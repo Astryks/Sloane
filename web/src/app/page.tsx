@@ -1120,6 +1120,47 @@ function CinematicVideoSection() {
   );
 }
 
+// Shared "try it yourself" block for showcase/comparison sections (2026-09-13)
+// - these sections show FIXED, already-rendered demo videos, not a live
+// generator, so clicking "Generate my video" here can't actually submit a
+// real job the way pay-as-you-go's button does. Instead it points people at
+// the two real ways to actually generate: sign up for a plan, or use
+// pay-as-you-go right now with no subscription at all.
+function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
+  const [prompt, setPrompt] = useState(defaultPrompt);
+  const [showCta, setShowCta] = useState(false);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <textarea
+        className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+        rows={3}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+      <button
+        onClick={() => setShowCta(true)}
+        className="w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft"
+      >
+        Generate my video
+      </button>
+      {showCta && (
+        <p className="rounded-2xl bg-white/70 p-3 text-xs text-foreground">
+          Ready to make this real?{" "}
+          <a href="/billing" className="font-semibold text-coral-dark underline">
+            Sign up for a plan
+          </a>{" "}
+          or try it right now with{" "}
+          <a href="#pay-as-you-go" className="font-semibold text-coral-dark underline">
+            pay as you go
+          </a>{" "}
+          - no subscription needed.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // --- Model comparison showcase: same photo + same prompt, five engines ---
 
 const MODEL_SHOWCASE_PROMPT =
@@ -1177,7 +1218,7 @@ function ModelShowcaseSection() {
       wash="bg-purple-wash/90"
       iconColor="text-purple"
       icon="🎞️"
-      title="Compare video models"
+      title="AI video models"
       subtitle="We ran the same reference photo and the same prompt through five video engines - tap one to see the result."
     >
       <p className="text-sm leading-relaxed text-muted">
@@ -1215,15 +1256,17 @@ function ModelShowcaseSection() {
 
       <p className="text-xs text-muted">{model.note}</p>
 
-      <div className="rounded-2xl bg-white/70 p-3">
-        <p className="text-xs font-semibold text-muted">The exact prompt used for all five:</p>
-        <p className="mt-1 text-xs italic text-muted">{MODEL_SHOWCASE_PROMPT}</p>
-      </div>
-
       <p className="text-xs text-muted">
         Caveat: these models change constantly - the labs and fal ship new versions often. This is a snapshot of
         where each one stood when we tested it (2026-09-12), not a permanent ranking.
       </p>
+
+      <div className="rounded-2xl bg-white/70 p-3">
+        <p className="mb-2 text-xs font-semibold text-muted">
+          That&apos;s the exact prompt we used above - want to try your own?
+        </p>
+        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} />
+      </div>
     </Card>
   );
 }
@@ -1288,6 +1331,9 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
 function ProductAdShowcaseSection() {
   const [modelId, setModelId] = useState(PRODUCT_AD_MODELS[0].id);
   const model = PRODUCT_AD_MODELS.find((m) => m.id === modelId)!;
+  const [yogaPrompt, setYogaPrompt] = useState(PRODUCT_AD_YOGA_PROMPT);
+  const [officePrompt, setOfficePrompt] = useState(PRODUCT_AD_OFFICE_PROMPT);
+  const [showAdCta, setShowAdCta] = useState(false);
 
   return (
     <Card
@@ -1352,13 +1398,42 @@ function ProductAdShowcaseSection() {
       </div>
 
       <div className="rounded-2xl bg-white/70 p-3">
-        <p className="text-xs font-semibold text-muted">Scene 1 prompt (yoga mat):</p>
-        <p className="mt-1 text-xs italic text-muted">{PRODUCT_AD_YOGA_PROMPT}</p>
-      </div>
-
-      <div className="rounded-2xl bg-white/70 p-3">
-        <p className="text-xs font-semibold text-muted">Scene 2 prompt (corner office):</p>
-        <p className="mt-1 text-xs italic text-muted">{PRODUCT_AD_OFFICE_PROMPT}</p>
+        <p className="mb-2 text-xs font-semibold text-muted">
+          Those are the exact prompts we used - want to try your own version of each scene?
+        </p>
+        <p className="mb-1 text-xs font-semibold text-muted">Scene 1 (yoga mat):</p>
+        <textarea
+          className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+          rows={2}
+          value={yogaPrompt}
+          onChange={(e) => setYogaPrompt(e.target.value)}
+        />
+        <p className="mb-1 mt-3 text-xs font-semibold text-muted">Scene 2 (corner office):</p>
+        <textarea
+          className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+          rows={2}
+          value={officePrompt}
+          onChange={(e) => setOfficePrompt(e.target.value)}
+        />
+        <button
+          onClick={() => setShowAdCta(true)}
+          className="mt-3 w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft"
+        >
+          Generate my video
+        </button>
+        {showAdCta && (
+          <p className="mt-3 rounded-2xl bg-white p-3 text-xs text-foreground">
+            Ready to make this real?{" "}
+            <a href="/billing" className="font-semibold text-coral-dark underline">
+              Sign up for a plan
+            </a>{" "}
+            or try it right now with{" "}
+            <a href="#pay-as-you-go" className="font-semibold text-coral-dark underline">
+              pay as you go
+            </a>{" "}
+            - no subscription needed.
+          </p>
+        )}
       </div>
 
       <div className="rounded-2xl bg-white/70 p-3">
@@ -1837,7 +1912,7 @@ export default function Home() {
       <main className="mx-auto flex max-w-2xl flex-col gap-10">
         <SiteHeader
           title="Lucy Labs"
-          subtitle="The AI Voice Clone, narrate any text or upload your voice and try it out!"
+          subtitle="The AI Voice Clone, upload 10 seconds of audio and see if our model can replicate it!"
           current="home"
           logoSize={64}
         />

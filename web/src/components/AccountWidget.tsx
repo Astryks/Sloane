@@ -48,7 +48,7 @@ export function AccountWidget() {
         <div className="flex w-full gap-2">
           <input
             className="flex-1 rounded-full border border-border bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-coral"
-            placeholder="LUCY-XXXX-XXXX-XXXX-XXXX"
+            placeholder="Lucy_XXXXXXXX"
             value={codeInput}
             onChange={(e) => setCodeInput(e.target.value)}
           />

@@ -320,15 +320,17 @@ export async function getVisitStats() {
 const ACCESS_TOKEN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function generateAccessToken(): string {
-  // Branded and readable - e.g. "LUCY-7F3K-QW2M-9XPR-4TZC" - 16 random
-  // symbols from the 32-char alphabet above (80 bits of entropy, still far
-  // beyond brute-force range for an access token) grouped into 4s so it's
-  // easy to read back and paste correctly, rather than the old unbroken
-  // 32-character hex string.
-  const bytes = randomBytes(16);
-  let out = "LUCY";
-  for (let i = 0; i < 16; i++) {
-    if (i % 4 === 0) out += "-";
+  // Branded and short - e.g. "Lucy_7F3KQW2M", per direct request for the
+  // code to look like "Lucy_xxxx" - shorter and simpler than the
+  // dash-grouped 16-symbol version this replaced. 8 random symbols from
+  // the 32-char alphabet above is 40 bits of entropy - short enough to
+  // read and type comfortably, still far more than a 4-character code
+  // would give (thin enough to be a real online-guessing concern with no
+  // rate limit on the lookup endpoints) while staying visually close to
+  // the requested "xxxx"-length example.
+  const bytes = randomBytes(8);
+  let out = "Lucy_";
+  for (let i = 0; i < 8; i++) {
     out += ACCESS_TOKEN_ALPHABET[bytes[i] % ACCESS_TOKEN_ALPHABET.length];
   }
   return out;
