@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AccountWidget } from "@/components/AccountWidget";
 import { Footer } from "@/components/Footer";
 import { SiteHeader } from "@/components/SiteHeader";
 import { RecordOrUpload } from "@/components/RecordOrUpload";
@@ -558,6 +557,42 @@ function VideoResultPlayer({
   );
 }
 
+// Replaces the old "paste your access code above" gating message on
+// Custom/Cinematic/Character (2026-09-13, per direct request, alongside
+// removing the home page's access-code paste box entirely) - a single
+// purple button, styled like pay-as-you-go's real Generate button, that
+// reveals the actual sign-in-or-pay-as-you-go options on click rather than
+// stating them unconditionally up front.
+function BuyCreditsToGenerateCTA() {
+  const [showOptions, setShowOptions] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setShowOptions(true)}
+        className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft"
+      >
+        Buy credits to generate my video
+      </button>
+      {showOptions && (
+        <p className="mt-3 rounded-2xl bg-white/70 p-3 text-sm text-muted">
+          <a href="/account" className="font-semibold text-purple underline">
+            Sign in
+          </a>{" "}
+          with a Video plan (or{" "}
+          <a href="/billing" className="font-semibold text-purple underline">
+            see plans
+          </a>
+          ), or{" "}
+          <a href="#pay-as-you-go" className="font-semibold text-purple underline">
+            try it out with pay as you go
+          </a>{" "}
+          first - no subscription needed.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Shared image/video-upload control used by all 3 upload-driven video modes.
 // Accepts MULTIPLE photos/videos at once - upload a few and pick which one
 // actually gets used, since every engine we call (Kling Avatar, Veo image-
@@ -942,13 +977,7 @@ function CustomVideoSection() {
       )}
 
       {!token ? (
-        <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">
-          Sign in with a Video-plan access code (paste yours above, or{" "}
-          <a href="/billing" className="font-semibold text-purple underline">
-            see plans
-          </a>
-          ) to generate.
-        </p>
+        <BuyCreditsToGenerateCTA />
       ) : (
         <button
           onClick={handleGenerate}
@@ -1086,13 +1115,7 @@ function CinematicVideoSection() {
       )}
 
       {!token ? (
-        <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">
-          Sign in with a Video-plan access code (paste yours above, or{" "}
-          <a href="/billing" className="font-semibold text-purple underline">
-            see plans
-          </a>
-          ) to generate.
-        </p>
+        <BuyCreditsToGenerateCTA />
       ) : (
         <button
           onClick={handleGenerate}
@@ -1579,13 +1602,7 @@ function CharacterVideoSection() {
       </div>
 
       {!token ? (
-        <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">
-          Sign in with a Video-plan access code (paste yours above, or{" "}
-          <a href="/billing" className="font-semibold text-purple underline">
-            see plans
-          </a>
-          ) to actually generate a video with them.
-        </p>
+        <BuyCreditsToGenerateCTA />
       ) : (
         <>
           <textarea
@@ -1916,7 +1933,6 @@ export default function Home() {
           current="home"
           logoSize={64}
         />
-        <AccountWidget />
         <PresetVoiceSection />
         <CloneVoiceSection />
         <VideoIntroSection />
