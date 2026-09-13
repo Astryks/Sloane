@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVideoPaygoJob, getCharacterVideoJob, getSubscriptionVideoJob } from "@/lib/db";
+import { getVideoPaygoJob, getCharacterVideoJob, getSubscriptionVideoJob, getProductAdJob } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 
 // Streams a finished video back through our own domain with a real
@@ -15,7 +15,7 @@ import { getSessionUser } from "@/lib/auth";
 // (job.user_id); "character"/"custom"/"cinematic" jobs are owned by
 // whoever holds the access_token that created them (job.access_token) -
 // same two auth systems used by the rest of the app for these features.
-type JobType = "paygo" | "character" | "custom" | "cinematic";
+type JobType = "paygo" | "product-ad" | "character" | "custom" | "cinematic";
 
 // "silent" exists on paygo jobs that went through the silent-render-then-
 // lip-sync pipeline (Veo/Seedance/Grok/MiniMax + audio) and on cinematic
@@ -28,6 +28,13 @@ type Variant = "final" | "silent";
 
 async function resolveVideoUrl(jobType: JobType, jobId: string, accessToken: string | null, variant: Variant): Promise<string | null> {
   switch (jobType) {
+    case "product-ad": {
+      const user = await getSessionUser();
+      if (!user) return null;
+      const job = await getProductAdJob(jobId);
+      if (!job || job.user_id !== user.id || job.status !== "completed") return null;
+      return variant === "silent" ? job.silent_video_url : job.final_video_url;
+    }
     case "paygo": {
       const user = await getSessionUser();
       if (!user) return null;
@@ -60,7 +67,7 @@ export async function GET(req: NextRequest) {
   const jobId = req.nextUrl.searchParams.get("jobId");
   const accessToken = req.nextUrl.searchParams.get("access_token");
   const variant = (req.nextUrl.searchParams.get("variant") === "silent" ? "silent" : "final") as Variant;
-  if (!jobType || !jobId || !["paygo", "character", "custom", "cinematic"].includes(jobType)) {
+  if (!jobType || !jobId || !["paygo", "product-ad", "character", "custom", "cinematic"].includes(jobType)) {
     return NextResponse.json({ error: "jobType and jobId are required" }, { status: 400 });
   }
 

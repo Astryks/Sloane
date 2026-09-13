@@ -151,6 +151,28 @@ export async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS product_ad_jobs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      model TEXT NOT NULL,
+      brief TEXT NOT NULL,
+      youtube_references TEXT,
+      product_image_url TEXT NOT NULL,
+      character_image_url TEXT NOT NULL,
+      storyboard_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      fal_endpoint TEXT NOT NULL,
+      fal_request_id TEXT,
+      modal_job_id TEXT,
+      audio_url TEXT,
+      silent_video_url TEXT,
+      lipsync_request_id TEXT,
+      final_video_url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
   // Character-video generation (2026-09-11) - pick one of the pre-made
   // AI actors, choose a voice (a Lucy preset -> Kling Avatar lip-sync, or
   // "veo" -> Veo generates its own dialogue+voice), type text. Billed
@@ -850,6 +872,88 @@ export async function listVideoPaygoJobsForUser(userId: string): Promise<VideoPa
     SELECT * FROM video_paygo_jobs WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT 20
   `;
   return rows as VideoPaygoJob[];
+}
+
+export type ProductAdJob = {
+  id: string;
+  user_id: string;
+  model: string;
+  brief: string;
+  youtube_references: string | null;
+  product_image_url: string;
+  character_image_url: string;
+  storyboard_metadata: Record<string, unknown>;
+  fal_endpoint: string;
+  fal_request_id: string | null;
+  modal_job_id: string | null;
+  audio_url: string | null;
+  silent_video_url: string | null;
+  lipsync_request_id: string | null;
+  final_video_url: string | null;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  error: string | null;
+  created_at: string;
+};
+
+export async function createProductAdJob(params: {
+  userId: string;
+  model: string;
+  brief: string;
+  youtubeReferences: string | null;
+  productImageUrl: string;
+  characterImageUrl: string;
+  storyboardMetadata: Record<string, unknown>;
+  falEndpoint: string;
+}): Promise<string> {
+  const rows = await sql`
+    INSERT INTO product_ad_jobs (
+      user_id, model, brief, youtube_references, product_image_url,
+      character_image_url, storyboard_metadata, fal_endpoint
+    ) VALUES (
+      ${params.userId}, ${params.model}, ${params.brief}, ${params.youtubeReferences},
+      ${params.productImageUrl}, ${params.characterImageUrl}, ${JSON.stringify(params.storyboardMetadata)}::jsonb,
+      ${params.falEndpoint}
+    ) RETURNING id
+  `;
+  return rows[0].id as string;
+}
+
+export async function getProductAdJob(jobId: string): Promise<ProductAdJob | null> {
+  const rows = await sql`SELECT * FROM product_ad_jobs WHERE id = ${jobId}`;
+  return (rows[0] as ProductAdJob) ?? null;
+}
+
+export async function setProductAdModalId(jobId: string, modalJobId: string) {
+  await sql`UPDATE product_ad_jobs SET modal_job_id = ${modalJobId}, status = 'in_progress' WHERE id = ${jobId}`;
+}
+
+export async function setProductAdFalRequestId(jobId: string, requestId: string) {
+  await sql`UPDATE product_ad_jobs SET fal_request_id = ${requestId}, status = 'in_progress' WHERE id = ${jobId}`;
+}
+
+export async function setProductAdAudioUrl(jobId: string, audioUrl: string) {
+  await sql`UPDATE product_ad_jobs SET audio_url = ${audioUrl} WHERE id = ${jobId}`;
+}
+
+export async function setProductAdSilentVideo(jobId: string, videoUrl: string) {
+  await sql`UPDATE product_ad_jobs SET silent_video_url = ${videoUrl} WHERE id = ${jobId}`;
+}
+
+export async function setProductAdLipsyncRequestId(jobId: string, requestId: string) {
+  await sql`UPDATE product_ad_jobs SET lipsync_request_id = ${requestId} WHERE id = ${jobId}`;
+}
+
+export async function completeProductAdJob(jobId: string, finalVideoUrl: string) {
+  await sql`UPDATE product_ad_jobs SET status = 'completed', final_video_url = ${finalVideoUrl} WHERE id = ${jobId}`;
+}
+
+export async function failProductAdJob(jobId: string, error: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE product_ad_jobs SET status = 'failed', error = ${error}
+    WHERE id = ${jobId} AND status NOT IN ('failed', 'completed')
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 // --- Character video generation (pre-made AI actors) ---
