@@ -563,7 +563,7 @@ function VideoResultPlayer({
 // purple button, styled like pay-as-you-go's real Generate button, that
 // reveals the actual sign-in-or-pay-as-you-go options on click rather than
 // stating them unconditionally up front.
-function BuyCreditsToGenerateCTA() {
+function GenerateVideoCTA() {
   const [showOptions, setShowOptions] = useState(false);
   return (
     <div>
@@ -571,7 +571,7 @@ function BuyCreditsToGenerateCTA() {
         onClick={() => setShowOptions(true)}
         className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft"
       >
-        Buy credits to generate my video
+        Generate my video
       </button>
       {showOptions && (
         <p className="mt-3 rounded-2xl bg-white/70 p-3 text-sm text-muted">
@@ -977,7 +977,7 @@ function CustomVideoSection() {
       )}
 
       {!token ? (
-        <BuyCreditsToGenerateCTA />
+        <GenerateVideoCTA />
       ) : (
         <button
           onClick={handleGenerate}
@@ -1115,7 +1115,7 @@ function CinematicVideoSection() {
       )}
 
       {!token ? (
-        <BuyCreditsToGenerateCTA />
+        <GenerateVideoCTA />
       ) : (
         <button
           onClick={handleGenerate}
@@ -1145,11 +1145,12 @@ function CinematicVideoSection() {
 
 // Shared "try it yourself" block for showcase/comparison sections (2026-09-13)
 // - these sections show FIXED, already-rendered demo videos, not a live
-// generator, so clicking "Buy credits to generate my video" here can't
-// actually submit a real job the way pay-as-you-go's button does. Instead
-// it points people at the two real ways to actually generate: sign up for
-// a plan, or use pay-as-you-go right now with no subscription at all.
-// Label kept identical to BuyCreditsToGenerateCTA below (and the inline
+// generator, so clicking "Generate my video" here can't actually submit a
+// real job the way pay-as-you-go's button does. Instead it points people
+// at the two real ways to actually generate: sign up for a plan, or use
+// pay-as-you-go right now with no subscription at all - that explanation
+// only ever shows up after the click, never in the button label itself.
+// Label kept identical to GenerateVideoCTA below (and the inline
 // button in ProductAdShowcaseSection) on purpose - same button, same
 // wording, wherever it shows up on the page.
 function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
@@ -1168,7 +1169,7 @@ function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
         onClick={() => setShowCta(true)}
         className="w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft"
       >
-        Buy credits to generate my video
+        Generate my video
       </button>
       {showCta && (
         <p className="rounded-2xl bg-white/70 p-3 text-xs text-foreground">
@@ -1445,7 +1446,7 @@ function ProductAdShowcaseSection() {
           onClick={() => setShowAdCta(true)}
           className="mt-3 w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft"
         >
-          Buy credits to generate my video
+          Generate my video
         </button>
         {showAdCta && (
           <p className="mt-3 rounded-2xl bg-white p-3 text-xs text-foreground">
@@ -1605,7 +1606,7 @@ function CharacterVideoSection() {
       </div>
 
       {!token ? (
-        <BuyCreditsToGenerateCTA />
+        <GenerateVideoCTA />
       ) : (
         <>
           <textarea
@@ -1900,7 +1901,7 @@ function PayAsYouGoVideoSection() {
               : balance < 1
                 ? buyingPack === "single"
                   ? "Redirecting…"
-                  : "Buy credits to generate"
+                  : "Generate my video"
                 : "Generate (1 credit)"}
           </button>
 
