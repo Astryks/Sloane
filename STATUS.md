@@ -1,3 +1,5 @@
+**Latest update, 2026-09-13:** All video-generation CTA labels are now consistently `Generate my video`; the prior `Buy credits to generate` wording was removed from the UI. This is committed in `04ad7eb`.
+
 # Lucy Labs — Status Summary
 
 **✅ RESOLVED, 2026-09-12: fal.ai topped up, AND a second, bigger real bug found and fixed - production had NO `FAL_KEY` env var at all.** The account-balance lock below was real, but topping it up didn't fix generation, because **Vercel's production environment never had `FAL_KEY` set** (confirmed via `vercel env ls production` / `vercel env pull` - completely absent, not just hidden). Every real fal call from the live site was silently running with `Authorization: Key undefined`, failing with inconsistent-looking errors per endpoint (storage API: "Invalid Key Authorization header format"; queue API: "Cannot access application X"). Fixed by adding `FAL_KEY` to Vercel production (same working key already used all session) and triggering a redeploy (`vercel redeploy`, aliased back to lucylabs.app). **Confirmed fixed with a real production test** - see below.
