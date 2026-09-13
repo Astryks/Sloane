@@ -1145,10 +1145,13 @@ function CinematicVideoSection() {
 
 // Shared "try it yourself" block for showcase/comparison sections (2026-09-13)
 // - these sections show FIXED, already-rendered demo videos, not a live
-// generator, so clicking "Generate my video" here can't actually submit a
-// real job the way pay-as-you-go's button does. Instead it points people at
-// the two real ways to actually generate: sign up for a plan, or use
-// pay-as-you-go right now with no subscription at all.
+// generator, so clicking "Buy credits to generate my video" here can't
+// actually submit a real job the way pay-as-you-go's button does. Instead
+// it points people at the two real ways to actually generate: sign up for
+// a plan, or use pay-as-you-go right now with no subscription at all.
+// Label kept identical to BuyCreditsToGenerateCTA below (and the inline
+// button in ProductAdShowcaseSection) on purpose - same button, same
+// wording, wherever it shows up on the page.
 function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [showCta, setShowCta] = useState(false);
@@ -1165,7 +1168,7 @@ function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
         onClick={() => setShowCta(true)}
         className="w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft"
       >
-        Generate my video
+        Buy credits to generate my video
       </button>
       {showCta && (
         <p className="rounded-2xl bg-white/70 p-3 text-xs text-foreground">
@@ -1442,7 +1445,7 @@ function ProductAdShowcaseSection() {
           onClick={() => setShowAdCta(true)}
           className="mt-3 w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft"
         >
-          Generate my video
+          Buy credits to generate my video
         </button>
         {showAdCta && (
           <p className="mt-3 rounded-2xl bg-white p-3 text-xs text-foreground">
