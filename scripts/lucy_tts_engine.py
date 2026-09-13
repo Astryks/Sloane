@@ -877,7 +877,7 @@ TERMINAL_FALL_TAIL_MS = 450.0
 SPLICE_CROSSFADE_MS = 15.0  # just enough to avoid an audible click at the head/tail seam
 
 
-def apply_terminal_fall(audio: np.ndarray, sr: int, sentence: str) -> np.ndarray:
+def apply_terminal_fall(audio: np.ndarray, sr: int, sentence: str, end_idx: int | None = None) -> np.ndarray:
     """Two bugs in the first two versions of this, both found by ear on the
     live site:
     1. A flat pitch-shift-down only lowers the whole tail's register - it
@@ -896,15 +896,23 @@ def apply_terminal_fall(audio: np.ndarray, sr: int, sentence: str) -> np.ndarray
     the tail window starts - falling from frame 0 while the peak is still
     ahead doesn't read as a descending ending. Skipped for questions, which
     should keep their natural rise. Applies to every voice.
+
+    end_idx (added 2026-09-14): defaults to the array's true end, same as
+    before. Passing an interior sample index lets a caller force this
+    sentence's OWN ending contour at a point *inside* a longer multi-
+    sentence chunk (see apply_interior_sentence_prosody) - everything at
+    and after end_idx is left completely untouched, same as everything
+    before the tail always was.
     """
     stripped = sentence.rstrip()
     if not stripped or stripped[-1] == "?":
         return audio
+    end_idx = len(audio) if end_idx is None else end_idx
     tail_len = int(sr * TERMINAL_FALL_TAIL_MS / 1000)
-    if len(audio) < tail_len * 2:
+    if end_idx < tail_len * 2:
         return audio  # too short for a contour edit to read as natural rather than warped
 
-    head, tail = audio[:-tail_len], audio[-tail_len:]
+    head, tail, rest = audio[: end_idx - tail_len], audio[end_idx - tail_len : end_idx], audio[end_idx:]
     tail64 = np.ascontiguousarray(tail.astype(np.float64))
     try:
         f0, t = pw.harvest(tail64, sr)
@@ -970,13 +978,13 @@ def apply_terminal_fall(audio: np.ndarray, sr: int, sentence: str) -> np.ndarray
     if fade_len > 0:
         fade = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
         reshaped[:fade_len] = tail[:fade_len].astype(np.float32) * (1 - fade) + reshaped[:fade_len] * fade
-    return np.concatenate([head, reshaped])
+    return np.concatenate([head, reshaped, rest])
 
 
 TERMINAL_RISE_SEMITONES = 4.0  # smaller than the 5.0 fall - a question should lift, not sound cartoonish
 
 
-def apply_terminal_rise(audio: np.ndarray, sr: int, sentence: str) -> np.ndarray:
+def apply_terminal_rise(audio: np.ndarray, sr: int, sentence: str, end_idx: int | None = None) -> np.ndarray:
     """The mirror of apply_terminal_fall() above, for questions - added
     2026-09-10 ("questions in a high tone"). apply_terminal_fall() already
     skipped forcing anything on questions so a natural rise wouldn't get
@@ -988,15 +996,19 @@ def apply_terminal_rise(audio: np.ndarray, sr: int, sentence: str) -> np.ndarray
     of fall) rather than a fresh design, since that function's two prior
     broken attempts (see its docstring) already paid down the real bugs in
     this class of edit - no reason to risk hitting them again from scratch.
+
+    end_idx: see apply_terminal_fall's docstring - same interior-boundary
+    support, same "everything at/after end_idx untouched" guarantee.
     """
     stripped = sentence.rstrip()
     if not stripped or stripped[-1] != "?":
         return audio
+    end_idx = len(audio) if end_idx is None else end_idx
     tail_len = int(sr * TERMINAL_FALL_TAIL_MS / 1000)
-    if len(audio) < tail_len * 2:
+    if end_idx < tail_len * 2:
         return audio
 
-    head, tail = audio[:-tail_len], audio[-tail_len:]
+    head, tail, rest = audio[: end_idx - tail_len], audio[end_idx - tail_len : end_idx], audio[end_idx:]
     tail64 = np.ascontiguousarray(tail.astype(np.float64))
     try:
         f0, t = pw.harvest(tail64, sr)
@@ -1043,7 +1055,55 @@ def apply_terminal_rise(audio: np.ndarray, sr: int, sentence: str) -> np.ndarray
     if fade_len > 0:
         fade = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
         reshaped[:fade_len] = tail[:fade_len].astype(np.float32) * (1 - fade) + reshaped[:fade_len] * fade
-    return np.concatenate([head, reshaped])
+    return np.concatenate([head, reshaped, rest])
+
+
+def apply_interior_sentence_prosody(audio: np.ndarray, sr: int, chunk_text: str, whisper_words: list) -> np.ndarray:
+    """Real bug this fixes, reported live 2026-09-14: apply_terminal_fall/
+    rise only ever fires once per generation CHUNK (via the caller in
+    synthesize(), keyed off that chunk's own last sentence) - chunk_sentences
+    groups multiple sentences into one ~40-word chunk for natural cross-
+    sentence flow, so a 3-sentence chunk only gets a deliberate pitch
+    contour on its FINAL sentence. Everything before that relies purely on
+    whatever Chatterbox produced on its own, which is where multi-sentence
+    passages were reported reading flat/"aimless in the middle."
+
+    Reuses the word-level timestamps Whisper already produced during this
+    same chunk's retry-verification (no extra inference) to locate each
+    INTERIOR sentence's own end-of-sentence moment, then applies the exact
+    same already-hardened fall/rise reshape used for a chunk's true end -
+    just at an earlier point in the array. The chunk's actual last sentence
+    is deliberately skipped here; the caller in synthesize() already shapes
+    it correctly against the chunk's real end.
+
+    Sentence-to-word alignment is a plain word-count walk, not a real
+    forced-alignment - good enough because this only runs on a chunk that
+    already passed the overlap-ratio check (see generate_sentence_with_retry),
+    so Whisper's word count is already known to be close to the input's.
+    Any mismatch just means one interior boundary lands slightly off or gets
+    skipped - never a crash, and never worse than doing nothing (the
+    pre-existing behavior for every sentence but the last).
+    """
+    sentences = split_sentences(chunk_text)
+    if len(sentences) < 2 or not whisper_words:
+        return audio  # nothing interior to shape, or no timing to place it with
+
+    result = audio
+    word_idx = 0
+    for sent in sentences[:-1]:
+        n_words = len(sent.split())
+        boundary_word_idx = word_idx + n_words - 1
+        word_idx += n_words
+        if boundary_word_idx < 0 or boundary_word_idx >= len(whisper_words):
+            break  # whisper's word count already drifted from the input's - stop rather than guess at later boundaries too
+        w = whisper_words[boundary_word_idx]
+        end_s = w.end if hasattr(w, "end") else w[2]
+        end_idx = int(end_s * sr)
+        if end_idx <= 0 or end_idx > len(result):
+            continue
+        result = apply_terminal_fall(result, sr, sent, end_idx=end_idx)
+        result = apply_terminal_rise(result, sr, sent, end_idx=end_idx)
+    return result
 
 
 def apply_pitch_jitter(audio: np.ndarray, sr: int, jitter_semitones: float, seed: int | None = None) -> np.ndarray:
@@ -1438,7 +1498,13 @@ def generate_sentence_with_retry(engine: ChatterboxTTS, sentence: str, reference
             if overlap - 0.05 > best_score:
                 best_trimmed, best_score, best_words = trimmed, overlap - 0.05, whisper_words
             continue
-        return apply_word_emphasis(trimmed, engine.sr, whisper_words)
+        shaped = apply_word_emphasis(trimmed, engine.sr, whisper_words)
+        # Gives every sentence but the chunk's last one (the caller in
+        # synthesize() already shapes that against the chunk's true end) a
+        # real terminal contour, not just whatever Chatterbox produced on
+        # its own - see apply_interior_sentence_prosody's docstring.
+        shaped = apply_interior_sentence_prosody(shaped, engine.sr, sentence, whisper_words)
+        return shaped
 
     if len(best_trimmed) == 0:
         # Real bug fixed here: every attempt came back completely
