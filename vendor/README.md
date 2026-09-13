@@ -80,6 +80,21 @@ re-pull manually if a newer version is needed.
   committing; `pretrained_weights/` is an empty placeholder directory in the
   upstream repo, kept as-is.
 
+- **`llamacpp-upstream/`** — [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp),
+  MIT licensed. Real, verified-best choice for a **fast, single-user,
+  self-hosted LLM "brain"** (a personal-clone assistant idea researched
+  2026-09-13 - see below) - real benchmarks show ~62-71 tok/s single-stream
+  on an RTX 4090 (our own GPU) for an 8B model, genuinely fast enough for
+  phone-call-speed conversation. Chosen over vLLM, which optimizes for
+  many-concurrent-users throughput, not single-user latency - the wrong
+  axis for this use case. This is the inference **engine**, not a specific
+  model - actual model weights (e.g. a small Llama/Mistral/Qwen chat model)
+  get pulled from HuggingFace on-demand later, same as everything else.
+  Test vocab fixtures (`models/`, ~75MB of tokenizer-only GGUF files, not
+  real model weights) and auto-generated operator-support tables
+  (`docs/ops/`, ~36MB of CSVs) dropped before committing - neither needed
+  to actually build/run it.
+
 ## Real-time AI avatar research, 2026-09-13 - not yet built, revisit later
 
 While discussing whether a live, emotionally-responsive "video call with an
@@ -122,3 +137,39 @@ won the comparison: Apache-2.0 explicitly covering the weights (not just
 code, unlike Hallo3), lighter (1.3B params, a "Flash" variant runs on as
 little as 12GB VRAM), and no identity-preservation red flag found against
 it. See PROJECT_CONTEXT.md Sec 8 for the full writeup.
+
+## Personal-clone assistant research, 2026-09-13 - not yet built, revisit later
+
+A different idea from the real-time avatar research above: an assistant
+that sounds like *you specifically* (your own voice, cloned from your own
+phone-call audio) and responds in your own conversational style (fine-tuned
+from your own exported WhatsApp messages), reachable by an approved circle
+of family - explicitly your own voice/data/permission, not impersonating
+anyone else. Real architecture, pieces mapped to what's already in this
+repo:
+- **Voice**: already solved - the same Chatterbox LoRA fine-tune pipeline
+  used for every preset voice in this project. If source call recordings
+  have two speakers, `scripts/08_isolate_speaker.py`'s existing k=2
+  clustering isolates your side first.
+- **Understanding + generating a sensible reply ("the brain")**: a general-
+  purpose open-source chat LLM (Llama/Mistral/Qwen-chat - not Qwen3-TTS,
+  which is audio-only) already has real language understanding baked in
+  from its own pretraining; a personality fine-tune on your WhatsApp
+  history (via `llamacpp-upstream`'s tooling) would only need to nudge
+  *how* it responds, not teach it to understand language for the first
+  time. Real, honest limit: this gets a strong stylistic impression, not
+  literally your own current thoughts - it will guess on topics your real
+  messages never covered, and that guess will still sound like you.
+- **Speed**: chose `llamacpp-upstream` specifically because Path B (self-
+  hosted) was chosen over a paid API, with an explicit "needs to be quick,
+  like a phone call" requirement - real benchmarks confirm single-user
+  low-latency performance on the same RTX 4090 already used throughout
+  this project, unlike vLLM which optimizes for many-concurrent-users
+  throughput instead.
+- **Reaching family by an actual phone number** (not just an in-app voice
+  chat) is the one piece that genuinely needs a third party - no one
+  self-hosts a connection to the real phone network; would need a
+  telephony API (e.g. Twilio) for just that piece if a real phone number
+  is wanted, not needed at all if an in-app voice chat is acceptable
+  instead.
+Nothing built or fine-tuned yet - code only, saved to revisit later.
