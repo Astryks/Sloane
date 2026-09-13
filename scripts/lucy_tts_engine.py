@@ -109,6 +109,22 @@ PRESET_VOICES = {
         "adapter_dir": f"{MODEL_ROOT}/chatterbox-ft-voice_rachel/chatterbox_output/new_lang_adapter",
         "reference": f"{MODEL_ROOT}/training_data/voice_rachel/clips/00001.wav",
     },
+    "voice_mia": {  # Mia - 2026-09-13, from 5 user-supplied clips (~29min).
+        # Real bug found and fixed before shipping: all 5 source clips open
+        # with a different man talking for ~60s before Mia starts - the
+        # first training run included his voice uncorrected (caught via
+        # direct user feedback after listening to the test sample).
+        # Re-extracted skipping that 60s (01_extract_audio.py's
+        # START_OFFSET_SECONDS) and fully retrained - 250 clips/19.1min.
+        "adapter_dir": f"{MODEL_ROOT}/chatterbox-ft-voice_mia/chatterbox_output/new_lang_adapter",
+        "reference": f"{MODEL_ROOT}/training_data/voice_mia/clips/00001.wav",
+    },
+    "voice_dave": {  # Dave - 2026-09-13, from 2 user-supplied clips.
+        # Notably thin source (~6.4min total, 56 clips/2.8min after speech-
+        # only chunking) - same honest caveat class as Megan's thin source.
+        "adapter_dir": f"{MODEL_ROOT}/chatterbox-ft-voice_dave/chatterbox_output/new_lang_adapter",
+        "reference": f"{MODEL_ROOT}/training_data/voice_dave/clips/00001.wav",
+    },
     # Michelle (voice_meditation) removed 2026-09-10 per direct user
     # feedback ("not good at all we can remove her") - also the voice this
     # session's own notes already flagged as never actually fixed (see

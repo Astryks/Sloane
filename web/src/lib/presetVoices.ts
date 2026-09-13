@@ -45,4 +45,13 @@ export const PRESET_VOICES: Voice[] = [
   { id: "liam", label: "Liam", color: "bg-purple", initial: "L" },
   { id: "ryan", label: "Ryan", color: "bg-butter", initial: "R" },
   { id: "tyler", label: "Tyler", color: "bg-coral", initial: "T" },
+  // Mia/Dave (2026-09-13) - real LoRA fine-tunes from user-supplied source
+  // clips, same quality tier as the original 11 (not zero-shot). Mia's
+  // source had a real bug found and fixed before shipping: her first ~60s
+  // of every source clip was a different man talking, re-extracted to skip
+  // that - see STATUS.md. Dave's source is notably thin (~6.4min total,
+  // same honest caveat class as Megan's thin source) - judged good enough
+  // to ship, not held to the same bar as the fuller-sourced voices.
+  { id: "voice_mia", label: "Mia", color: "bg-rose", initial: "M" },
+  { id: "voice_dave", label: "Dave", color: "bg-blue", initial: "D" },
 ];
