@@ -26,7 +26,15 @@ export function ShareButtons({ text, url, file }: ShareButtonsProps) {
 
   if (file) {
     const canShareFile = typeof navigator !== "undefined" && !!navigator.share && !!navigator.canShare?.({ files: [file] });
-    if (!canShareFile) return null;
+    if (!canShareFile) {
+      // Was `return null` - most desktop browsers don't support file
+      // sharing via the Web Share API, so this whole component silently
+      // vanished with no button and no explanation, indistinguishable from
+      // "the share button is broken." There's no real hosted URL to fall
+      // back to for link-based sharing (see the file-sharing comment
+      // above), so at least say why and point at the real way to share.
+      return <p className="mt-3 text-xs text-muted">Use the Download MP3 button above to save and share this clip.</p>;
+    }
     return (
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
