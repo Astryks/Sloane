@@ -1124,12 +1124,21 @@ def apply_comma_pauses(audio: np.ndarray, sr: int, chunk_text: str, whisper_word
 
     Reuses the same word-level timestamps already produced during retry-
     verification to find where each comma actually lands in the generated
-    audio, then splices in a short, fixed silence there - a plain insert,
-    not a pitch/DSP reshape, so there's no artifact risk the way
-    apply_terminal_fall/rise or apply_word_emphasis have to guard against.
-    Must run AFTER those (they anchor themselves to sample positions in the
-    audio as it exists *before* any silence gets inserted here) and before
-    nothing else in this chunk's own processing - the caller's own final
+    audio, then splices in a short, fixed silence there. Real bug caught
+    live 2026-09-14 in the first version of this: it spliced in that
+    silence with a hard cut, no fade - every other edit in this file
+    (apply_terminal_fall/rise, apply_word_emphasis) uses a ~15ms crossfade
+    at its splice point specifically to avoid an audible click, and this
+    one didn't, which is almost certainly what "distorted" actually was -
+    reported live in the same message as "doesn't pause after now," which
+    a harsh click right at that exact point could easily also account for
+    (a click reads as noise, not as a clean gap). Now fades the audio down
+    to the inserted silence and back up, same duration/technique as every
+    other splice here.
+
+    Must run AFTER apply_word_emphasis/apply_interior_sentence_prosody
+    (they anchor themselves to sample positions in the audio as it exists
+    *before* any silence gets inserted here) - the caller's own final
     apply_terminal_fall/rise call still lands correctly afterward since it
     always anchors off the array's (now longer) true end, not a fixed
     index.
@@ -1155,13 +1164,25 @@ def apply_comma_pauses(audio: np.ndarray, sr: int, chunk_text: str, whisper_word
         return audio
 
     silence = np.zeros(int(sr * COMMA_PAUSE_SECONDS), dtype=np.float32)
+    fade_n = min(int(sr * SPLICE_CROSSFADE_MS / 1000), int(sr * COMMA_PAUSE_SECONDS) // 2)
+
+    def _fade(segment: np.ndarray, fade_in: bool, fade_out: bool) -> np.ndarray:
+        if fade_n <= 0 or len(segment) < fade_n:
+            return segment
+        segment = segment.copy()
+        if fade_in:
+            segment[:fade_n] *= np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
+        if fade_out:
+            segment[-fade_n:] *= np.linspace(1.0, 0.0, fade_n, dtype=np.float32)
+        return segment
+
     pieces = []
     prev = 0
-    for idx in insert_points:
-        pieces.append(audio[prev:idx])
+    for k, idx in enumerate(insert_points):
+        pieces.append(_fade(audio[prev:idx], fade_in=(k > 0), fade_out=True))
         pieces.append(silence)
         prev = idx
-    pieces.append(audio[prev:])
+    pieces.append(_fade(audio[prev:], fade_in=True, fade_out=False))
     return np.concatenate(pieces)
 
 
