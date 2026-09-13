@@ -13,6 +13,7 @@ import { getCharacter } from "@/lib/characters";
 import { hasEnoughFalBalanceToGenerate, submitFalJob, uploadBufferToFal } from "@/lib/fal";
 import { submitModalJob } from "@/lib/modal";
 import { buildProductAdFalInput, isProductAdModel, productAdFalEndpoint } from "@/lib/productAd";
+import { buildProductAdStoryboard } from "@/lib/productAdStoryboard";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const MAX_BRIEF_LENGTH = 1200;
@@ -22,15 +23,6 @@ const MAX_METADATA_LENGTH = 40_000;
 function setupError(): string | null {
   const missing = ["FAL_KEY", "MODAL_SUBMIT_URL", "MODAL_STATUS_URL"].filter((key) => !process.env[key]);
   return missing.length > 0 ? `Product ad generation is not configured. Missing provider environment key(s): ${missing.join(", ")}.` : null;
-}
-
-function dialogueText(metadata: Record<string, unknown>, brief: string): string {
-  const cues = Array.isArray(metadata.dialogueCues) ? metadata.dialogueCues : [];
-  const lines = cues
-    .filter((cue): cue is Record<string, unknown> => typeof cue === "object" && cue !== null)
-    .map((cue) => (typeof cue.line === "string" ? cue.line : ""))
-    .filter(Boolean);
-  return lines.length > 0 ? lines.join(" ") : brief;
 }
 
 export async function POST(req: NextRequest) {
@@ -71,14 +63,25 @@ export async function POST(req: NextRequest) {
     }
 
     let characterImageUrl: string;
+    let characterName: string;
+    let characterVoiceId: string | null;
     if (uploadedCharacter instanceof Blob && uploadedCharacter.size > 0) {
       if (!uploadedCharacter.type.startsWith("image/")) return NextResponse.json({ error: "Character upload must be an image" }, { status: 400 });
       if (uploadedCharacter.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: "Character image is too large (max 15MB)" }, { status: 400 });
       characterImageUrl = await uploadBufferToFal(Buffer.from(await uploadedCharacter.arrayBuffer()), uploadedCharacter.type, "character.jpg");
+      // No known name/voice for a freshly uploaded face - "the presenter"
+      // keeps the storyboard prompt grammatical without inventing an
+      // identity; voice falls back to whatever the client hinted (or
+      // Harper's, the flagship voice) since there's no character record to
+      // read a default from.
+      characterName = "the presenter";
+      characterVoiceId = null;
     } else {
       const character = getCharacter(characterId === "jess" ? "vicky" : characterId);
       if (!character) return NextResponse.json({ error: "Choose a character or upload a character image" }, { status: 400 });
       characterImageUrl = character.imageUrl;
+      characterName = character.name;
+      characterVoiceId = character.defaultVoiceId;
     }
 
     if (!(await hasEnoughFalBalanceToGenerate())) {
@@ -89,6 +92,13 @@ export async function POST(req: NextRequest) {
     let jobId: string | null = null;
     try {
       const productImageUrl = await uploadBufferToFal(Buffer.from(await productImage.arrayBuffer()), productImage.type, "product.jpg");
+
+      // The real storyboard/prompt is computed here, server-side, from the
+      // brief the user actually typed - not trusted verbatim from the
+      // client's storyboard_metadata field (which is still accepted and
+      // stored for reference, but no longer used to build the real prompt).
+      const storyboard = buildProductAdStoryboard({ brief, youtubeReference: youtubeReferences, characterName });
+
       jobId = await createProductAdJob({
         userId: user.id,
         model,
@@ -96,16 +106,15 @@ export async function POST(req: NextRequest) {
         youtubeReferences,
         productImageUrl,
         characterImageUrl,
-        storyboardMetadata,
+        storyboardMetadata: { ...storyboardMetadata, ...storyboard },
         falEndpoint: productAdFalEndpoint(model),
       });
 
-      const prompt = `${brief}\n${storyboardMetadata.continuityLock ?? ""}\n${storyboardMetadata.productIntegrityLock ?? ""}${youtubeReferences ? `\nStyle reference: ${youtubeReferences}` : ""}`;
-      const falRequestId = await submitFalJob(productAdFalEndpoint(model), buildProductAdFalInput(model, prompt, productImageUrl, characterImageUrl));
+      const falRequestId = await submitFalJob(productAdFalEndpoint(model), buildProductAdFalInput(model, storyboard.fullPrompt, productImageUrl, characterImageUrl));
       await setProductAdFalRequestId(jobId, falRequestId);
 
-      const voiceId = typeof storyboardMetadata.voiceId === "string" ? storyboardMetadata.voiceId : "harper";
-      const modal = await submitModalJob({ action: "generate-preset", text: dialogueText(storyboardMetadata, brief), voice_id: voiceId });
+      const voiceId = characterVoiceId ?? (typeof storyboardMetadata.voiceId === "string" ? storyboardMetadata.voiceId : "harper");
+      const modal = await submitModalJob({ action: "generate-preset", text: storyboard.dialogueLine, voice_id: voiceId });
       await setProductAdModalId(jobId, modal.jobId);
       return NextResponse.json({ jobId });
     } catch (err) {
