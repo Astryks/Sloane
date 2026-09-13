@@ -19,7 +19,13 @@ set -euo pipefail
 
 BASE_TOOLKIT=/workspace/sloane/chatterbox-finetuning
 PROJECT_ROOT=/workspace/sloane
-VOICES=(voice_comedy)
+VOICES=(voice_mia voice_dave)
+# 2026-09-13: two new voices. voice_mia from 5 user-supplied clips (~29 min
+# total); voice_dave from 2 user-supplied clips (~6.4 min total, thinner
+# than most other voices here - flagged honestly, not hidden). Both
+# extracted locally via 01_extract_audio.py's SOURCES entries.
+#
+# Previously trained here: voice_comedy (see history below).
 # 2026-09-10: third new voice from user-supplied podcast source (~27.6min,
 # no start timestamp given). k=2 speaker-clustered and filtered to the
 # confirmed target cluster (155/254 clips), same pattern as voice_adam

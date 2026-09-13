@@ -63,14 +63,39 @@ SOURCES = {
         DOWNLOADS_DIR / "1-The_Calm_Breath 2.mp3",
         DOWNLOADS_DIR / "2-Calm_Birth 2.mp3",
     ],
+    # 2026-09-13: new voice "Mia" - 5 user-supplied clips, ~29 min total.
+    "voice_mia": [
+        DOWNLOADS_DIR / "Mia 1.mp4",
+        DOWNLOADS_DIR / "Mia 2.mp4",
+        DOWNLOADS_DIR / "Mia 3.mp4",
+        DOWNLOADS_DIR / "Mia 4.mp4",
+        DOWNLOADS_DIR / "Mia 5.mp4",
+    ],
+    # 2026-09-13: new voice "Dave" - 2 user-supplied clips (~6.4 min total).
+    "voice_dave": [
+        DOWNLOADS_DIR / "Dave 1.mp3",
+        DOWNLOADS_DIR / "Dave 2.mp4",
+    ],
+}
+
+# Per-speaker start offset (seconds) to skip before extracting - for a
+# source where someone else talks first before the target speaker starts.
+# 2026-09-13: direct correction after the first voice_mia training run -
+# all 5 Mia clips open with a man speaking for roughly the first 60s before
+# Mia herself starts, and the original extraction included his voice in
+# her training set. Skipping it here so a re-extraction never picks him up
+# again.
+START_OFFSET_SECONDS = {
+    "voice_mia": 60,
 }
 
 
-def extract(video_path: Path, out_path: Path, ffmpeg_exe: str) -> None:
+def extract(video_path: Path, out_path: Path, ffmpeg_exe: str, start_seconds: float = 0) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        ffmpeg_exe,
-        "-y",
+    cmd = [ffmpeg_exe, "-y"]
+    if start_seconds > 0:
+        cmd += ["-ss", str(start_seconds)]
+    cmd += [
         "-i",
         str(video_path),
         "-vn",
@@ -82,7 +107,7 @@ def extract(video_path: Path, out_path: Path, ffmpeg_exe: str) -> None:
         "pcm_s16le",
         str(out_path),
     ]
-    print(f"  extracting -> {out_path.name}")
+    print(f"  extracting -> {out_path.name}" + (f" (skipping first {start_seconds:.0f}s)" if start_seconds else ""))
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(result.stderr[-2000:], file=sys.stderr)
@@ -100,10 +125,11 @@ def main() -> None:
                 continue
             stem = video_path.stem.strip().replace("/", "-")
             out_path = out_dir / f"{stem}.wav"
-            if out_path.exists():
+            start_seconds = START_OFFSET_SECONDS.get(speaker, 0)
+            if out_path.exists() and not start_seconds:
                 print(f"  already extracted, skipping: {out_path.name}")
                 continue
-            extract(video_path, out_path, ffmpeg_exe)
+            extract(video_path, out_path, ffmpeg_exe, start_seconds)
 
 
 if __name__ == "__main__":

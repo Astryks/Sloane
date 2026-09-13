@@ -32,6 +32,8 @@ SPEAKERS = [
     "voice_adam",
     "voice_rachel",
     "voice_emily",
+    "voice_mia",
+    "voice_dave",
 ]
 
 
