@@ -1383,6 +1383,30 @@ function ProductAdShowcaseSection() {
         for testing how well each engine keeps a product&apos;s logo intact.
       </p>
 
+      <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <div className="flex shrink-0 items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/product-showcase/harper_reference.jpg" alt="Harper face reference" className="h-20 w-20 rounded-xl object-cover" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/product-showcase/lucylabs_cup_v2.png" alt="Lucy Labs cup reference" className="h-20 w-20 rounded-xl object-contain" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-foreground">Try this with Harper + your cup</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted">Use the real Harper face and Lucy Labs cup references above for a quick original product ad experiment.</p>
+            <ol className="mt-3 space-y-1 text-xs leading-relaxed text-muted">
+              <li><strong>1.</strong> Upload Harper face</li>
+              <li><strong>2.</strong> Upload the cup</li>
+              <li><strong>3.</strong> Paste the Old Spice style reference: <a href="https://www.youtube.com/watch?v=uLTIowBF0kE" target="_blank" rel="noreferrer" className="font-semibold text-purple underline">youtube.com/watch?v=uLTIowBF0kE</a></li>
+              <li><strong>4.</strong> Choose a model</li>
+              <li><strong>5.</strong> Click <strong>Generate my video</strong></li>
+            </ol>
+            <p className="mt-3 text-xs leading-relaxed text-muted">That YouTube link is only a style reference. Lucy Labs creates an original ad from your brief and references, not a copy of the Old Spice commercial. When it finishes, download both the silent MP4 and the Kling-dubbed, lip-synced MP4.</p>
+            <a href="#product-ad-flow" className="mt-3 inline-block rounded-full bg-purple px-4 py-2 text-xs font-bold text-white shadow-soft">Open the product ad builder</a>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-center gap-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/product-showcase/harper_yoga.png" alt="Harper on a yoga mat, holding the tumbler" className="h-40 w-auto rounded-xl object-contain" />

@@ -9,7 +9,7 @@ import {
   setProductAdLipsyncRequestId,
   setProductAdSilentVideo,
 } from "@/lib/db";
-import { getFalJobResult, getFalJobStatus, submitLipsyncJob, uploadBufferToFal, LIPSYNC_ENDPOINT } from "@/lib/fal";
+import { getFalJobResult, getFalJobStatus, getFalVideoUrl, submitLipsyncJob, uploadBufferToFal, LIPSYNC_ENDPOINT } from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
 import { padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 
@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
   if (job.status === "failed") return NextResponse.json({ status: "FAILED", error: job.error });
 
   let audioUrl = job.audio_url;
+  let finalVideoUrl = job.final_video_url;
   if (job.modal_job_id && !audioUrl) {
     try {
       const modalStatus = await getModalJobStatus(job.modal_job_id.startsWith("modal:") ? job.modal_job_id.slice(6) : job.modal_job_id);
@@ -39,11 +40,18 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
       }
       if (modalStatus.status === "COMPLETED") {
-        const audioBase64 = modalStatus.output?.audio_base64 as string | undefined;
-        if (!audioBase64) throw new Error("Voice generation produced no audio");
-        const audioBuffer = padWavToMinDuration(Buffer.from(audioBase64, "base64"), LIPSYNC_MIN_AUDIO_SECONDS);
-        audioUrl = await uploadBufferToFal(audioBuffer, "audio/wav", `${job.id}.wav`);
-        await setProductAdAudioUrl(job.id, audioUrl);
+        if (modalStatus.videoUrl) {
+          finalVideoUrl = modalStatus.videoUrl;
+        } else if (modalStatus.audioUrl) {
+          audioUrl = modalStatus.audioUrl;
+          await setProductAdAudioUrl(job.id, audioUrl);
+        } else if (modalStatus.audioBase64) {
+          const audioBuffer = padWavToMinDuration(Buffer.from(modalStatus.audioBase64, "base64"), LIPSYNC_MIN_AUDIO_SECONDS);
+          audioUrl = await uploadBufferToFal(audioBuffer, "audio/wav", `${job.id}.wav`);
+          await setProductAdAudioUrl(job.id, audioUrl);
+        } else {
+          throw new Error("Modal completed without a usable audio or video URL");
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Voice preparation failed";
@@ -71,7 +79,7 @@ export async function GET(req: NextRequest) {
     if (falStatus === "COMPLETED") {
       try {
         const result = await getFalJobResult(job.fal_endpoint, job.fal_request_id);
-        silentVideoUrl = result.video?.url ?? null;
+        silentVideoUrl = getFalVideoUrl(result);
         if (!silentVideoUrl) throw new Error("The model returned no video");
         await setProductAdSilentVideo(job.id, silentVideoUrl);
       } catch (err) {
@@ -80,6 +88,11 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ status: "FAILED", error: message });
       }
     }
+  }
+
+  if (finalVideoUrl && silentVideoUrl) {
+    await completeProductAdJob(job.id, finalVideoUrl);
+    return NextResponse.json({ status: "COMPLETED", finalVideoUrl, silentVideoUrl });
   }
 
   if (!audioUrl || !silentVideoUrl) return NextResponse.json({ status: "IN_PROGRESS", phase: audioUrl ? "Rendering silent video" : "Preparing dialogue" });
@@ -104,7 +117,7 @@ export async function GET(req: NextRequest) {
     }
     if (lipsyncStatus === "COMPLETED") {
       const result = await getFalJobResult(LIPSYNC_ENDPOINT, job.lipsync_request_id);
-      const finalVideoUrl = result.video?.url;
+      const finalVideoUrl = getFalVideoUrl(result);
       if (!finalVideoUrl) throw new Error("Kling returned no lip-synced video");
       await completeProductAdJob(job.id, finalVideoUrl);
       return NextResponse.json({ status: "COMPLETED", finalVideoUrl, silentVideoUrl });

@@ -4,6 +4,8 @@
 // this repo use the Python fal_client SDK instead since they run outside
 // Next.js; this is the equivalent for API routes.
 
+import { findNestedMediaUrl, findNestedString } from "./providerResponse";
+
 const FAL_BASE = "https://queue.fal.run";
 
 function falHeaders() {
@@ -94,7 +96,9 @@ export async function submitFalJob(endpoint: string, input: Record<string, unkno
     throw new Error(`fal submit failed (${res.status}): ${text.slice(0, 300)}`);
   }
   const data = await res.json();
-  return data.request_id as string;
+  const requestId = findNestedString(data, ["request_id", "job_id"]);
+  if (!requestId) throw new Error("fal submit response contained no usable job ID");
+  return requestId;
 }
 
 export type FalJobStatus = "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
@@ -137,12 +141,17 @@ export async function getFalJobStatus(endpoint: string, requestId: string): Prom
     throw new Error(`fal status check failed (${res.status}): ${text.slice(0, 300)}`);
   }
   const data = await res.json();
-  return (data.status as FalJobStatus) ?? "IN_PROGRESS";
+  const status = findNestedString(data, ["status"]);
+  if (status === "IN_QUEUE" || status === "IN_PROGRESS" || status === "COMPLETED" || status === "FAILED") return status;
+  throw new Error("fal status response did not include a usable status");
 }
 
-// Result shape differs slightly per engine (all three so far return
-// {video: {url}}), so this stays loosely typed and callers pull `.video.url`.
-export async function getFalJobResult(endpoint: string, requestId: string): Promise<{ video?: { url: string } }> {
+export type FalJobResult = {
+  video?: { url?: string };
+  [key: string]: unknown;
+};
+
+export async function getFalJobResult(endpoint: string, requestId: string): Promise<FalJobResult> {
   const res = await fetch(`${FAL_BASE}/${pollingEndpoint(endpoint)}/requests/${requestId}`, {
     headers: falHeaders(),
   });
@@ -150,7 +159,11 @@ export async function getFalJobResult(endpoint: string, requestId: string): Prom
     const text = await res.text();
     throw new Error(`fal result fetch failed (${res.status}): ${text.slice(0, 300)}`);
   }
-  return res.json();
+  return res.json() as Promise<FalJobResult>;
+}
+
+export function getFalVideoUrl(result: unknown): string | null {
+  return findNestedMediaUrl(result, "video") ?? findNestedString(result, ["video_url"]);
 }
 
 // Two-step upload to fal's own storage (verified working 2026-09-11 against

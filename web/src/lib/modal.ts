@@ -7,12 +7,17 @@
 // /v2/{endpointId}/{run,status} do - each @modal.fastapi_endpoint function
 // gets its own subdomain, so submit and status are two separate URLs (see
 // STATUS.md "Modal migration" for how to find them after `modal deploy`).
+import { findNestedMediaUrl, findNestedString, findNestedStatus } from "./providerResponse";
+
 const MODAL_SUBMIT_URL = process.env.MODAL_SUBMIT_URL!;
 const MODAL_STATUS_URL = process.env.MODAL_STATUS_URL!;
 
 export type ModalStatusResponse = {
   status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
   output?: Record<string, unknown>;
+  audioUrl?: string;
+  videoUrl?: string;
+  audioBase64?: string;
   error?: string;
 };
 
@@ -23,13 +28,14 @@ export async function submitModalJob(input: Record<string, unknown>): Promise<{ 
     body: JSON.stringify(input),
   });
   const data = await res.json();
-  if (!res.ok || !data.call_id) {
+  const callId = findNestedString(data, ["call_id", "job_id"]);
+  if (!res.ok || !callId) {
     throw new Error(data.error ?? `Modal job submission failed (${res.status})`);
   }
   // Prefixed so job-status/route.ts can tell a Modal call_id apart from a
   // RunPod job id at poll time without a separate "which backend" lookup -
   // RunPod's own ids never contain a colon.
-  return { jobId: `modal:${data.call_id as string}` };
+  return { jobId: `modal:${callId}` };
 }
 
 export async function getModalJobStatus(callId: string): Promise<ModalStatusResponse> {
@@ -38,7 +44,19 @@ export async function getModalJobStatus(callId: string): Promise<ModalStatusResp
   if (!res.ok) {
     throw new Error(data.error ?? `Modal status check failed (${res.status})`);
   }
-  return data as ModalStatusResponse;
+  const status = findNestedStatus(data);
+  if (status !== "IN_PROGRESS" && status !== "COMPLETED" && status !== "FAILED") {
+    throw new Error("Modal status response did not include a usable status");
+  }
+  const output = data.output && typeof data.output === "object" ? data.output as Record<string, unknown> : undefined;
+  return {
+    status,
+    output,
+    audioUrl: findNestedMediaUrl(data, "audio") ?? undefined,
+    videoUrl: findNestedMediaUrl(data, "video") ?? undefined,
+    audioBase64: findNestedString(data, ["audio_base64"]) ?? undefined,
+    error: findNestedString(data, ["error"]) ?? undefined,
+  };
 }
 
 // Fire-and-forget: called the moment someone opens the generation page,
