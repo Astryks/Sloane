@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import wav from "node-wav";
 import lamejs from "@breezystack/lamejs";
 
+// lamejs's pure-JS encoder scales with audio duration; a slowed-down (speed
+// < 1.0) or just long generation takes proportionally longer to encode, and
+// this route had no override so it ran on Vercel's 10s default - happy to
+// give it real headroom rather than let it get progressively closer to that
+// ceiling as generations get longer/slower.
+export const maxDuration = 60;
+
 // Takes the already-generated audio as base64 in the request body - the
 // client has it in memory from the completed job (see job-status/route.ts),
 // there's no longer a server-side file to fetch by filename now that audio

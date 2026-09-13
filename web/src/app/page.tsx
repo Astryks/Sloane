@@ -56,24 +56,40 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 // POSTs the base64 to /api/download-mp3 for server-side transcoding and
 // triggers a local file download from the response.
 function AudioResultPlayer({ audioBase64 }: { audioBase64: string | null }) {
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   if (!audioBase64) return null;
   const dataUrl = `data:audio/wav;base64,${audioBase64}`;
   const shareFile = new File([base64ToBlob(audioBase64, "audio/wav")], "lucy-audio.wav", { type: "audio/wav" });
 
   async function handleDownloadMp3() {
-    const res = await fetch("/api/download-mp3", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ audioBase64, name: `lucy-${Date.now()}` }),
-    });
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = `lucy-${Date.now()}.mp3`;
-    a.click();
-    URL.revokeObjectURL(objectUrl);
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const res = await fetch("/api/download-mp3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioBase64, name: `lucy-${Date.now()}` }),
+      });
+      if (!res.ok) {
+        // Was a silent no-op on failure - the button just did nothing, no
+        // error, no explanation, indistinguishable from being broken. Now
+        // surfaces whatever the route actually reported.
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? `Download failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `lucy-${Date.now()}.mp3`;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Could not download that audio - try again.");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
@@ -81,10 +97,12 @@ function AudioResultPlayer({ audioBase64 }: { audioBase64: string | null }) {
       <audio className="w-full" src={dataUrl} controls />
       <button
         onClick={handleDownloadMp3}
-        className="mt-3 inline-block rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold text-foreground hover:bg-white/70"
+        disabled={downloading}
+        className="mt-3 inline-block rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold text-foreground hover:bg-white/70 disabled:opacity-60"
       >
-        Download MP3
+        {downloading ? "Preparing MP3…" : "Download MP3"}
       </button>
+      {downloadError && <p className="mt-2 text-xs text-coral-dark">{downloadError}</p>}
       <ShareButtons file={shareFile} text="Listen to what I made with Lucy!" />
     </div>
   );

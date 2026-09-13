@@ -848,8 +848,28 @@ def apply_speed(audio: np.ndarray, rate: float) -> np.ndarray:
     """rate > 1.0 = faster, < 1.0 = slower. Real time-stretching (changes
     duration, preserves pitch) - not the same as pitch_semitones, and a
     genuine "speak slower" control, unlike emotion which Chatterbox has no
-    equivalent knob for (see PITCH_SEMITONES_BY_VOICE comment)."""
-    return librosa.effects.time_stretch(audio, rate=rate)
+    equivalent knob for (see PITCH_SEMITONES_BY_VOICE comment).
+
+    2026-09-14: switched from librosa.effects.time_stretch (an STFT phase
+    vocoder) to WSOLA (audiotsm) - the phase vocoder is exactly the
+    technique already documented above (SPEED_BY_VOICE history) as making
+    Izzy/Alice/Robbo sound "distorted"/"like a robot" when used to slow
+    speech down, which is why that per-voice attempt was reverted rather
+    than fixed. It was never actually fixed though - this same function
+    backed the client-facing Speed slider the whole time, so any user
+    dragging it below 1.0 hit the identical artifact live. WSOLA works in
+    the time domain (finds the best-aligned overlapping waveform segment
+    at each step) instead of manipulating STFT phase, which is why it's
+    the standard choice for speech-rate change in real players/tools -
+    far less "phasy"/metallic on voice than a phase vocoder, especially
+    when slowing down."""
+    from audiotsm import wsola
+    from audiotsm.io.array import ArrayReader, ArrayWriter
+
+    reader = ArrayReader(audio.reshape(1, -1).astype(np.float64))
+    writer = ArrayWriter(channels=1)
+    wsola(channels=1, speed=rate).run(reader, writer)
+    return writer.data.reshape(-1).astype(np.float32)
 
 
 TERMINAL_FALL_SEMITONES = 5.0  # forced pitch drop from the tail's own peak down to its last voiced frame

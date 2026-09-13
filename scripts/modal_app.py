@@ -63,6 +63,10 @@ image = (
         "faster-whisper==1.2.1",
         "pyworld==0.3.5",
         "librosa==0.11.0",
+        # WSOLA time-stretch for apply_speed() (lucy_tts_engine.py) - replaced
+        # librosa.effects.time_stretch's phase vocoder 2026-09-14, see that
+        # function's docstring. Pure-Python/numpy, no native binary.
+        "audiotsm==0.1.2",
         "soundfile==0.13.1",
         "scipy==1.17.1",
         "numpy==1.26.4",
