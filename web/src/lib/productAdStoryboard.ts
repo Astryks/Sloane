@@ -29,6 +29,17 @@ export type ProductAdStoryboard = {
 
 const MAX_DIALOGUE_CHARS = 140;
 
+// Real, confirmed limit (2026-09-13 live test): fal-ai/kling-video's
+// text/image-to-video endpoints reject any prompt over 2500 characters
+// with a 422 ("String should have at most 2500 characters"). The original
+// template blew past this by re-embedding the entire brief verbatim inside
+// shot 01's description (on top of stating it once up front) - fixed below
+// by referencing the brief instead of repeating it, plus this hard safety
+// cap so a long user brief can never silently break Kling generation again,
+// regardless of template changes later. Kept well under Kling's exact 2500
+// so other engines' own (undocumented) limits have headroom too.
+const MAX_PROMPT_CHARS = 2200;
+
 // Prefers an actual quoted line from the brief ("Say exactly this...") as
 // real spoken dialogue; otherwise falls back to the brief's first sentence,
 // capped to a length that renders as one natural ~6-9s spoken beat (the
@@ -58,7 +69,7 @@ export function buildProductAdStoryboard(params: {
       id: "01",
       title: "Hero entrance",
       camera: "Wide shot, slow cinematic push-in, premium key light",
-      description: `${characterName} enters the frame with confident, magnetic energy, establishing the scene: ${brief}`,
+      description: `${characterName} enters the frame with confident, magnetic energy, establishing the scene described above.`,
     },
     {
       id: "02",
@@ -90,22 +101,36 @@ export function buildProductAdStoryboard(params: {
     ? `Match the confident tone, pacing, and self-assured humor of this reference ad, without copying its footage or dialogue: ${youtubeReference}.`
     : "";
 
-  const shotList = shots.map((shot) => `${shot.id}. ${shot.title} (${shot.camera}): ${shot.description}`).join("\n");
-
   // The @Image1/@Image2 reference framing is added by buildProductAdFalInput
   // (productAd.ts) right before submission, not here, so it isn't duplicated
   // when that wrapper concatenates its own copy in front of this prompt.
-  const fullPrompt = [
+  // Core parts (creative brief + hard locks) come first and are never
+  // truncated - they matter more than the shot list, which is genuinely
+  // helpful but the most repetitive/least essential part, so it's the one
+  // that gets cut short if a long brief leaves no room for it.
+  const core = [
     "Create a cinematic, premium product advertisement.",
     brief,
     styleNote,
     cameraDirective,
     continuityLock,
     productIntegrityLock,
-    `Shot list:\n${shotList}`,
   ]
     .filter((line) => line && line.trim().length > 0)
     .join("\n\n");
+
+  let fullPrompt = core;
+  let budget = MAX_PROMPT_CHARS - core.length - "\n\nShot list:\n".length;
+  const includedShots: string[] = [];
+  for (const shot of shots) {
+    const line = `${shot.id}. ${shot.title} (${shot.camera}): ${shot.description}`;
+    if (line.length + 1 > budget) break;
+    includedShots.push(line);
+    budget -= line.length + 1;
+  }
+  if (includedShots.length > 0) {
+    fullPrompt = `${core}\n\nShot list:\n${includedShots.join("\n")}`;
+  }
 
   return { shots, dialogueLine, continuityLock, productIntegrityLock, cameraDirective, fullPrompt };
 }
