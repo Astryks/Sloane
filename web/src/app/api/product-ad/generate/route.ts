@@ -10,7 +10,7 @@ import {
   refundVideoCredit,
 } from "@/lib/db";
 import { getCharacter } from "@/lib/characters";
-import { hasEnoughFalBalanceToGenerate, submitFalJob, uploadBufferToFal } from "@/lib/fal";
+import { compositeProductAndCharacter, hasEnoughFalBalanceToGenerate, submitFalJob, uploadBufferToFal } from "@/lib/fal";
 import { submitModalJob } from "@/lib/modal";
 import { buildProductAdFalInput, isProductAdModel, productAdFalEndpoint } from "@/lib/productAd";
 import { buildProductAdStoryboard } from "@/lib/productAdStoryboard";
@@ -110,7 +110,16 @@ export async function POST(req: NextRequest) {
         falEndpoint: productAdFalEndpoint(model),
       });
 
-      const falRequestId = await submitFalJob(productAdFalEndpoint(model), buildProductAdFalInput(model, storyboard.fullPrompt, productImageUrl, characterImageUrl));
+      // Seedance's reference-to-video endpoint natively takes both images
+      // (image_urls: [product, character]) - no compositing needed there.
+      // Every other engine's schema only has ONE image_url field; without
+      // compositing, that slot went to the character photo and the product
+      // was never actually shown to the model at all (see fal.ts's
+      // compositeProductAndCharacter comment for the full real bug this
+      // fixes, found in the 2026-09-13 live test).
+      const modelImageUrl = model === "seedance" ? characterImageUrl : await compositeProductAndCharacter(productImageUrl, characterImageUrl);
+
+      const falRequestId = await submitFalJob(productAdFalEndpoint(model), buildProductAdFalInput(model, storyboard.fullPrompt, productImageUrl, modelImageUrl));
       await setProductAdFalRequestId(jobId, falRequestId);
 
       const voiceId = characterVoiceId ?? (typeof storyboardMetadata.voiceId === "string" ? storyboardMetadata.voiceId : "harper");

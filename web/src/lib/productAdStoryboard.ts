@@ -60,8 +60,12 @@ export function buildProductAdStoryboard(params: {
   const { brief, youtubeReference, characterName } = params;
   const dialogueLine = extractDialogueLine(brief);
 
-  const continuityLock = `Keep ${characterName}'s exact face, hair, wardrobe, proportions, and performance identity fully consistent in every single shot - this is the same person throughout, not a different actor.`;
-  const productIntegrityLock = "Render the uploaded product exactly as shown in its reference photo: identical silhouette, materials, colors, printed label, logo, cap, and readable text in every frame. Never invent, melt, mirror, warp, stretch, or redesign the product.";
+  // Explicit priority order, per direct product requirement: the product
+  // must never change - it is the non-negotiable constraint. The
+  // character's likeness is a best-effort goal, not a hard one - it is
+  // allowed to drift if that's what it takes to keep the product correct.
+  const productIntegrityLock = "The product must be pixel-identical to its uploaded reference photo in every single frame: exact silhouette, materials, colors, printed label, logo, cap, and readable text. This is the single most important, non-negotiable requirement - never invent, melt, mirror, warp, stretch, recolor, or redesign the product, even slightly.";
+  const continuityLock = `Try to keep ${characterName}'s face, hair, wardrobe, and performance identity consistent across shots - this is a best-effort goal, not a strict requirement, and it must never come at the cost of the product's exact appearance above.`;
   const cameraDirective = "Use dynamic, premium cinematic camera work across the sequence: a slow push-in on the opening shot, a macro orbit with rack focus on the product beauty shot, a deliberate zoom on the interaction/dialogue shot, a hard cut with a motivated lateral move at the location or angle change, and a final dolly-in for the closing hero lockup. Every zoom in or out should be smooth and motivated, never abrupt, shaky, or distorting to the product's true form.";
 
   const shots: ProductAdShot[] = [
@@ -110,11 +114,11 @@ export function buildProductAdStoryboard(params: {
   // that gets cut short if a long brief leaves no room for it.
   const core = [
     "Create a cinematic, premium product advertisement.",
+    productIntegrityLock,
     brief,
     styleNote,
     cameraDirective,
     continuityLock,
-    productIntegrityLock,
   ]
     .filter((line) => line && line.trim().length > 0)
     .join("\n\n");

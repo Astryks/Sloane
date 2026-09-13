@@ -209,6 +209,49 @@ export async function submitLipsyncJob(videoUrl: string, audioUrl: string): Prom
   return submitFalJob(LIPSYNC_ENDPOINT, { video_url: videoUrl, audio_url: audioUrl });
 }
 
+// Real, serious bug fixed here (2026-09-13 live test): the product-ad flow
+// only ever sent ONE reference image to Veo/Kling(image-to-video)/Grok/
+// MiniMax - their schemas only have a single `image_url` field each, and
+// that slot was given to the CHARACTER photo, leaving the PRODUCT entirely
+// invisible to those 4 engines (only mentioned in text). That's why none of
+// them reproduced the real product shape/color in testing - they were
+// hallucinating a generic bottle from a text description alone. Only
+// Seedance's `reference-to-video` (image_urls, up to 9 images) ever
+// actually saw both images, and Seedance is the one blocked by content
+// policy for AI-generated faces.
+//
+// Fix: composite the product + character into ONE image first via fal's
+// Flux Kontext multi-image model, then use THAT single composite as the
+// `image_url` for the single-image engines - a real, previously-proven
+// pattern in this project (see STATUS.md's "Product-ad showcase rebuilt
+// around Harper" entry, which used this same technique manually via a
+// one-off script). Direct, explicit product-fidelity priority: the product
+// must come out pixel-identical to its reference photo; the character is
+// allowed to drift - reflected in the instruction prompt below.
+export const FLUX_KONTEXT_MULTI_ENDPOINT = "fal-ai/flux-pro/kontext/multi";
+
+export async function compositeProductAndCharacter(productImageUrl: string, characterImageUrl: string): Promise<string> {
+  const prompt =
+    "@Image1 is the product. @Image2 is the person. Create one single photo of the person from @Image2 holding or standing next to the product from @Image1. The product's exact shape, proportions, color, printed label, logo, and text must be reproduced pixel-for-pixel identical to @Image1 - this is the single most important requirement, never redesign, restyle, recolor, or alter the product in any way. Keep the person's face and identity close to @Image2, but perfect product fidelity always takes priority over the person's likeness.";
+  const requestId = await submitFalJob(FLUX_KONTEXT_MULTI_ENDPOINT, {
+    prompt,
+    image_urls: [productImageUrl, characterImageUrl],
+  });
+  const start = Date.now();
+  while (Date.now() - start < 120_000) {
+    const status = await getFalJobStatus(FLUX_KONTEXT_MULTI_ENDPOINT, requestId);
+    if (status === "FAILED") throw new Error("Flux Kontext failed to composite the product and character images");
+    if (status === "COMPLETED") {
+      const result = await getFalJobResult(FLUX_KONTEXT_MULTI_ENDPOINT, requestId);
+      const imageUrl = (result as { images?: Array<{ url?: string }> }).images?.[0]?.url;
+      if (!imageUrl) throw new Error("Flux Kontext returned no composite image");
+      return imageUrl;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error("Flux Kontext composite timed out");
+}
+
 export async function uploadBufferToFal(data: Buffer, contentType: string, fileName: string): Promise<string> {
   const initRes = await fetch("https://rest.fal.ai/storage/upload/initiate", {
     method: "POST",
