@@ -10,7 +10,7 @@ import {
   refundVideoCredit,
 } from "@/lib/db";
 import { getCharacter } from "@/lib/characters";
-import { compositeProductAndCharacter, hasEnoughFalBalanceToGenerate, submitFalJob, uploadBufferToFal } from "@/lib/fal";
+import { compositeProductAndCharacter, hasEnoughFalBalanceToGenerate, lockFaceOnComposite, submitFalJob, uploadBufferToFal } from "@/lib/fal";
 import { submitModalJob } from "@/lib/modal";
 import { buildProductAdFalInput, isProductAdModel, productAdFalEndpoint } from "@/lib/productAd";
 import { buildProductAdStoryboard } from "@/lib/productAdStoryboard";
@@ -117,7 +117,20 @@ export async function POST(req: NextRequest) {
       // was never actually shown to the model at all (see fal.ts's
       // compositeProductAndCharacter comment for the full real bug this
       // fixes, found in the 2026-09-13 live test).
-      const modelImageUrl = model === "seedance" ? characterImageUrl : await compositeProductAndCharacter(productImageUrl, characterImageUrl);
+      let modelImageUrl = characterImageUrl;
+      if (model !== "seedance") {
+        modelImageUrl = await compositeProductAndCharacter(productImageUrl, characterImageUrl);
+        // Best-effort character-fidelity refinement - never fails the job.
+        // Only ever affects the character (the explicitly lower-priority,
+        // best-effort part of this feature), never the product. See
+        // lockFaceOnComposite's comment in fal.ts for the real, honest scope
+        // of what this can and can't fix.
+        try {
+          modelImageUrl = await lockFaceOnComposite(modelImageUrl, characterImageUrl);
+        } catch (err) {
+          console.error("product-ad face-lock pass failed, using uncorrected composite", err);
+        }
+      }
 
       const falRequestId = await submitFalJob(productAdFalEndpoint(model), buildProductAdFalInput(model, storyboard.fullPrompt, productImageUrl, modelImageUrl));
       await setProductAdFalRequestId(jobId, falRequestId);

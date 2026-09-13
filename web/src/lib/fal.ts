@@ -252,6 +252,47 @@ export async function compositeProductAndCharacter(productImageUrl: string, char
   throw new Error("Flux Kontext composite timed out");
 }
 
+// Optional character-fidelity refinement (2026-09-13) - real, honest scope:
+// this corrects the FACE in the single composite reference image (built by
+// compositeProductAndCharacter above), before it's ever sent to the video
+// model. It does NOT touch the generated video frame-by-frame: fal has no
+// video-native identity-lock endpoint - the only option, fal-ai/face-swap,
+// is image-only (confirmed against its real schema, which returns a single
+// `image`, even though its input description loosely mentions video).
+// Running it per-frame on a whole clip would mean 100+ separate calls per
+// generation - real added cost/latency for uncertain benefit, not the cheap
+// fix this was scoped as. So this only ever improves the STARTING reference
+// the video model sees; it cannot guarantee the face stays put for the rest
+// of the clip, since the underlying video model itself was never trained to
+// hold a reference face stable (see compositeProductAndCharacter's comment)
+// - a real, honest limitation, not something this step fixes. Deliberately
+// best-effort: if it fails, the caller falls back to the uncorrected
+// composite rather than failing the whole generation over a nice-to-have -
+// this only ever affects the character, which is explicitly the
+// lower-priority, best-effort requirement (see productAdStoryboard.ts's
+// continuityLock) - never the product.
+export const FACE_SWAP_ENDPOINT = "fal-ai/face-swap";
+
+export async function lockFaceOnComposite(compositeImageUrl: string, originalCharacterImageUrl: string): Promise<string> {
+  const requestId = await submitFalJob(FACE_SWAP_ENDPOINT, {
+    swap_image_url: originalCharacterImageUrl,
+    base_image_url: compositeImageUrl,
+  });
+  const start = Date.now();
+  while (Date.now() - start < 60_000) {
+    const status = await getFalJobStatus(FACE_SWAP_ENDPOINT, requestId);
+    if (status === "FAILED") throw new Error("Face-lock pass failed");
+    if (status === "COMPLETED") {
+      const result = await getFalJobResult(FACE_SWAP_ENDPOINT, requestId);
+      const imageUrl = (result as { image?: { url?: string } }).image?.url;
+      if (!imageUrl) throw new Error("Face-lock pass returned no image");
+      return imageUrl;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error("Face-lock pass timed out");
+}
+
 export async function uploadBufferToFal(data: Buffer, contentType: string, fileName: string): Promise<string> {
   const initRes = await fetch("https://rest.fal.ai/storage/upload/initiate", {
     method: "POST",
