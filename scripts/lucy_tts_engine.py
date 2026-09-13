@@ -1058,6 +1058,57 @@ def apply_terminal_rise(audio: np.ndarray, sr: int, sentence: str, end_idx: int 
     return np.concatenate([head, reshaped, rest])
 
 
+COMMA_PAUSE_SECONDS = 0.18  # a breath/beat, shorter than DEFAULT_PAUSE_SECONDS' between-sentence 0.22
+
+
+def apply_comma_pauses(audio: np.ndarray, sr: int, chunk_text: str, whisper_words: list) -> np.ndarray:
+    """Real gap reported live 2026-09-14: "she goes straight past... there
+    should be a pause after now and before wherever" ("Make yourself
+    comfortable now, wherever you are."). Nothing in this pipeline ever
+    looked at commas - apply_terminal_fall/rise and
+    apply_interior_sentence_prosody only fire at SENTENCE endings (via
+    split_sentences on ./!/?), so a comma's pause was left entirely up to
+    however Chatterbox happened to render it, with no floor.
+
+    Reuses the same word-level timestamps already produced during retry-
+    verification to find where each comma actually lands in the generated
+    audio, then splices in a short, fixed silence there - a plain insert,
+    not a pitch/DSP reshape, so there's no artifact risk the way
+    apply_terminal_fall/rise or apply_word_emphasis have to guard against.
+    Must run AFTER those (they anchor themselves to sample positions in the
+    audio as it exists *before* any silence gets inserted here) and before
+    nothing else in this chunk's own processing - the caller's own final
+    apply_terminal_fall/rise call still lands correctly afterward since it
+    always anchors off the array's (now longer) true end, not a fixed
+    index.
+    """
+    if not whisper_words:
+        return audio
+    words = chunk_text.split()
+    insert_points = []
+    for i, w in enumerate(words):
+        if i >= len(whisper_words):
+            break  # whisper's word count already drifted from the input's - stop rather than misalign further
+        if w.rstrip().endswith(","):
+            wt = whisper_words[i]
+            end_s = wt.end if hasattr(wt, "end") else wt[2]
+            end_idx = int(end_s * sr)
+            if 0 < end_idx <= len(audio):
+                insert_points.append(end_idx)
+    if not insert_points:
+        return audio
+
+    silence = np.zeros(int(sr * COMMA_PAUSE_SECONDS), dtype=np.float32)
+    pieces = []
+    prev = 0
+    for idx in insert_points:
+        pieces.append(audio[prev:idx])
+        pieces.append(silence)
+        prev = idx
+    pieces.append(audio[prev:])
+    return np.concatenate(pieces)
+
+
 def apply_interior_sentence_prosody(audio: np.ndarray, sr: int, chunk_text: str, whisper_words: list) -> np.ndarray:
     """Real bug this fixes, reported live 2026-09-14: apply_terminal_fall/
     rise only ever fires once per generation CHUNK (via the caller in
@@ -1504,6 +1555,11 @@ def generate_sentence_with_retry(engine: ChatterboxTTS, sentence: str, reference
         # real terminal contour, not just whatever Chatterbox produced on
         # its own - see apply_interior_sentence_prosody's docstring.
         shaped = apply_interior_sentence_prosody(shaped, engine.sr, sentence, whisper_words)
+        # Must run last - it's the only one of these three that changes the
+        # audio's length (inserts silence), so anything anchored to a
+        # sample position needs to have already run against the original,
+        # not-yet-lengthened array.
+        shaped = apply_comma_pauses(shaped, engine.sr, sentence, whisper_words)
         return shaped
 
     if len(best_trimmed) == 0:
