@@ -389,6 +389,10 @@ Ran a systematic review across web, mobile, and the inference engine before a pl
 ## Next steps, in order
 
 **Fresh, current priorities as of 2026-09-13 (read these first):**
+0.15. **Unified every "generate my video" CTA button to one label - done and pushed (`ffba34a`).**
+   - **Direct request**: the label had drifted into two different wordings across the 5 lead-gen CTA buttons added over the previous two rounds - "Generate my video" (items 0.13's showcase-section CTAs) vs "Buy credits to generate my video" (item 0.14's gated-section CTAs). All 5 now say exactly "Buy credits to generate my video".
+   - **Left alone on purpose**: pay-as-you-go's real submit button (`"Generate (1 credit)"` / `"Buy credits to generate"` depending on balance) - that one actually submits a real job or starts a real Stripe checkout, a genuinely different thing from the 5 lead-gen CTAs that don't submit anything themselves.
+   - **Verified in a browser, both locally and live in production after deploy**: all 5 buttons read identically.
 0.14. **Access-code paste UI removed entirely, replaced with a "Buy credits" CTA on every gated video section - done and pushed (`fb50cb3`).**
    - **Direct request, with screenshots**: remove the free-tier access-code paste box from the home page, and replace the "Sign in with a Video-plan access code... to generate" message on Custom, Cinematic, and Character sections with a purple "Buy credits to generate my video" button (matching pay-as-you-go's real generate button).
    - **Deleted `AccountWidget.tsx`** (the paste box) and its one usage on the home page - no longer needed now that signing in via email already auto-recognizes a linked subscription (yesterday's item 0.11 auto-sync fix made this genuinely redundant, not just cosmetically removed). Confirmed `/api/billing/status` (which it called) is still used elsewhere for the free-tier audio quota, so nothing broke by removing it.
