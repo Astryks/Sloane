@@ -28,6 +28,7 @@ export type ProductAdShot = {
   title: string;
   camera: string;
   description: string;
+  expression: string;
 };
 
 export type ProductAdStoryboard = {
@@ -92,8 +93,18 @@ const PACE_PRESETS: Record<PaceKey, Pace> = {
 // picked from brief keywords - no randomness, same brief always produces
 // the same storyboard, but different briefs/moods produce visibly
 // different shot styles.
-type ShotRole = "hero" | "beauty" | "interaction" | "transition" | "lockup";
-const SHOT_LIBRARY: Record<ShotRole, Record<PaceKey, string>> = {
+//
+// 2026-09-13: added a `reaction` role and per-shot facial-expression
+// direction, generalized from studying real, generic television-commercial
+// editing convention (cut rhythm, ensemble reaction shots, hook-then-payoff
+// structure - long-standing industry technique, not specific to any one
+// ad). Real finding worth encoding: energetic/comedic-style ads cut far
+// more often (many short shots) than slow/contemplative ones (fewer,
+// longer-held shots) - so `reaction` is only used for the energetic pace,
+// inserted as an extra quick cutaway; slow/medium keep the original 5-shot
+// structure, which already matches how calmer ads tend to hold shots.
+type ShotRole = "hero" | "beauty" | "interaction" | "reaction" | "transition" | "lockup";
+const SHOT_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
   hero: {
     slow: "35mm lens, low-angle static wide shot, subtle 0.4m creep-in over 5s, subject starts in silhouette as backlight slowly brightens to a full reveal",
     medium: "35mm lens, wide shot, smooth Steadicam push-in 1.2m over 3s, ending on a medium-wide frame, eye-level",
@@ -109,6 +120,10 @@ const SHOT_LIBRARY: Record<ShotRole, Record<PaceKey, string>> = {
     medium: "50mm lens, medium shot, 0.8m push-in over 3s onto the face for dialogue, centered rule-of-thirds framing",
     energetic: "35mm lens, medium shot with a brisk 1.2m push-in over 2s, punchy framing timed to a confident hand gesture as the product is raised",
   },
+  reaction: {
+    // Only used for the energetic pace - see comment above.
+    energetic: "50mm lens, quick handheld cutaway to a genuine reaction close-up, held 1s, slight natural camera sway, no camera movement beyond that",
+  },
   transition: {
     slow: "24mm lens, slow cross-dissolve into the new location, subtle 1m lateral drift, continuity of character and product preserved throughout",
     medium: "24mm lens, hard cut, motivated 2m lateral tracking move, continuity of character and product preserved",
@@ -118,6 +133,40 @@ const SHOT_LIBRARY: Record<ShotRole, Record<PaceKey, string>> = {
     slow: "35mm lens, slow 0.6m dolly-in over 5s to a steady final hero frame, quiet stillness, product held at chest height, centered",
     medium: "35mm lens, 1.2m dolly-in over 3s to a steady final hero frame, product held at chest height, centered",
     energetic: "28mm lens, quick 1.8m dolly-in over 2s ending on a confident hero frame, product raised slightly toward camera",
+  },
+};
+
+// ---- Facial-expression direction per shot role/pace - generic, varied
+// emotional beats (not tied to any specific ad), since a flat "confident
+// energy" note on every shot reads as stiff. ----
+const EXPRESSION_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
+  hero: {
+    slow: "a calm, warm half-smile, unhurried and self-assured",
+    medium: "a confident, welcoming smile building as the frame settles",
+    energetic: "wide-eyed enthusiasm, an immediate open smile",
+  },
+  beauty: {
+    slow: "no face in frame - focus is entirely on the product",
+    medium: "no face in frame - focus is entirely on the product",
+    energetic: "no face in frame - focus is entirely on the product",
+  },
+  interaction: {
+    slow: "a genuine, thoughtful expression, soft eye contact with the camera",
+    medium: "a warm, confident expression with direct eye contact",
+    energetic: "an animated, delighted expression, eyebrows raised, genuine energy",
+  },
+  reaction: {
+    energetic: "a real, unforced reaction - a quick laugh, raised eyebrows, or a pleasantly surprised look",
+  },
+  transition: {
+    slow: "expression carries over unchanged from the prior shot, calm and steady",
+    medium: "expression carries over unchanged from the prior shot, confident",
+    energetic: "expression carries over unchanged from the prior shot, energetic",
+  },
+  lockup: {
+    slow: "a settled, quietly confident smile, direct eye contact with the camera",
+    medium: "a warm, confident closing smile, direct eye contact with the camera",
+    energetic: "a big, genuine closing smile, direct eye contact with the camera",
   },
 };
 
@@ -181,32 +230,53 @@ export function buildProductAdStoryboard(params: {
     {
       id: "01",
       title: "Hero entrance",
-      camera: SHOT_LIBRARY.hero[paceKey],
+      camera: SHOT_LIBRARY.hero[paceKey]!,
       description: `${characterName} enters the frame with confident, magnetic energy, establishing the scene described above.`,
+      expression: EXPRESSION_LIBRARY.hero[paceKey]!,
     },
     {
       id: "02",
       title: "Product beauty",
-      camera: SHOT_LIBRARY.beauty[paceKey],
+      camera: SHOT_LIBRARY.beauty[paceKey]!,
       description: "The product is revealed in a clean, glossy close-up that keeps every label and logo detail sharp, well-lit, and completely undistorted.",
+      expression: EXPRESSION_LIBRARY.beauty[paceKey]!,
     },
     {
       id: "03",
       title: "Interaction",
-      camera: SHOT_LIBRARY.interaction[paceKey],
+      camera: SHOT_LIBRARY.interaction[paceKey]!,
       description: `${characterName} picks up the product and speaks directly to camera: "${dialogueLine}"`,
+      expression: EXPRESSION_LIBRARY.interaction[paceKey]!,
     },
+    // Real, generalized finding from studying commercial editing convention:
+    // energetic/comedic-style ads cut far more often than slow/contemplative
+    // ones - an extra quick reaction cutaway only for the energetic pace,
+    // matching that real difference in cutting rhythm rather than using the
+    // same shot count for every mood.
+    ...(paceKey === "energetic"
+      ? [
+          {
+            id: "03b",
+            title: "Reaction cutaway",
+            camera: SHOT_LIBRARY.reaction.energetic!,
+            description: `A quick cutaway reaction shot - a genuine, unscripted-feeling beat right after the line lands.`,
+            expression: EXPRESSION_LIBRARY.reaction.energetic!,
+          },
+        ]
+      : []),
     {
       id: "04",
       title: "Location or angle change",
-      camera: SHOT_LIBRARY.transition[paceKey],
+      camera: SHOT_LIBRARY.transition[paceKey]!,
       description: `A confident scene or angle change keeps the same ${characterName} and the same product in frame, echoing the bold, self-assured energy of a classic big-brand product ad.`,
+      expression: EXPRESSION_LIBRARY.transition[paceKey]!,
     },
     {
       id: "05",
       title: "Final lockup",
-      camera: SHOT_LIBRARY.lockup[paceKey],
+      camera: SHOT_LIBRARY.lockup[paceKey]!,
       description: `${characterName} holds the product steady in a final hero frame as the ad closes.`,
+      expression: EXPRESSION_LIBRARY.lockup[paceKey]!,
     },
   ];
 
@@ -250,7 +320,7 @@ export function buildProductAdStoryboard(params: {
   let budget = MAX_PROMPT_CHARS - core.length - "\n\nShot list:\n".length;
   const includedShots: string[] = [];
   for (const shot of shots) {
-    const line = `${shot.id}. ${shot.title} (${shot.camera}): ${shot.description}`;
+    const line = `${shot.id}. ${shot.title} (${shot.camera}) [expression: ${shot.expression}]: ${shot.description}`;
     if (line.length + 1 > budget) break;
     includedShots.push(line);
     budget -= line.length + 1;
