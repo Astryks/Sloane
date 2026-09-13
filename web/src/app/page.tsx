@@ -15,6 +15,7 @@ import { CHARACTERS, LUCY_VOICE_CREDIT_COST } from "@/lib/characters";
 import { VIDEO_PAYGO_ENGINES, VIDEO_CREDIT_PACKS, type VideoEngine } from "@/lib/videoPaygo";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
+import { ProductAdFlow } from "@/components/ProductAdFlow";
 
 // Backend mode is switchable at runtime from /admin (see
 // @/lib/inferenceBackend) - fetched here rather than read from a build-time
@@ -1946,6 +1947,7 @@ export default function Home() {
         <PayAsYouGoVideoSection />
         <ModelShowcaseSection />
         <ProductAdShowcaseSection />
+        <ProductAdFlow />
         <Footer />
       </main>
     </div>
