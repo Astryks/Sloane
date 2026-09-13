@@ -1271,6 +1271,20 @@ MIN_WORD_OVERLAP_RATIO = 0.85  # below this, treat as a bad generation (words sk
 # words below.
 LEADING_FILLER_WORDS = {"so", "um", "uh", "well", "okay", "ok", "like", "and", "now", "right"}
 
+# Unlike LEADING_FILLER_WORDS above (ordinary words that are only wrong in
+# first position - "so"/"now"/"right" can legitimately appear mid-sentence),
+# these are pure hesitation sounds that a written script would essentially
+# never intentionally contain, in ANY position - reported live 2026-09-14
+# ("umm" mid-sentence, not at the start, so the leading-only check above
+# never even looked at it). Safe to flag unconditionally, wherever they show
+# up in the transcript.
+HESITATION_MARKERS = {"um", "umm", "uh", "uhh", "uhm", "erm", "hm", "hmm"}
+
+
+def has_spurious_hesitation(transcribed_text: str) -> bool:
+    words = [w.strip(string.punctuation).lower() for w in transcribed_text.split()]
+    return any(w in HESITATION_MARKERS for w in words)
+
 
 def _normalize_words(text: str) -> set[str]:
     stripped = text.lower().translate(str.maketrans("", "", string.punctuation))
@@ -1416,6 +1430,11 @@ def generate_sentence_with_retry(engine: ChatterboxTTS, sentence: str, reference
             continue
         if has_spurious_leading_filler(sentence, transcribed_text):
             print(f"[engine] spurious leading filler - said \"{transcribed_text[:40]}\" for \"{sentence[:40]}\", retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
+            if overlap - 0.05 > best_score:
+                best_trimmed, best_score, best_words = trimmed, overlap - 0.05, whisper_words
+            continue
+        if has_spurious_hesitation(transcribed_text):
+            print(f"[engine] spurious hesitation marker - said \"{transcribed_text[:80]}\" for \"{sentence[:80]}\", retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             if overlap - 0.05 > best_score:
                 best_trimmed, best_score, best_words = trimmed, overlap - 0.05, whisper_words
             continue
