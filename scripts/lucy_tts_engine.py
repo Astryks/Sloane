@@ -10,6 +10,7 @@ Pure extraction - no behavior changes. Every function/constant here is
 unchanged from 06_inference_server.py as of the 2026-09-09 long-sentence
 chunking fix.
 """
+import difflib
 import os
 import re
 import shutil
@@ -1058,6 +1059,57 @@ def apply_terminal_rise(audio: np.ndarray, sr: int, sentence: str, end_idx: int 
     return np.concatenate([head, reshaped, rest])
 
 
+_ALIGNMENT_PUNCT_STRIP = string.punctuation.replace("'", "")  # keep apostrophes - "I'm" is one word, not two
+
+
+def _norm_word_for_alignment(w: str) -> str:
+    """Real bug caught in testing before this ever shipped: Whisper's own
+    word tokens come back with a LEADING SPACE (`" Hi,"`, not `"Hi,"`) -
+    stripping only string.punctuation (which doesn't include whitespace)
+    left that space in place, so "hi" from the input never matched " hi"
+    from Whisper. Every word "mismatched," which pushed difflib into
+    treating the whole sequence as one giant replace block instead of
+    finding real equal/insert/delete runs - the exact case this alignment
+    was built to get right. `.strip()` before AND after the punctuation
+    strip actually removes it.
+    """
+    return w.strip().strip(_ALIGNMENT_PUNCT_STRIP).lower()
+
+
+def _align_words_to_whisper(input_words: list[str], whisper_words: list) -> list[int | None]:
+    """Real bug fixed here, reported live 2026-09-14: apply_comma_pauses and
+    apply_interior_sentence_prosody both originally assumed input_words[i]
+    lines up with whisper_words[i] by plain position - "the i-th word I
+    wrote is the i-th word Whisper heard." That's false whenever Whisper's
+    own tokenization disagrees with a plain .split() of the input text (a
+    different word count from splitting differently around punctuation, a
+    merged/split token, etc.) even on a chunk that already passed the
+    overlap-ratio check - a real mid-sentence pause landed after "yourself"
+    instead of after "now," in "Make yourself comfortable now, wherever you
+    are," because everything after the first small drift was off by one.
+
+    Aligns by normalized WORD TEXT (difflib, stdlib, no new dependency) -
+    "equal" runs map straight across; "replace" runs (Whisper heard
+    something different, not just extra/missing) are paired up position-by-
+    position within the shorter side as a best effort. Returns one entry
+    per input word: the whisper_words index it corresponds to, or None if
+    no reasonable match exists there (a dropped/inserted word) - callers
+    must already treat None as "skip this one, don't guess."
+    """
+    norm_input = [_norm_word_for_alignment(w) for w in input_words]
+    norm_whisper = [_norm_word_for_alignment(w.word if hasattr(w, "word") else w[0]) for w in whisper_words]
+    matcher = difflib.SequenceMatcher(a=norm_input, b=norm_whisper, autojunk=False)
+    mapping: list[int | None] = [None] * len(input_words)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                mapping[i1 + k] = j1 + k
+        elif tag == "replace":
+            for k in range(min(i2 - i1, j2 - j1)):
+                mapping[i1 + k] = j1 + k
+    return mapping
+
+
 COMMA_PAUSE_SECONDS = 0.18  # a breath/beat, shorter than DEFAULT_PAUSE_SECONDS' between-sentence 0.22
 
 
@@ -1085,16 +1137,20 @@ def apply_comma_pauses(audio: np.ndarray, sr: int, chunk_text: str, whisper_word
     if not whisper_words:
         return audio
     words = chunk_text.split()
+    mapping = _align_words_to_whisper(words, whisper_words)
     insert_points = []
     for i, w in enumerate(words):
-        if i >= len(whisper_words):
-            break  # whisper's word count already drifted from the input's - stop rather than misalign further
-        if w.rstrip().endswith(","):
-            wt = whisper_words[i]
-            end_s = wt.end if hasattr(wt, "end") else wt[2]
-            end_idx = int(end_s * sr)
-            if 0 < end_idx <= len(audio):
-                insert_points.append(end_idx)
+        if not w.rstrip().endswith(","):
+            continue
+        j = mapping[i]
+        if j is None:
+            continue  # no confident match for this word - skip rather than guess
+        wt = whisper_words[j]
+        end_s = wt.end if hasattr(wt, "end") else wt[2]
+        end_idx = int(end_s * sr)
+        if 0 < end_idx <= len(audio):
+            insert_points.append(end_idx)
+    insert_points.sort()
     if not insert_points:
         return audio
 
@@ -1127,17 +1183,19 @@ def apply_interior_sentence_prosody(audio: np.ndarray, sr: int, chunk_text: str,
     is deliberately skipped here; the caller in synthesize() already shapes
     it correctly against the chunk's real end.
 
-    Sentence-to-word alignment is a plain word-count walk, not a real
-    forced-alignment - good enough because this only runs on a chunk that
-    already passed the overlap-ratio check (see generate_sentence_with_retry),
-    so Whisper's word count is already known to be close to the input's.
-    Any mismatch just means one interior boundary lands slightly off or gets
-    skipped - never a crash, and never worse than doing nothing (the
-    pre-existing behavior for every sentence but the last).
+    Sentence-to-word alignment uses _align_words_to_whisper (text-based,
+    not a plain word-count walk - see its docstring for the real
+    misalignment bug that approach had). Any word _align_words_to_whisper
+    can't confidently place just means that boundary is skipped - never a
+    crash, and never worse than doing nothing (the pre-existing behavior
+    for every sentence but the last).
     """
     sentences = split_sentences(chunk_text)
     if len(sentences) < 2 or not whisper_words:
         return audio  # nothing interior to shape, or no timing to place it with
+
+    all_words = chunk_text.split()
+    mapping = _align_words_to_whisper(all_words, whisper_words)
 
     result = audio
     word_idx = 0
@@ -1145,9 +1203,12 @@ def apply_interior_sentence_prosody(audio: np.ndarray, sr: int, chunk_text: str,
         n_words = len(sent.split())
         boundary_word_idx = word_idx + n_words - 1
         word_idx += n_words
-        if boundary_word_idx < 0 or boundary_word_idx >= len(whisper_words):
-            break  # whisper's word count already drifted from the input's - stop rather than guess at later boundaries too
-        w = whisper_words[boundary_word_idx]
+        if boundary_word_idx < 0 or boundary_word_idx >= len(mapping):
+            break
+        j = mapping[boundary_word_idx]
+        if j is None:
+            continue  # no confident match for this sentence's last word - skip rather than guess
+        w = whisper_words[j]
         end_s = w.end if hasattr(w, "end") else w[2]
         end_idx = int(end_s * sr)
         if end_idx <= 0 or end_idx > len(result):
