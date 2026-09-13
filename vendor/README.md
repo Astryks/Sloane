@@ -53,6 +53,52 @@ re-pull manually if a newer version is needed.
   against fal.ai's hosted endpoint (not this vendored code) the same day -
   see STATUS.md for the result. Kept `examples/` (real usage scripts) and
   the technical report PDF; nothing dropped.
+- **`moshi-upstream/`** — [kyutai-labs/moshi](https://github.com/kyutai-labs/moshi),
+  dual MIT/Apache-2.0 licensed. Real-time full-duplex speech-to-speech
+  foundation model (~200ms latency, raw audio in -> raw audio out, no
+  separate ASR/LLM/TTS stages) - vendored 2026-09-13 while researching
+  whether a real-time "video call with an AI" product is buildable. English-
+  only today; a real, exploratory candidate for the conversational "brain +
+  ears" half of that idea, not yet evaluated hands-on or integrated. Demo
+  audio samples (`data/`, ~1.8MB) dropped before committing.
+- **`musetalk-upstream/`** — [TMElyralab/MuseTalk](https://github.com/TMElyralab/MuseTalk),
+  MIT licensed (Tencent Music Entertainment). Real-time-capable open-source
+  lip-sync model (30fps+ on a single GPU) that edits the mouth region of an
+  existing photo/video to match new audio - the realistic open-source
+  candidate for the "face" half of a real-time avatar, since it's built for
+  live speed rather than the slower cinematic-diffusion talking-head models
+  already vendored above (Hallo2/Hallo3/EchoMimicV3). Not yet evaluated
+  hands-on or integrated. Demo assets (`assets/demo`, `assets/figs`,
+  `data/audio`, `data/video`) dropped before committing.
+- **`liveportrait-upstream/`** — [KwaiVGI/LivePortrait](https://github.com/KwaiVGI/LivePortrait),
+  MIT licensed (Kuaishou Visual Generation and Interaction Center). Fast
+  portrait animation/expression-retargeting model (~13ms/frame on an RTX
+  4090) - complementary to MuseTalk above (expression/pose control rather
+  than audio-driven lip-sync specifically). Vendored 2026-09-13 for the same
+  real-time-avatar research as Moshi/MuseTalk; not yet evaluated hands-on or
+  integrated. Demo assets (`assets/examples`, `assets/docs`) dropped before
+  committing; `pretrained_weights/` is an empty placeholder directory in the
+  upstream repo, kept as-is.
+
+## Real-time AI avatar research, 2026-09-13 - not yet built, revisit later
+
+While discussing whether a live, emotionally-responsive "video call with an
+AI" product is buildable, checked what's real vs. announced-but-inaccessible
+in the open-source space (same diligence as the Feature C search below).
+**EMO** ("Emote Portrait Alive", Alibaba's Institute for Intelligent
+Computing) was checked and found to be paper-only, same situation as
+OmniTalker: [HumanAIGC/EMO](https://github.com/HumanAIGC/EMO) is just a
+README with a citation and links to the paper/project page/a YouTube demo -
+no runnable code, no weights, nothing to vendor. Not cloned.
+The three real, vendorable candidates above (Moshi, MuseTalk, LivePortrait)
+map roughly onto the three real pieces a live avatar needs: a full-duplex
+conversational engine, and two options for the real-time face. A genuinely
+relevant existing discovery from a real, independent reference
+implementation ([PunithVT/ai-avatar-system](https://github.com/PunithVT/ai-avatar-system),
+not vendored here, just noted): it combines Whisper + Chatterbox + MuseTalk
+- the same TTS engine and ASR toolkit already used in this project's own
+production pipeline. This is flagged for a later session, not started -
+see STATUS.md.
 
 ## Feature C model selection: OmniTalker → Hallo3 → EchoMimicV3
 
