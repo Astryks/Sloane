@@ -1667,8 +1667,8 @@ export default function Home() {
 
         <VideoOptionCard
           icon="🧵"
-          title="Create my video"
-          description="Free. Combine your generated clips (from any section above, or your storyboard) into one video, in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
+          title="Free video editor"
+          description="Stitch different scenes together to create one video here for free. Combine your generated clips (from any section above, or your storyboard) in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
           href="/stitch"
           cta="Combine my videos"
         />
