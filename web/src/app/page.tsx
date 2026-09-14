@@ -892,10 +892,19 @@ const PRODUCT_AD_SCRIPT =
 // Transcribed scene-by-scene from her original document rather than
 // linking/embedding the raw .docx file itself, so it reads natively on
 // the page and works on mobile - real audio/video columns, not paraphrased.
-const JOJO_STORYBOARD: { audio: string; video: string }[] = [
+// Per-scene reference images (2026-09-15): the storyboard's real reference
+// images are almost all downloaded stock/editorial photography used as
+// internal mood-board references (one has a visible Getty Images
+// watermark, confirmed by looking at the actual embedded images before
+// adding anything) - not ours to republish. Only JoJo's own brand assets
+// (their logo, app-store badges, end card - no third-party photography in
+// any of them) are included here, on scenes 1/17/18. Every other scene
+// stays text-only rather than using a stock photo we don't have rights to.
+const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
   {
     audio: "Are you ready to take a ride on #PASABAYDELIVERY?\n\nWith Jojo, where I'm going I'll bring it there\nSa Jojo, sabay kita!",
     video: "Opening credit shows the two talents going across the screen with one pushing the other's chair, having fun. The #pasabaydelivery hashtag appears behind them as they leave the screen.\n\nLogo Jojo with blinking eye",
+    image: "/product-showcase/jojo/jojo-logo-sabaykita.png",
   },
   {
     audio: "Meet Bea.",
@@ -960,10 +969,12 @@ const JOJO_STORYBOARD: { audio: string; video: string }[] = [
   {
     audio: "Send through Jojo or be a Jojo.\n\nDownload the Jojo app at makisabay na!",
     video: "Show Jojo logo. Show Google Play Store and App Store logos.",
+    image: "/product-showcase/jojo/jojo-app-badges.png",
   },
   {
     audio: "If you want to know more about us, visit myJojo.com or follow us on social media at @Jojodelivers.",
     video: "MyJojo.com\n\nFB, TW, IG, YT\n@Jojodelivers",
+    image: "/product-showcase/jojo/jojo-endcard.png",
   },
 ];
 
@@ -1161,6 +1172,7 @@ function ProductAdSection() {
               <thead>
                 <tr className="text-left text-muted">
                   <th className="w-10 border-b border-border pb-1 pr-2 font-semibold">#</th>
+                  <th className="w-20 border-b border-border pb-1 pr-2 font-semibold">Image</th>
                   <th className="border-b border-border pb-1 pr-3 font-semibold">Audio</th>
                   <th className="border-b border-border pb-1 font-semibold">Video</th>
                 </tr>
@@ -1169,6 +1181,12 @@ function ProductAdSection() {
                 {JOJO_STORYBOARD.map((scene, i) => (
                   <tr key={i} className="align-top">
                     <td className="border-b border-border py-2 pr-2 text-muted">{i + 1}</td>
+                    <td className="border-b border-border py-2 pr-2">
+                      {scene.image && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={scene.image} alt={`Scene ${i + 1} brand asset`} className="h-14 w-14 rounded-lg border border-border object-contain bg-white" />
+                      )}
+                    </td>
                     <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-foreground">{scene.audio}</td>
                     <td className="whitespace-pre-line border-b border-border py-2 text-muted">{scene.video}</td>
                   </tr>
@@ -1178,6 +1196,9 @@ function ProductAdSection() {
           </div>
           <p className="mt-2 text-[11px] italic text-muted">
             Shared with us directly by the director - her real storyboard, transcribed here scene by scene.
+            Reference images are shown only where they&apos;re JoJo&apos;s own brand assets (logo, app badges, end
+            card) - the rest of her original scene references were licensed stock photography, so they&apos;re
+            described in words here instead of reproduced.
           </p>
         </details>
 
