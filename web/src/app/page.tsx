@@ -886,6 +886,87 @@ const PRODUCT_AD_SCRIPT =
   "“I'm on a yoga mat. Now I'm in a corner office, forty floors up. Anything is possible when your tumbler " +
   "works as hard as you do. Check out Lucy Labs.”";
 
+// The director's actual storyboard for the JoJo case study below, shared
+// with us directly for this purpose (2026-09-15, per direct request -
+// "embed the word doc too, that's the storyboard they need to see").
+// Transcribed scene-by-scene from her original document rather than
+// linking/embedding the raw .docx file itself, so it reads natively on
+// the page and works on mobile - real audio/video columns, not paraphrased.
+const JOJO_STORYBOARD: { audio: string; video: string }[] = [
+  {
+    audio: "Are you ready to take a ride on #PASABAYDELIVERY?\n\nWith Jojo, where I'm going I'll bring it there\nSa Jojo, sabay kita!",
+    video: "Opening credit shows the two talents going across the screen with one pushing the other's chair, having fun. The #pasabaydelivery hashtag appears behind them as they leave the screen.\n\nLogo Jojo with blinking eye",
+  },
+  {
+    audio: "Meet Bea.",
+    video: "Show an online seller surrounded by packages to be sent. Incidental props show her very millennial office space - plants, inspirational quotes.",
+  },
+  {
+    audio: "She is in Pasig and she needs to send a package to Makati.\n\nNasa Pasig siya at kailangan niyang magpadala ng package to Makati.",
+    video: "Image of a map or something similar, then there's an arrow going from point A to B",
+  },
+  {
+    audio: "Meet Mario.",
+    video: "Show Mario, smiling",
+  },
+  {
+    audio: "He is also from Pasig but he commutes to Makati every day.\n\nTaga-Pasig rin siya pero nagko-commute siya papuntang Makati every day.",
+    video: "Show Mario in a crowded MRT.\nClose up of hand hanging on a hand grip\nFull shot Mario sideways, getting through the train motion and handling the hand grip",
+  },
+  {
+    audio: "What if there's a way for them to help one another?",
+    video: "Split screen - show Bea looking right frame, Mario looking back at Bea.",
+  },
+  {
+    audio: "It's possible with #PASABAYDELIVERY or Crowdshipping",
+    video: "“#PasabayDelivery” term appears on screen and when it is mentioned, the characters can smile as if in agreement",
+  },
+  {
+    audio: "Through Jojo app,",
+    video: "Show the hand of Bea holding a phone",
+  },
+  {
+    audio: "pwedeng ipasabay ni Bea ang package niya kay Mario",
+    video: "Frontal shot of Bea holding the phone with Jojo app.\n\nWe show a graphic with 'We found a match'\nWe split the screen again with the mid shot of Mario, with his phone and smiling.",
+  },
+  {
+    audio: "at pwedeng kumita si Mario ng extra money on his way to Makati.",
+    video: "Show Mario getting the box from Bea and heading to Makati with it.\nClose up & mid shot of package delivery, full shot of Mario commuting with package",
+  },
+  {
+    audio: "The sender gets fast, secure and convenient shipping",
+    video: "Show a smiling Bea looking at her phone. Split screen with the app animation showing the confirmed booking",
+  },
+  {
+    audio: "while helping a fellow Filipino turn his commute into cash.",
+    video: "The receiver is typing on a computer, Mario enters the frame in a funny way and delivers the item.\nNext frame, a blue piggy bank and Mario inserting a bill inside.",
+  },
+  {
+    audio: "Ang mga Jojo transporters ay verified at rated by the community.\n\nPwede pang i-track ang delivery live via the app para siguradong in good hands ang package mo.",
+    video: "Jojo Transporter profile tagged as 4.9 stars rating plus the number of trips\n\nReal-time app tracking screenshot - show movement",
+  },
+  {
+    audio: "Hindi diyan nagtatapos ang pagtutulungan sa Jojo!",
+    video: "Show Bea and Mario talking with the package. The two are being replicated to represent other senders and transporters.",
+  },
+  {
+    audio: "Ang bawat #PasabayDelivery ay nakakatulong rin sa pagbawas ng traffic at polusyon sa Pilipinas.",
+    video: "We see Mario blowing a dark cloud out of the frame",
+  },
+  {
+    audio: "After all, no extra cars or trucks will be added on the road, wala rin extra wrapping bags ang kailangan kapag nagpasabay ka kay Jojo!",
+    video: "We see Bea, air in the wind, breathing clean air while the many moving vehicles are slowly reduced",
+  },
+  {
+    audio: "Send through Jojo or be a Jojo.\n\nDownload the Jojo app at makisabay na!",
+    video: "Show Jojo logo. Show Google Play Store and App Store logos.",
+  },
+  {
+    audio: "If you want to know more about us, visit myJojo.com or follow us on social media at @Jojodelivers.",
+    video: "MyJojo.com\n\nFB, TW, IG, YT\n@Jojodelivers",
+  },
+];
+
 type ProductAdModel = {
   id: string;
   name: string;
@@ -1073,6 +1154,33 @@ function ProductAdSection() {
           to download. Every scene has its own shot description and its own line of narration - a storyboard, not
           just a script.
         </p>
+        <details className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">View the full storyboard (her actual document, scene by scene)</summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[480px] border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="w-10 border-b border-border pb-1 pr-2 font-semibold">#</th>
+                  <th className="border-b border-border pb-1 pr-3 font-semibold">Audio</th>
+                  <th className="border-b border-border pb-1 font-semibold">Video</th>
+                </tr>
+              </thead>
+              <tbody>
+                {JOJO_STORYBOARD.map((scene, i) => (
+                  <tr key={i} className="align-top">
+                    <td className="border-b border-border py-2 pr-2 text-muted">{i + 1}</td>
+                    <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-foreground">{scene.audio}</td>
+                    <td className="whitespace-pre-line border-b border-border py-2 text-muted">{scene.video}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] italic text-muted">
+            Shared with us directly by the director - her real storyboard, transcribed here scene by scene.
+          </p>
+        </details>
+
         <div className="mx-auto mt-3 max-w-md overflow-hidden rounded-2xl border border-border">
           <iframe
             src="https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2Fjojo-pasabay-delivery%2F2521431254554554%2F&show_text=false&width=560&t=0"
