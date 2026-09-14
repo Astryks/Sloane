@@ -6,6 +6,31 @@ import { useState } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudio";
 
+// Small shared drag-and-drop wrapper (2026-09-14, per direct request -
+// "would be nice to... drag and drop images") - wraps any existing
+// click-to-upload label/input so dropping a file fires the same
+// onFile(file) callback as picking one, without duplicating each
+// dropzone's own styling.
+function useDropzone(onFile: (file: File) => void) {
+  const [dragOver, setDragOver] = useState(false);
+  return {
+    dragOver,
+    handlers: {
+      onDragOver: (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(true);
+      },
+      onDragLeave: () => setDragOver(false),
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) onFile(file);
+      },
+    },
+  };
+}
+
 type Slot = {
   id: string;
   order_index: number;
@@ -76,6 +101,7 @@ function ReferenceLibrary({
   const [refineVariants, setRefineVariants] = useState<string[]>([]);
   const [refineBusy, setRefineBusy] = useState(false);
   const [refineError, setRefineError] = useState("");
+  const uploadDropzone = useDropzone((file) => uploadImage(file));
 
   function startRefine(id: string) {
     setRefiningId(id);
@@ -316,8 +342,13 @@ function ReferenceLibrary({
             onChange={(e) => setName(e.target.value)}
           />
 
-          <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border p-3 text-center text-xs">
-            Upload a photo
+          <label
+            {...uploadDropzone.handlers}
+            className={`block cursor-pointer rounded-xl border-2 border-dashed p-3 text-center text-xs transition ${
+              uploadDropzone.dragOver ? "border-purple bg-purple-wash" : "border-border"
+            }`}
+          >
+            Upload a photo, or drag one here
             <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
           </label>
 
@@ -393,6 +424,7 @@ function SlotCard({
   const [selectedRefs, setSelectedRefs] = useState<string[]>(slot.reference_ids ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const uploadDropzone = useDropzone((file) => uploadImage(file));
 
   function toggleRef(id: string) {
     setSelectedRefs((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
@@ -464,14 +496,21 @@ function SlotCard({
     <div className="flex flex-col gap-2 rounded-2xl border border-border bg-white p-3">
       {!slot.image_url ? (
         <div className="space-y-2">
-          <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border p-3 text-center text-xs">
-            Upload an image
+          <label
+            {...uploadDropzone.handlers}
+            className={`block cursor-pointer rounded-xl border-2 border-dashed p-3 text-center text-xs transition ${
+              uploadDropzone.dragOver ? "border-purple bg-purple-wash" : "border-border"
+            }`}
+          >
+            Upload an image, or drag one here
             <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
           </label>
 
           {references.length > 0 && (
             <div className="space-y-1 rounded-xl border border-border p-2">
-              <p className="text-[10px] font-semibold text-muted">Use from Cast & Locations (optional):</p>
+              <p className="text-[10px] font-semibold text-muted">
+                Use from Cast & Locations{selectedRefs.length > 0 ? " (carried over from your last scene, so mood and lighting match - deselect any you don't want)" : " (optional)"}:
+              </p>
               <div className="flex flex-wrap gap-1">
                 {references.map((ref) => (
                   <button
@@ -584,7 +623,15 @@ export default function AdsGridPage() {
     if (!projectId) return;
     try {
       const data = await postJson("/api/grid-storyboard/slot/add", { projectId });
-      setSlots((prev) => [...prev, data.slot]);
+      // Carry the previous scene's references forward as this new scene's
+      // starting selection (2026-09-14, per direct request - scenes
+      // "have to match up," not "feel like random scenes... stitched
+      // together"). Reusing the same character/location/vibe reference by
+      // default is what keeps mood and lighting consistent scene to scene;
+      // still just a default, not locked - the user can deselect any of
+      // them on this new scene's card.
+      const carriedRefs = slots.length > 0 ? slots[slots.length - 1].reference_ids : [];
+      setSlots((prev) => [...prev, { ...data.slot, reference_ids: carriedRefs }]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add a scene");
     }
@@ -601,25 +648,74 @@ export default function AdsGridPage() {
         {showExample && (
           <div className="rounded-2xl border border-border bg-white/70 p-5 text-sm">
             <div className="mb-2 flex items-center justify-between">
-              <p className="font-bold">How this works</p>
+              <p className="font-bold">How this works: one grid becomes one ad</p>
               <button onClick={() => setShowExample(false)} className="text-xs text-muted underline">
                 Hide
               </button>
             </div>
+
+            <div className="mb-4 overflow-x-auto">
+              <div className="flex min-w-max items-center gap-2 py-1">
+                <div className="w-28 shrink-0 rounded-xl border border-border bg-white p-2 text-center text-[10px] text-muted">
+                  <p className="text-xl">👤🏞️</p>
+                  Cast &amp; Locations
+                </div>
+                <span className="text-muted">→</span>
+                <div className="w-28 shrink-0 rounded-xl border border-border bg-white p-2 text-center text-[10px] text-muted">
+                  <p className="text-xl">🖼️</p>
+                  Scene 1: image
+                </div>
+                <span className="text-muted">→</span>
+                <div className="w-28 shrink-0 rounded-xl border border-purple/40 bg-purple-wash p-2 text-center text-[10px] text-muted">
+                  <p className="text-xl">🎬</p>
+                  Scene 1: animated
+                </div>
+                <span className="text-muted">→</span>
+                <div className="w-28 shrink-0 rounded-xl border border-border bg-white p-2 text-center text-[10px] text-muted">
+                  <p className="text-xl">🖼️</p>
+                  Scene 2: image
+                </div>
+                <span className="text-muted">→</span>
+                <div className="w-28 shrink-0 rounded-xl border border-purple/40 bg-purple-wash p-2 text-center text-[10px] text-muted">
+                  <p className="text-xl">🎬</p>
+                  Scene 2: animated
+                </div>
+                <span className="text-muted">→</span>
+                <div className="w-28 shrink-0 rounded-xl border border-dashed border-border p-2 text-center text-[10px] text-muted">
+                  <p className="text-xl">➕</p>
+                  Repeat as needed
+                </div>
+                <span className="text-muted">→</span>
+                <div className="w-28 shrink-0 rounded-xl border border-mint bg-mint/10 p-2 text-center text-[10px] text-muted">
+                  <p className="text-xl">🧵</p>
+                  Create full ad
+                </div>
+              </div>
+            </div>
+
             <ol className="list-decimal space-y-1.5 pl-5 text-muted">
               <li>
-                <strong>Cast & Locations first.</strong> Nail down each character, location, and product once - design them with any AI chat you like, upload a real photo, or generate
-                and pick from a few options here.
+                <strong>Cast & Locations first.</strong> Nail down each character, location, and product once - design them with any AI chat you like and upload the result, or generate
+                one right here with GPT Image or Nano Banana Pro (included, no extra charge - only turning a scene into video costs a credit).
               </li>
               <li>
-                <strong>Add a scene</strong> and bring in the references it needs - the same face/place/product stays consistent because we reuse the exact same image, not a fresh
-                description each time.
+                <strong>Add a scene</strong> and bring in the references it needs - drag an image in, upload one, or generate one. A new scene starts with the same references as your
+                last one, so mood and lighting carry through by default - this is what keeps it feeling like one ad, not random clips stitched together. Deselect any you don&apos;t
+                want for that scene.
               </li>
               <li>
                 <strong>Describe the shot simply:</strong> shot type, camera move, and the action - that&apos;s usually enough. A few keywords work as well as a long paragraph.
               </li>
-              <li>Pick a video model and generate - each generation is 1 credit, so you only ever pay for scenes you actually want. Iterate with any model - Veo, Kling, Seedance, MiniMax, or Grok.</li>
-              <li>Repeat for as many scenes as your story needs, then head to the combine tool below to stitch them into one video, in order.</li>
+              <li>
+                <strong>Pick a video model from the dropdown and generate</strong> - each generation is 1 credit, so you only ever pay for scenes you actually want. The animated
+                result appears right in that scene&apos;s square. Iterate with any model - Veo, Kling, Seedance, MiniMax, or Grok.
+              </li>
+              <li>
+                Click <strong>+ Add scene</strong> and repeat for as many scenes as your story needs - each one becomes its own square in the grid.
+              </li>
+              <li>
+                When you&apos;re done, click <strong>Create full ad</strong> below - it hands your finished scenes straight to the combine tool, already loaded in order.
+              </li>
             </ol>
           </div>
         )}
@@ -648,9 +744,30 @@ export default function AdsGridPage() {
                 + Add scene
               </button>
             </div>
-            <a href="/stitch" className="inline-block rounded-full bg-mint px-6 py-3 text-sm font-bold text-white">
-              Create my video - combine scenes below
-            </a>
+
+            {(() => {
+              const readyVideoUrls = slots.filter((s) => s.video_url).map((s) => s.video_url as string);
+              const canCombine = readyVideoUrls.length >= 2;
+              const href = readyVideoUrls.length > 0 ? `/stitch?videos=${readyVideoUrls.map(encodeURIComponent).join(",")}` : "/stitch";
+              return (
+                <div>
+                  <a
+                    href={href}
+                    aria-disabled={!canCombine}
+                    className={`inline-block rounded-full px-6 py-3 text-sm font-bold text-white ${
+                      canCombine ? "bg-mint" : "pointer-events-none bg-mint/40"
+                    }`}
+                  >
+                    {canCombine ? `Create full ad - combine ${readyVideoUrls.length} scenes` : "Create full ad - generate at least 2 scenes first"}
+                  </a>
+                  {canCombine && (
+                    <p className="mt-1 text-xs text-muted">
+                      Your {readyVideoUrls.length} finished scenes load into the combine tool automatically, already in order.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </>
         )}
       </main>

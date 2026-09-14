@@ -20,7 +20,8 @@
 // avoid the real failure mode of some clips having an audio stream and
 // others not.
 
-import { useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { FFmpeg } from "@ffmpeg/ffmpeg";
 import { SiteHeader } from "@/components/SiteHeader";
 
@@ -29,14 +30,54 @@ type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
 
-export default function StitchPage() {
+function StitchPageInner() {
+  const searchParams = useSearchParams();
   const [items, setItems] = useState<VideoItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
+  const preloadedRef = useRef(false);
+
+  // Picks up scenes handed off from /ads (2026-09-14, per direct request -
+  // "at the end they have an option to click create full ad where we
+  // stitch it together") - a comma-separated list of already-generated
+  // scene video URLs in `?videos=`, fetched and preloaded as real files so
+  // there's no manual download-then-reupload round trip between the two
+  // pages. Purely additive: this page still works exactly the same way
+  // for anyone who lands here directly and uploads their own files.
+  // preloadedRef guards against React Strict Mode's dev-only double-invoke
+  // of effects, which would otherwise fetch and add every scene twice.
+  useEffect(() => {
+    const videos = searchParams.get("videos");
+    if (!videos || preloadedRef.current) return;
+    const urls = videos.split(",").map((u) => decodeURIComponent(u)).filter(Boolean).slice(0, MAX_FILES);
+    if (urls.length === 0) return;
+    preloadedRef.current = true;
+    setPreloading(true);
+    setError("");
+    (async () => {
+      const loaded: VideoItem[] = [];
+      for (let i = 0; i < urls.length; i++) {
+        try {
+          const res = await fetch(urls[i]);
+          if (!res.ok) throw new Error(`status ${res.status}`);
+          const blob = await res.blob();
+          const file = new File([blob], `scene-${i + 1}.mp4`, { type: blob.type || "video/mp4" });
+          loaded.push({ file, id: `seed-${i}-${Math.random().toString(36).slice(2)}`, previewUrl: URL.createObjectURL(file) });
+        } catch {
+          // One scene failing to load shouldn't block the rest - just skip it.
+        }
+      }
+      if (loaded.length > 0) setItems((prev) => [...prev, ...loaded]);
+      if (loaded.length < urls.length) setError(`Loaded ${loaded.length} of ${urls.length} scenes - one or more couldn't be fetched.`);
+      setPreloading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -147,6 +188,10 @@ export default function StitchPage() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
+        {preloading && (
+          <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">Loading your scenes from Ads…</p>
+        )}
+
         <label className="block cursor-pointer rounded-2xl border-2 border-dashed border-border bg-white p-6 text-center">
           <span className="text-sm font-semibold">Choose video files to combine (up to {MAX_FILES})</span>
           <input className="sr-only" type="file" accept="video/*" multiple onChange={(e) => handleFiles(e.target.files)} />
@@ -221,5 +266,13 @@ export default function StitchPage() {
         </p>
       </main>
     </div>
+  );
+}
+
+export default function StitchPage() {
+  return (
+    <Suspense fallback={null}>
+      <StitchPageInner />
+    </Suspense>
   );
 }
