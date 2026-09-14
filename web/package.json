@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^2.8.0",
     "music-metadata": "^11.15.0",
