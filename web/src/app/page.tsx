@@ -13,7 +13,6 @@ import { useFreeTierId } from "@/lib/useFreeTierId";
 import { VIDEO_PAYGO_ENGINES, VIDEO_CREDIT_PACKS, type VideoEngine } from "@/lib/videoPaygo";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
-import { ProductAdFlow } from "@/components/ProductAdFlow";
 
 // Backend mode is switchable at runtime from /admin (see
 // @/lib/inferenceBackend) - fetched here rather than read from a build-time
@@ -634,6 +633,16 @@ function useReferenceMedia() {
   // specific URL(s) being dropped, and an unmount effect below revokes
   // whatever's still left if the user navigates away with items still in
   // the list.
+  // Used to seed a photo picked somewhere else on the page (see
+  // TryYourOwnPromptCTA below) directly into this hook's item list,
+  // without needing a real FileList the way handleFiles does.
+  function addItem(blob: Blob) {
+    setItems((prev) => {
+      setSelectedIndex(prev.length);
+      return [...prev, { blob, sourceFile: null, previewUrl: URL.createObjectURL(blob), isVideo: false }];
+    });
+  }
+
   function removeAt(i: number) {
     setItems((prev) => {
       URL.revokeObjectURL(prev[i]?.previewUrl);
@@ -671,6 +680,7 @@ function useReferenceMedia() {
     extracting,
     error,
     handleFiles,
+    addItem,
     removeAt,
     reset,
   };
@@ -824,16 +834,30 @@ function MultiAudioField({ audio }: { audio: ReturnType<typeof useMultiAudio> })
   );
 }
 
-// Shared "try it yourself" block for showcase/comparison sections (2026-09-13)
-// - these sections show FIXED, already-rendered demo videos, not a live
-// generator, so clicking "Generate my video" here can't actually submit a
-// real job the way pay-as-you-go's button does. Instead it points people
-// at the two real ways to actually generate: sign up for a plan, or use
-// pay-as-you-go right now with no subscription at all - that explanation
-// only ever shows up after the click, never in the button label itself.
-function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
+// Shared "try it yourself" block for showcase/comparison sections
+// (2026-09-13, upload added 2026-09-14 per direct feedback - "users need
+// an option to upload their own image" - a text-only box implied you
+// couldn't bring a photo into this, when pay-as-you-go genuinely takes
+// one). These sections show FIXED, already-rendered demo videos, not a
+// live generator, so clicking "Generate my video" here can't submit a
+// real job on its own - instead it hands the prompt AND photo down to the
+// real pay-as-you-go generator below (via onTryItYourself, seeding that
+// section's own state) and scrolls to it, rather than losing what was
+// just typed/uploaded.
+function TryYourOwnPromptCTA({
+  defaultPrompt,
+  onTryItYourself,
+}: {
+  defaultPrompt: string;
+  onTryItYourself: (prompt: string, imageBlob: Blob | null) => void;
+}) {
   const [prompt, setPrompt] = useState(defaultPrompt);
-  const [showCta, setShowCta] = useState(false);
+  const media = useReferenceMedia();
+
+  function handleClick() {
+    onTryItYourself(prompt, media.imageBlob);
+    document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -843,25 +867,10 @@ function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
       />
-      <button
-        onClick={() => setShowCta(true)}
-        className="w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft"
-      >
-        Generate my video
+      <ReferenceMediaField media={media} label="Upload your own photo (optional)" />
+      <button onClick={handleClick} className="w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft">
+        Use this below with pay as you go
       </button>
-      {showCta && (
-        <p className="rounded-2xl bg-white/70 p-3 text-xs text-foreground">
-          Ready to make this real?{" "}
-          <a href="/billing" className="font-semibold text-coral-dark underline">
-            Sign up for a plan
-          </a>{" "}
-          or try it right now with{" "}
-          <a href="#pay-as-you-go" className="font-semibold text-coral-dark underline">
-            pay as you go
-          </a>{" "}
-          - no subscription needed.
-        </p>
-      )}
     </div>
   );
 }
@@ -928,7 +937,7 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
   },
 ];
 
-function ReviewsSection() {
+function ReviewsSection({ onTryItYourself }: { onTryItYourself: (prompt: string, imageBlob: Blob | null) => void }) {
   const [modelId, setModelId] = useState(PRODUCT_AD_MODELS[0].id);
   const model = PRODUCT_AD_MODELS.find((m) => m.id === modelId)!;
   const [yogaPrompt, setYogaPrompt] = useState(PRODUCT_AD_YOGA_PROMPT);
@@ -947,8 +956,14 @@ function ReviewsSection() {
         <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
           <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/kirsty-kling-dub.mp4" controls loop muted playsInline />
           <p className="mt-1.5 text-xs text-muted">
-            A real photo, dubbed with a Lucy voice via Kling. Our pick for this: Kling is the only engine here that
-            reliably keeps your exact face, not a lookalike.
+            A real photo, dubbed with a Lucy voice via Kling - our pick for keeping your exact face, not a
+            lookalike. Honest caveat: even Kling&apos;s lip-sync isn&apos;t perfect every time, which is why we
+            also let you skip lip-sync entirely and just play your audio as a plain voiceover instead.
+          </p>
+          <p className="mt-1.5 text-xs text-muted">
+            For dialogue, you pick a Lucy voice or upload your own audio for Kling to sync to - Veo is the only
+            engine here that can generate its own native voice with no audio input at all. Kling, Grok, MiniMax,
+            and Seedance all need a Lucy voice or your own audio to say anything.
           </p>
         </div>
         <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
@@ -957,47 +972,38 @@ function ReviewsSection() {
             A photo dropped into a fully new scene, generated by Veo from a detailed text prompt - strong,
             reliable cinematic quality when you don&apos;t need to keep your exact background.
           </p>
+          <div className="mt-1.5 rounded-xl bg-cream p-2">
+            <p className="text-[11px] font-semibold text-muted">We uploaded a photo and used this prompt:</p>
+            <p className="mt-0.5 text-[11px] italic text-muted">{MODEL_SHOWCASE_PROMPT}</p>
+          </div>
         </div>
       </div>
 
       <div className="rounded-2xl bg-white/70 p-3">
-        <p className="mb-2 text-xs font-semibold text-muted">That&apos;s the exact prompt behind the moon clip above - want to try your own version?</p>
-        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} />
+        <p className="mb-2 text-xs font-semibold text-muted">Want to try your own version of that moon shot?</p>
+        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} onTryItYourself={onTryItYourself} />
       </div>
 
-      <p className="text-sm leading-relaxed text-muted">
-        Below is a tougher test: the same product, the same script, the same AI character (Harper), run through
-        five engines - a two-scene ad, yoga mat to corner office, with real spoken dialogue and a real product
-        logo to keep intact.
-      </p>
+      <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-purple">0. Can AI make an ad for you?</p>
+        <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex shrink-0 items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/product-showcase/harper_reference.jpg" alt="Harper, our AI character" className="h-20 w-20 rounded-xl object-cover" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/product-showcase/lucylabs_cup_v2.png" alt="The tumbler Harper is trying to sell" className="h-20 w-20 rounded-xl object-contain" />
+          </div>
+          <p className="text-sm leading-relaxed text-muted">
+            We built an AI character we call Harper. We wanted to see if she could actually sell something - so we
+            handed her a real script and this tumbler, and ran the same two-scene ad (yoga mat to corner office)
+            through five different video engines to see which one could pull it off.
+          </p>
+        </div>
+      </div>
       <p className="text-xs italic text-muted">
         To be clear: this tumbler isn&apos;t a real Lucy Labs product - it&apos;s a relabeled stock photo, purely
         for testing how well each engine keeps a product&apos;s logo intact.
       </p>
-
-      <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-          <div className="flex shrink-0 items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/product-showcase/harper_reference.jpg" alt="Harper face reference" className="h-20 w-20 rounded-xl object-cover" />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/product-showcase/lucylabs_cup_v2.png" alt="Lucy Labs cup reference" className="h-20 w-20 rounded-xl object-contain" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-foreground">Try this with Harper + your cup</p>
-            <p className="mt-1 text-xs leading-relaxed text-muted">Use the real Harper face and Lucy Labs cup references above for a quick original product ad experiment.</p>
-            <ol className="mt-3 space-y-1 text-xs leading-relaxed text-muted">
-              <li><strong>1.</strong> Upload Harper face</li>
-              <li><strong>2.</strong> Upload the cup</li>
-              <li><strong>3.</strong> Paste the Old Spice style reference: <a href="https://www.youtube.com/watch?v=uLTIowBF0kE" target="_blank" rel="noreferrer" className="font-semibold text-purple underline">youtube.com/watch?v=uLTIowBF0kE</a></li>
-              <li><strong>4.</strong> Choose a model</li>
-              <li><strong>5.</strong> Click <strong>Generate my video</strong></li>
-            </ol>
-            <p className="mt-3 text-xs leading-relaxed text-muted">That YouTube link is only a style reference. Lucy Labs creates an original ad from your brief and references, not a copy of the Old Spice commercial. When it finishes, download both the silent MP4 and the Kling-dubbed, lip-synced MP4.</p>
-            <a href="#product-ad-flow" className="mt-3 inline-block rounded-full bg-purple px-4 py-2 text-xs font-bold text-white shadow-soft">Open the product ad builder</a>
-          </div>
-        </div>
-      </div>
 
       <div className="flex items-center justify-center gap-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1123,7 +1129,15 @@ const PAYGO_PROMPT_PLACEHOLDER =
   'talks to the camera, camera slowly pans across a bright modern sunlit room, energetic, playful, confident, ' +
   'cinematic commercial ad, photorealistic, 4k"';
 
-function PayAsYouGoVideoSection() {
+function PayAsYouGoVideoSection({
+  seedPrompt,
+  seedImageBlob,
+  seedVersion,
+}: {
+  seedPrompt: string | null;
+  seedImageBlob: Blob | null;
+  seedVersion: number;
+}) {
   const [signedIn, setSignedIn] = useState(false);
   const [balance, setBalance] = useState(0);
   const [engine, setEngine] = useState<VideoEngine>("veo");
@@ -1139,6 +1153,16 @@ function PayAsYouGoVideoSection() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ videoUrl: string; jobId: string; silentVideoUrl: string | null } | null>(null);
   const [buyingPack, setBuyingPack] = useState<string | null>(null);
+
+  // Picks up a prompt/photo handed down from one of ReviewsSection's "try
+  // it yourself" boxes (see TryYourOwnPromptCTA) - keyed on seedVersion so
+  // it only fires on an actual new handoff, not every render.
+  useEffect(() => {
+    if (seedVersion === 0) return;
+    if (seedPrompt) setPrompt(seedPrompt);
+    if (seedImageBlob) media.addItem(seedImageBlob);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedVersion]);
 
   // Same shared-<audio>-element click-to-preview pattern as VoicePicker.tsx
   // and the character/model-showcase pickers above - click a voice to hear
@@ -1446,6 +1470,20 @@ export default function Home() {
     fetch("/api/warm-inference", { method: "POST" }).catch(() => {});
   }, []);
 
+  // Lets ReviewsSection's "try it yourself" boxes hand their prompt/photo
+  // down into the real generator below instead of losing them - seedVersion
+  // increments on every handoff so PayAsYouGoVideoSection's effect can tell
+  // a brand-new handoff apart from the same prompt/blob being passed again.
+  const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
+  const [seedImageBlob, setSeedImageBlob] = useState<Blob | null>(null);
+  const [seedVersion, setSeedVersion] = useState(0);
+
+  function handleTryItYourself(prompt: string, imageBlob: Blob | null) {
+    setSeedPrompt(prompt);
+    setSeedImageBlob(imageBlob);
+    setSeedVersion((v) => v + 1);
+  }
+
   return (
     <div className="min-h-screen px-6 py-20">
       <main className="mx-auto flex max-w-2xl flex-col gap-10">
@@ -1458,9 +1496,8 @@ export default function Home() {
         <PresetVoiceSection />
         <CloneVoiceSection />
 
-        <PayAsYouGoVideoSection />
-        <ReviewsSection />
-        <ProductAdFlow />
+        <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedVersion={seedVersion} />
+        <ReviewsSection onTryItYourself={handleTryItYourself} />
 
         <VideoOptionCard
           number={2}
