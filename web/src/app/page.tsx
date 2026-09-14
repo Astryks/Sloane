@@ -1140,6 +1140,7 @@ function PayAsYouGoVideoSection({
 }) {
   const [signedIn, setSignedIn] = useState(false);
   const [balance, setBalance] = useState(0);
+  const [authChecked, setAuthChecked] = useState(false);
   const [engine, setEngine] = useState<VideoEngine>("veo");
   const media = useReferenceMedia();
   const audio = useMultiAudio();
@@ -1190,10 +1191,23 @@ function PayAsYouGoVideoSection({
   const promptSkippable = engine === "kling" && audioMode === "own" && !!audio.selectedBlob;
 
   async function refreshBalance() {
-    const res = await fetch("/api/video-paygo/balance");
-    const data = await res.json();
-    setSignedIn(data.signedIn);
-    setBalance(data.balance);
+    try {
+      const res = await fetch("/api/video-paygo/balance");
+      const data = await res.json();
+      setSignedIn(data.signedIn);
+      setBalance(data.balance);
+    } finally {
+      // Real bug fixed here (2026-09-15, per direct report - "this section
+      // doesn't always load on time"): `signedIn` defaulted to false, so a
+      // genuinely signed-in visitor briefly saw "Sign in to buy video
+      // credits" - the wrong message, not just a loading flicker - until
+      // this fetch resolved, then the real engine picker/credit balance
+      // popped in late. authChecked gates on knowing the REAL status
+      // first, showing a neutral loading state instead of guessing signed-
+      // out, so nothing misleading ever flashes on screen while a cold
+      // serverless function or DB connection is still warming up.
+      setAuthChecked(true);
+    }
   }
 
   useEffect(() => {
@@ -1252,7 +1266,12 @@ function PayAsYouGoVideoSection({
       title="Option 1: Create any video"
       subtitle="Any prompt, plus an optional photo/video and audio - pick your engine, no subscription, pay per video."
     >
-      {!signedIn ? (
+      {!authChecked ? (
+        <div className="space-y-2" aria-busy="true">
+          <div className="h-4 w-40 animate-pulse rounded-full bg-white/70" />
+          <div className="h-24 animate-pulse rounded-2xl bg-white/70" />
+        </div>
+      ) : !signedIn ? (
         <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">
           <a href="/account" className="font-semibold text-purple underline">
             Sign in
