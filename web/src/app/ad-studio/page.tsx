@@ -13,9 +13,12 @@ type Scene = {
   action: string;
   dialogue: string | null;
   image_url: string | null;
+  image_edit_count: number;
   video_url: string | null;
   status: string;
 };
+
+const MAX_SCENE_IMAGE_EDITS = 3;
 
 type Stage = "brief" | "storyboard" | "scenes" | "final";
 
@@ -104,7 +107,7 @@ export default function AdStudioPage() {
     setError("");
     try {
       const data = await postJson("/api/ad-studio/scene/edit-image", { sceneId: activeScene.id, editText });
-      updateScene(activeScene.id, { image_url: data.imageUrl });
+      updateScene(activeScene.id, { image_url: data.imageUrl, image_edit_count: activeScene.image_edit_count + 1 });
       setEditText("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not edit the scene image");
@@ -272,17 +275,21 @@ export default function AdStudioPage() {
               {activeScene.image_url && !activeScene.video_url && (
                 <div className="mt-4 space-y-3">
                   <img src={activeScene.image_url} alt={`Scene ${activeIndex + 1}`} className="w-full rounded-2xl border border-border" />
-                  <div className="flex flex-wrap gap-2">
-                    <input
-                      className="flex-1 rounded-full border border-border px-4 py-2 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-                      placeholder="Type what to change about this image…"
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                    />
-                    <button onClick={handleEditImage} disabled={busy || !editText.trim()} className="rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">
-                      Update image
-                    </button>
-                  </div>
+                  {activeScene.image_edit_count < MAX_SCENE_IMAGE_EDITS ? (
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        className="flex-1 rounded-full border border-border px-4 py-2 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+                        placeholder="Type what to change about this image…"
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                      />
+                      <button onClick={handleEditImage} disabled={busy || !editText.trim()} className="rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">
+                        Update image ({MAX_SCENE_IMAGE_EDITS - activeScene.image_edit_count} left)
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted">You&apos;ve used all {MAX_SCENE_IMAGE_EDITS} edits for this scene - approve it as-is to continue.</p>
+                  )}
                   <button onClick={handleGenerateVideo} disabled={busy} className="rounded-full bg-purple px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">
                     {busy ? "Generating video…" : "Approve image & generate video"}
                   </button>

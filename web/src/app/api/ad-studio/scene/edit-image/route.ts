@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, setAdStudioSceneImage } from "@/lib/db";
+import { getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, MAX_SCENE_IMAGE_EDITS, recordAdStudioSceneEdit } from "@/lib/db";
 import { editImageWithPrompt } from "@/lib/fal";
 
 const MAX_EDIT_LENGTH = 400;
@@ -29,9 +29,21 @@ export async function POST(req: NextRequest) {
     const scene = await getAdStudioScene(sceneId);
     if (!scene) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
     if (!scene.image_url) return NextResponse.json({ error: "Generate the scene's image before editing it" }, { status: 400 });
+    // Checked before spending anything on the (paid) edit call below, not
+    // after - no reason to pay fal for an edit we're about to reject.
+    if (scene.image_edit_count >= MAX_SCENE_IMAGE_EDITS) {
+      return NextResponse.json({ error: `This scene has already used its ${MAX_SCENE_IMAGE_EDITS} free edits - approve it as-is or start a new project.` }, { status: 400 });
+    }
 
     const imageUrl = await editImageWithPrompt(scene.image_url, editText);
-    await setAdStudioSceneImage(sceneId, imageUrl);
+    const recorded = await recordAdStudioSceneEdit(sceneId, imageUrl);
+    if (!recorded) {
+      // Lost a race against another edit request for the same scene - the
+      // edit itself already succeeded and cost real money, so still return
+      // the new image rather than discard it, just without crediting past
+      // the cap.
+      return NextResponse.json({ imageUrl, warning: "Edit limit reached" });
+    }
     return NextResponse.json({ imageUrl });
   } catch (err) {
     console.error("ad-studio scene image edit failed", err);

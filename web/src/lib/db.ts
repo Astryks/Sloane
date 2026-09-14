@@ -234,6 +234,7 @@ export async function initSchema() {
       action TEXT NOT NULL,
       dialogue TEXT,
       image_prompt TEXT NOT NULL,
+      image_edit_count INT NOT NULL DEFAULT 0,
       image_url TEXT,
       image_fal_request_id TEXT,
       video_url TEXT,
@@ -1085,6 +1086,7 @@ export type AdStudioScene = {
   action: string;
   dialogue: string | null;
   image_prompt: string;
+  image_edit_count: number;
   image_url: string | null;
   image_fal_request_id: string | null;
   video_url: string | null;
@@ -1182,6 +1184,28 @@ export async function setAdStudioSceneImageRequestId(sceneId: string, requestId:
 
 export async function setAdStudioSceneImage(sceneId: string, imageUrl: string) {
   await sql`UPDATE ad_studio_scenes SET image_url = ${imageUrl}, status = 'image_ready' WHERE id = ${sceneId}`;
+}
+
+// Real cost-exposure fix (2026-09-14): a flat-priced project had no cap on
+// how many times a user could edit one scene's image before approving it -
+// each edit is a real, billed fal.ai call, so unlimited free edits meant
+// unbounded cost on a fixed-price product. 3 mirrors the same "reasonable
+// free iteration, not unlimited" ceiling used elsewhere in this app.
+export const MAX_SCENE_IMAGE_EDITS = 3;
+
+// Atomic increment-and-check, same pattern as reserveCharacterUsage above -
+// a naive "read count, check < 3, then update" has the same race-condition
+// risk (two overlapping edit requests both reading count=2, both passing,
+// landing at count=4) that pattern was written to close elsewhere in this
+// file. Returns false without writing anything if the cap's already hit.
+export async function recordAdStudioSceneEdit(sceneId: string, imageUrl: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE ad_studio_scenes
+    SET image_url = ${imageUrl}, image_edit_count = image_edit_count + 1
+    WHERE id = ${sceneId} AND image_edit_count < ${MAX_SCENE_IMAGE_EDITS}
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function setAdStudioSceneVideoRequestId(sceneId: string, requestId: string) {
