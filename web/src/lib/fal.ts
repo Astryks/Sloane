@@ -314,16 +314,23 @@ export async function uploadBufferToFal(data: Buffer, contentType: string, fileN
   return file_url as string;
 }
 
-// Ad Studio's scene reference images (2026-09-14). Two separate real
-// endpoints, confirmed via fal's public OpenAPI before writing this (not
-// guessed): flux-pro/v1.1-ultra takes only `prompt` (image_url is optional,
-// for style guidance) - the pure text-to-image generator, used for a
-// scene's FIRST image. flux-pro/kontext requires BOTH `prompt` and
-// `image_url` - single-image editing, used every time a user types what
-// to change about an already-generated scene image rather than
-// re-describing it from scratch.
-export const TEXT_TO_IMAGE_ENDPOINT = "fal-ai/flux-pro/v1.1-ultra";
-export const IMAGE_EDIT_ENDPOINT = "fal-ai/flux-pro/kontext";
+// Ad Studio's scene reference images (2026-09-14, switched from Flux to
+// Google's Nano Banana Pro / Gemini 3 Pro Image the same day after a real
+// side-by-side comparison on an identical prompt): Nano Banana Pro
+// rendered actual legible product text/branding on the first try (a real,
+// coherent label), where Flux's output didn't show a clear, single,
+// labeled product at all - directly relevant since product legibility is
+// the whole point of Ad Studio's product mode. Both endpoints confirmed
+// via fal's public OpenAPI before writing this: gemini-3-pro-image-preview
+// takes just `prompt` (text-to-image, up to 4 images/call) - used for a
+// scene's first image. gemini-3-pro-image-preview/edit requires `prompt`
+// + `image_urls` (an ARRAY, not a single image_url like Flux's kontext -
+// it natively takes multiple reference images) - used every time a user
+// types what to change about an already-generated scene image. Real cost:
+// $0.15/image vs. Flux's $0.06/$0.04 - a genuine increase, but negligible
+// next to a scene's $1.20-1.94 video generation cost.
+export const TEXT_TO_IMAGE_ENDPOINT = "fal-ai/gemini-3-pro-image-preview";
+export const IMAGE_EDIT_ENDPOINT = "fal-ai/gemini-3-pro-image-preview/edit";
 
 async function pollForImageUrl(endpoint: string, requestId: string, timeoutMs: number, label: string): Promise<string> {
   const start = Date.now();
@@ -347,6 +354,6 @@ export async function generateImageFromPrompt(prompt: string): Promise<string> {
 }
 
 export async function editImageWithPrompt(imageUrl: string, editPrompt: string): Promise<string> {
-  const requestId = await submitFalJob(IMAGE_EDIT_ENDPOINT, { prompt: editPrompt, image_url: imageUrl });
+  const requestId = await submitFalJob(IMAGE_EDIT_ENDPOINT, { prompt: editPrompt, image_urls: [imageUrl] });
   return pollForImageUrl(IMAGE_EDIT_ENDPOINT, requestId, 90_000, "Scene image edit");
 }

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { createAdStudioProject, createAdStudioScene, initSchema, listAdStudioScenes, type AdStudioMode } from "@/lib/db";
-import { isAdStudioModel } from "@/lib/adStudio";
 import { buildAdStudioStoryboard } from "@/lib/adStudioStoryboard";
 
 const MAX_BRIEF_LENGTH = 1200;
@@ -23,7 +22,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const brief = String(body.brief ?? "").trim();
     const mode = String(body.mode ?? "guided");
-    const videoModel = String(body.videoModel ?? "");
     const storyType = body.storyType === "cinematic" ? "cinematic" : "ad";
     const characterName = String(body.characterName ?? "the presenter").trim() || "the presenter";
     // Product-fidelity mode (an ad with a specific product to keep exact)
@@ -36,7 +34,6 @@ export async function POST(req: NextRequest) {
     if (!brief) return NextResponse.json({ error: "Describe what you want before generating a storyboard" }, { status: 400 });
     if (brief.length > MAX_BRIEF_LENGTH) return NextResponse.json({ error: `Brief is too long (max ${MAX_BRIEF_LENGTH} characters)` }, { status: 400 });
     if (!VALID_MODES.includes(mode as AdStudioMode)) return NextResponse.json({ error: "Invalid mode" }, { status: 400 });
-    if (!isAdStudioModel(videoModel)) return NextResponse.json({ error: "Choose one of the available video models" }, { status: 400 });
 
     const sceneCount = SCENE_COUNT_BY_MODE[storyType];
     // Real, honest limit for now: dialogue lines are just the brief's own
@@ -50,7 +47,11 @@ export async function POST(req: NextRequest) {
 
     const draftScenes = buildAdStudioStoryboard({ brief, sceneCount, characterName, hasProduct, dialogueLines });
 
-    const projectId = await createAdStudioProject({ userId: user.id, mode: mode as AdStudioMode, brief, videoModel });
+    // videoModel is no longer a user-facing choice (see adStudioStoryboard.ts's
+    // pickVideoModelForRole) - the project-level column just needs a value
+    // to satisfy its NOT NULL constraint; each scene's own video_model
+    // (set below, one per scene) is what actually drives generation.
+    const projectId = await createAdStudioProject({ userId: user.id, mode: mode as AdStudioMode, brief, videoModel: "veo" });
     for (const scene of draftScenes) {
       await createAdStudioScene({
         projectId,
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
         action: scene.action,
         dialogue: scene.dialogue,
         imagePrompt: scene.imagePrompt,
+        videoModel: scene.videoModel,
       });
     }
 

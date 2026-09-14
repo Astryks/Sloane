@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { failAdStudioScene, getAdStudioProject, getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, setAdStudioSceneVideo } from "@/lib/db";
+import { failAdStudioScene, getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, setAdStudioSceneVideo } from "@/lib/db";
 import { adStudioFalEndpoint, isAdStudioModel } from "@/lib/adStudio";
 import { getFalJobResult, getFalJobStatus, getFalVideoUrl } from "@/lib/fal";
 
@@ -27,11 +27,10 @@ export async function GET(req: NextRequest) {
     if (scene.video_url) return NextResponse.json({ status: "COMPLETED", videoUrl: scene.video_url });
     if (!scene.video_fal_request_id) return NextResponse.json({ status: scene.status });
 
-    const project = await getAdStudioProject(scene.project_id);
-    if (!project || !isAdStudioModel(project.video_model)) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    if (!isAdStudioModel(scene.video_model)) {
+      return NextResponse.json({ error: "This scene's video model is no longer supported" }, { status: 500 });
     }
-    const endpoint = adStudioFalEndpoint(project.video_model);
+    const endpoint = adStudioFalEndpoint(scene.video_model);
 
     const status = await getFalJobStatus(endpoint, scene.video_fal_request_id);
     if (status === "FAILED") {

@@ -22,14 +22,6 @@ const MAX_SCENE_IMAGE_EDITS = 3;
 
 type Stage = "brief" | "storyboard" | "scenes" | "final";
 
-const VIDEO_MODELS = [
-  { id: "veo", label: "Veo" },
-  { id: "kling", label: "Kling" },
-  { id: "seedance", label: "Seedance" },
-  { id: "grok", label: "Grok" },
-  { id: "minimax", label: "MiniMax" },
-];
-
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -49,7 +41,6 @@ export default function AdStudioPage() {
   const [stage, setStage] = useState<Stage>("brief");
   const [brief, setBrief] = useState("");
   const [storyType, setStoryType] = useState<"ad" | "cinematic">("ad");
-  const [videoModel, setVideoModel] = useState("veo");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -70,7 +61,7 @@ export default function AdStudioPage() {
     setBusy(true);
     setError("");
     try {
-      const data = await postJson("/api/ad-studio/create", { brief, mode: "guided", storyType, videoModel, hasProduct: storyType === "ad" });
+      const data = await postJson("/api/ad-studio/create", { brief, mode: "guided", storyType, hasProduct: storyType === "ad" });
       setProjectId(data.projectId);
       setScenes(data.scenes);
       setActiveIndex(0);
@@ -190,25 +181,14 @@ export default function AdStudioPage() {
               value={brief}
               onChange={(e) => setBrief(e.target.value)}
             />
-            <div className="flex flex-wrap gap-3">
-              <label className="text-sm">
-                <span className="mr-2 font-semibold">Type</span>
-                <select className="rounded-lg border border-border p-2" value={storyType} onChange={(e) => setStoryType(e.target.value as "ad" | "cinematic")}>
-                  <option value="ad">Ad (product-focused, 4 scenes)</option>
-                  <option value="cinematic">Cinematic short (7 scenes)</option>
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mr-2 font-semibold">Video model</span>
-                <select className="rounded-lg border border-border p-2" value={videoModel} onChange={(e) => setVideoModel(e.target.value)}>
-                  {VIDEO_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <label className="text-sm">
+              <span className="mr-2 font-semibold">Type</span>
+              <select className="rounded-lg border border-border p-2" value={storyType} onChange={(e) => setStoryType(e.target.value as "ad" | "cinematic")}>
+                <option value="ad">Ad (product-focused, 4 scenes)</option>
+                <option value="cinematic">Cinematic short (7 scenes)</option>
+              </select>
+            </label>
+            <p className="text-xs text-muted">We&apos;ll pick the best camera and video engine for each shot automatically.</p>
             <button
               onClick={handleCreateStoryboard}
               disabled={!brief.trim() || busy}

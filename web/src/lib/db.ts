@@ -234,6 +234,7 @@ export async function initSchema() {
       action TEXT NOT NULL,
       dialogue TEXT,
       image_prompt TEXT NOT NULL,
+      video_model TEXT NOT NULL DEFAULT 'veo',
       image_edit_count INT NOT NULL DEFAULT 0,
       image_url TEXT,
       image_fal_request_id TEXT,
@@ -1086,6 +1087,7 @@ export type AdStudioScene = {
   action: string;
   dialogue: string | null;
   image_prompt: string;
+  video_model: string;
   image_edit_count: number;
   image_url: string | null;
   image_fal_request_id: string | null;
@@ -1149,10 +1151,11 @@ export async function createAdStudioScene(params: {
   action: string;
   dialogue: string | null;
   imagePrompt: string;
+  videoModel: string;
 }): Promise<string> {
   const rows = await sql`
-    INSERT INTO ad_studio_scenes (project_id, order_index, shot_type, camera, action, dialogue, image_prompt)
-    VALUES (${params.projectId}, ${params.orderIndex}, ${params.shotType}, ${params.camera}, ${params.action}, ${params.dialogue}, ${params.imagePrompt})
+    INSERT INTO ad_studio_scenes (project_id, order_index, shot_type, camera, action, dialogue, image_prompt, video_model)
+    VALUES (${params.projectId}, ${params.orderIndex}, ${params.shotType}, ${params.camera}, ${params.action}, ${params.dialogue}, ${params.imagePrompt}, ${params.videoModel})
     RETURNING id
   `;
   return rows[0].id as string;

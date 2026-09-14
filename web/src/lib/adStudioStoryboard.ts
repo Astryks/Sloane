@@ -23,7 +23,23 @@ export type AdStudioSceneDraft = {
   expression: string;
   dialogue: string | null;
   imagePrompt: string;
+  videoModel: string;
 };
+
+// Real, deliberate simplification (2026-09-14): this used to be a single
+// user-facing dropdown on the brief screen - direct feedback was that
+// picking a video model felt intimidating, like a whole separate product
+// decision, when it should just be an engineering choice made on the
+// user's behalf. Now picked per SHOT, automatically, from the same real
+// findings already logged in this project: Seedance gives the best
+// product fidelity (its native multi-image reference path needs no
+// compositing) but its content-policy filter reliably blocks AI-generated
+// human faces - safe only for "beauty" shots, which never have a face in
+// frame (see EXPRESSION_LIBRARY). Every other shot role has a character in
+// it, so it gets Veo (proven, reliable, no face-policy risk).
+function pickVideoModelForRole(role: ShotRole, hasProduct: boolean): string {
+  return role === "beauty" && hasProduct ? "seedance" : "veo";
+}
 
 // Every sequence starts on an establishing "hero" shot and ends on a
 // "lockup" (the closing/resolving frame) - the two roles every ad or
@@ -85,8 +101,14 @@ export function buildAdStudioStoryboard(params: {
     const camera = SHOT_LIBRARY[role][paceKey as PaceKey] ?? SHOT_LIBRARY[role].medium ?? "35mm lens, medium shot, smooth push-in";
     const expression = EXPRESSION_LIBRARY[role][paceKey as PaceKey] ?? EXPRESSION_LIBRARY[role].medium ?? "natural, engaged expression";
     const action = actionFor(role, characterName, dialogue, hasProduct);
+    // "Cinematic still frame" (the original wording here) reliably triggered
+    // a real, unwanted artifact discovered in testing: Nano Banana Pro
+    // over-interpreted it as an actual video-editing screenshot and burned
+    // in a fake timecode overlay. "High-resolution photograph" + an
+    // explicit negative instruction gets the same photographic look
+    // without that artifact.
     const imagePrompt = [
-      `Cinematic still frame, ${lighting.description}.`,
+      `High-resolution photograph, no on-screen text, no timestamp, no UI overlays, no watermark. ${lighting.description}.`,
       camera,
       action,
       `Expression: ${expression}.`,
@@ -98,6 +120,7 @@ export function buildAdStudioStoryboard(params: {
       .filter(Boolean)
       .join(" ");
 
-    return { orderIndex: i, shotType: role, camera, action, expression, dialogue, imagePrompt };
+    const videoModel = pickVideoModelForRole(role, hasProduct);
+    return { orderIndex: i, shotType: role, camera, action, expression, dialogue, imagePrompt, videoModel };
   });
 }
