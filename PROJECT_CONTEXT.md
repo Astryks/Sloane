@@ -1560,3 +1560,90 @@ on a different architecture and rebuilding `lucy_tts_engine.py`'s entire
 generation/chunking/retry pipeline, real work on top of everything already
 invested in the current one. Vendored at `vendor/qwen3-tts-upstream/` for
 when/if a real fine-tuning trial is decided on.
+
+## 18. Product thesis for the storyboard/Ad Studio line, arrived at through real testing, 2026-09-14
+
+This is a durable conclusion, not a snapshot of one day's mood - kept here
+(not just STATUS.md's rolling log) because it should shape every future
+decision on this line of the product, and shouldn't get re-litigated from
+scratch next session.
+
+**How we got here.** Studied two real Runway videos (a Bloomberg CEO
+interview and a Runway Creative Team workflow tutorial) to answer "how do
+Runway/Arcads/Higgsfield actually do this." Real findings, not guesses:
+Runway trains its own foundation models and positions itself as a
+director's tool (their own line: "text prompts alone can't make movies" -
+the product is control mechanisms, not raw generation). Higgsfield's real
+pull is fun, viral, shareable short-form content - a different market
+entirely from brand advertising. Arcads' real mechanism is one AI actor
+locked to one account, reused across UGC-style ad variations - proprietary
+actor-exclusivity infrastructure, not a better underlying video model. fal
+is pure infrastructure: an aggregator/reseller of Google/Kuaishou/
+ByteDance/etc's models with its own margin baked in, zero creative opinion.
+
+**We tested whether we could compete on quality and got a real, honest
+answer: no, on both axes that would matter.** Video models: Kling/Veo/
+Seedance are third-party, accessed through fal exactly like anyone else
+could - no training moat, no way to be "better" at the model layer.
+Voice: our own fine-tuned Chatterbox voices AND a stronger third-party
+model (Qwen3-TTS) were both tested live the same day and both came back
+"robotic"/"monotone" - real, repeated evidence, not a bad take. Chasing
+"our voice is the differentiator" was a real mistake worth naming
+- ownership of a mediocre pipeline is not itself an advantage.
+
+**So the thesis: we are a platform, not a model company, because we
+cannot afford to be a model company.** No capital for foundation-model
+training (Runway) or for building proprietary actor-exclusivity
+infrastructure at Arcads' scale. The commodity layer (Kling/Veo/Seedance/
+Nano Banana Pro, all via the same fal.ai account) stays exactly that -
+commodity, accessed the same way anyone can access it. Differentiation
+has to live entirely in the layer above it.
+
+**Real, live evidence that even "control-first" isn't enough on its own**:
+a generated ad was judged "looks amateur" - and the root cause traced back
+to this project's OWN deterministic prompt templates (`EXPRESSION_LIBRARY`
+in `productAdStoryboard.ts`) hardcoding a single, generic "enthusiastic
+UGC-influencer" aesthetic (literally "wide-eyed enthusiasm, an immediate
+open smile" on every energetic shot) - the same mistake as trying to be
+"better" at voice: substituting our own guess at good taste for the
+customer's actual taste. **The real, durable fix is not a better
+hardcoded template - it's giving customers a way to inject their own
+taste**: a style-reference image (mood board, fed to the image model as
+an additional reference the same way Runway's own tutorial recommends
+using references for vibe, not literal content) and/or a short free-text
+style-direction field, separate from the brief itself. Not yet built -
+flagged as the next real feature on this line.
+
+**Answering "what can we actually engineer, beyond being a fal
+reseller" - concrete, real, buildable without training anything:**
+- **Consistency engineering** - reference-locking (built), and the
+  planned SAM2-based product-compositing pipeline (scoped, not built) -
+  fal itself does none of this; it's pure single-call generation.
+- **The real control/workflow layer** (built) - an editable storyboard,
+  per-scene approve/regenerate/edit, not "type text, get a finished
+  video." This is the actual product shape, not a UI nicety.
+- **Brand-kit persistence** (not built) - save a brand's locked
+  character/product references and style direction once, reuse across
+  every future ad for that brand. Real stickiness/retention value that
+  neither raw fal access nor a one-shot Arcads-style tool offers.
+- **Finishing features** (not built) - burned-in captions and automatic
+  multi-aspect-ratio variants (9:16/1:1/16:9) from one approved cut,
+  reusing infrastructure already built (ffmpeg stitching, faster_whisper
+  transcription already used for TTS verification) rather than new
+  vendors.
+- **Multi-language localization** (not built) - this project already owns
+  a real voice-cloning + lip-sync pipeline (Chatterbox + the Kling
+  lipsync endpoint); pairing it with the video pipeline to produce
+  dubbed variants in multiple languages is a real, differentiated
+  combination most raw video-gen access doesn't bundle.
+- **Automated best-of-N quality scoring** (not built, scoped earlier) -
+  generate 2-3 takes per shot, score automatically against the reference
+  image, keep the best - catches a bad generation instead of hoping the
+  user notices.
+- **Vertical-specific storyboard presets** (not built) - lowers the
+  barrier further for a blank-page brief, extending the existing
+  deterministic shot-library pattern per industry rather than one
+  generic template for everything.
+Deliberately NOT listed: anything requiring training our own model or
+building infrastructure at Arcads' capital scale - out of reach, and not
+where the actual leverage is anyway.
