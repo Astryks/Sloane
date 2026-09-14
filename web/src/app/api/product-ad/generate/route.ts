@@ -4,6 +4,7 @@ import {
   createProductAdJob,
   failProductAdJob,
   initSchema,
+  recordConsent,
   setProductAdFalRequestId,
   setProductAdModalId,
   spendVideoCredit,
@@ -14,6 +15,14 @@ import { compositeProductAndCharacter, hasEnoughFalBalanceToGenerate, lockFaceOn
 import { submitModalJob } from "@/lib/modal";
 import { buildProductAdFalInput, isProductAdModel, productAdFalEndpoint } from "@/lib/productAd";
 import { buildProductAdStoryboard } from "@/lib/productAdStoryboard";
+
+// Real legal-risk mitigation (2026-09-14) - only applies to an actually
+// UPLOADED character photo, never the app's own pre-made characters
+// (Harper/Vicky/etc, already rights-cleared as part of this product).
+// Generating a video likeness of a real person without their permission
+// is a real, serious legal exposure - same consent-attestation-plus-audit-
+// log pattern as clone-voice's own gate.
+const CHARACTER_CONSENT_TEXT = "I confirm I own the rights to this image, or have the explicit permission of the person shown, to generate a video using their likeness.";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const MAX_BRIEF_LENGTH = 1200;
@@ -68,6 +77,16 @@ export async function POST(req: NextRequest) {
     if (uploadedCharacter instanceof Blob && uploadedCharacter.size > 0) {
       if (!uploadedCharacter.type.startsWith("image/")) return NextResponse.json({ error: "Character upload must be an image" }, { status: 400 });
       if (uploadedCharacter.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: "Character image is too large (max 15MB)" }, { status: 400 });
+      if (String(form.get("character_consent") ?? "") !== "true") {
+        return NextResponse.json({ error: "Please confirm you have the right to use this image before continuing." }, { status: 400 });
+      }
+      await recordConsent({
+        userId: user.id,
+        contentType: "character_image",
+        feature: "product-ad",
+        consentText: CHARACTER_CONSENT_TEXT,
+        ipAddress: req.headers.get("x-forwarded-for"),
+      });
       characterImageUrl = await uploadBufferToFal(Buffer.from(await uploadedCharacter.arrayBuffer()), uploadedCharacter.type, "character.jpg");
       // No known name/voice for a freshly uploaded face - "the presenter"
       // keeps the storyboard prompt grammatical without inventing an

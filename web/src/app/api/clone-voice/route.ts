@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSubscriberByToken, checkQuota, reserveCharacterUsage, checkFreeQuota, recordFreeUsage, createPendingGeneration, initSchema } from "@/lib/db";
+import { getSubscriberByToken, checkQuota, reserveCharacterUsage, checkFreeQuota, recordFreeUsage, createPendingGeneration, initSchema, recordConsent } from "@/lib/db";
 import { isPodMode, generateViaPod, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 import { PLANS } from "@/lib/plans";
+
+// Real legal-risk mitigation, matching ElevenLabs' own actual approach
+// (researched earlier this project - not ID-document upload, a required
+// consent attestation + an audit log). Voice cloning without the
+// speaker's permission is a real, growing legal exposure (voice is
+// increasingly treated as biometric data) - this is the floor, not a
+// complete solution, but it's what the real-world comparable does.
+const CONSENT_TEXT = "I confirm this is my own voice, or I have the explicit permission of the person speaking, to clone this voice.";
 
 // RunPod's /run input cap is 10MB - a base64-encoded reference clip much
 // past a minute or two of decent-quality audio could exceed that. The UI
@@ -57,9 +65,22 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    if (String(form.get("consent") ?? "") !== "true") {
+      return NextResponse.json({ error: "Please confirm you have the right to clone this voice before continuing." }, { status: 400 });
+    }
     const exaggeration = form.get("exaggeration");
     const speed = form.get("speed");
     const sessionUser = await getSessionUser();
+    // Awaited (not fire-and-forget) so a serverless function returning its
+    // response doesn't race/kill this write - recordConsent itself never
+    // throws, so this can't block or fail the actual generation.
+    await recordConsent({
+      userId: sessionUser?.id ?? null,
+      contentType: "voice_reference",
+      feature: "clone-voice",
+      consentText: CONSENT_TEXT,
+      ipAddress: req.headers.get("x-forwarded-for"),
+    });
 
     let result: { status: "COMPLETED"; audioBase64: string } | { jobId: string };
     if (await isPodMode()) {

@@ -423,6 +423,7 @@ function CloneVoiceSection() {
   const [text, setText] = useState("");
   const [file, setFile] = useState<Blob | File | null>(null);
   const [delivery, setDelivery] = useState<Delivery>(DEFAULT_DELIVERY);
+  const [consent, setConsent] = useState(false);
   const isPodMode = useIsPodMode();
   const { generate, loading, error, audioBase64, statusMessage, showWaitingUi } = useAudioGeneration("/api/clone-voice");
 
@@ -440,6 +441,7 @@ function CloneVoiceSection() {
     form.append("reference_audio", file, referenceFilename);
     form.append("exaggeration", String(delivery.expressiveness));
     form.append("speed", String(delivery.speed));
+    form.append("consent", String(consent));
     if (token) form.append("access_token", token);
     else if (freeTierId) form.append("free_tier_id", freeTierId);
     await generate(form);
@@ -464,6 +466,10 @@ function CloneVoiceSection() {
         onChange={(e) => setText(e.target.value)}
       />
       <DeliverySliders value={delivery} onChange={setDelivery} accentColor="text-blue" />
+      <label className="flex items-start gap-2 text-xs text-muted">
+        <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+        <span>I confirm this is my own voice, or I have the explicit permission of the person speaking, to clone this voice.</span>
+      </label>
       {!isPodMode && (
         <p className="text-xs text-muted">Generation usually takes under a minute, but can take up to a few minutes after a quiet period while the voice engine wakes up.</p>
       )}
@@ -478,7 +484,7 @@ function CloneVoiceSection() {
           to keep going now.
         </p>
       ) : (
-        <GenerateButton loading={loading} disabled={!text || !file || loading} onClick={handleGenerate} colorClassName="bg-blue" />
+        <GenerateButton loading={loading} disabled={!text || !file || !consent || loading} onClick={handleGenerate} colorClassName="bg-blue" />
       )}
       {showWaitingUi && (
         <>

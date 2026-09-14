@@ -173,6 +173,29 @@ export async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Consent/audit trail (2026-09-14) - real legal-risk mitigation, per
+  // direct request ("build safety guardrails like elevenlabs so we cant
+  // get into legal issues if users copy audio without licences or
+  // generate videos with images they dont have approval of"). Matches
+  // ElevenLabs' own real approach (researched earlier this project, see
+  // STATUS.md "voice-cloning consent" section): NOT ID-document upload -
+  // a required consent attestation + an audit log, so there's a real,
+  // timestamped record if a dispute ever arises. Deliberately generic
+  // across content types (voice reference clips AND uploaded character/
+  // product photos) rather than one-off per feature, so the same table
+  // covers clone-voice today and any future Ad Studio "upload your own
+  // photo" path without a schema change.
+  await sql`
+    CREATE TABLE IF NOT EXISTS consent_records (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      content_type TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      consent_text TEXT NOT NULL,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
   // Ad Studio (2026-09-14) - a storyboard-first, scene-by-scene ad
   // production flow: one project holds an ordered list of scenes, each
   // scene has its own reference image (regenerable by typing an edit,
@@ -1001,6 +1024,34 @@ export async function failProductAdJob(jobId: string, error: string): Promise<bo
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+// --- Consent / audit trail ---
+
+export type ConsentContentType = "voice_reference" | "character_image" | "product_image";
+export type ConsentFeature = "clone-voice" | "product-ad" | "ad-studio";
+
+// Best-effort by design: a DB hiccup here should never block a real,
+// paying generation the way a failed quota/payment check should - this is
+// an audit trail for a real dispute later, not a live gate that needs to
+// be perfectly durable to do its job. Callers still REQUIRE the consent
+// flag to be true before calling this (the actual gate), this only
+// records that it was given.
+export async function recordConsent(params: {
+  userId: string | null;
+  contentType: ConsentContentType;
+  feature: ConsentFeature;
+  consentText: string;
+  ipAddress: string | null;
+}): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO consent_records (user_id, content_type, feature, consent_text, ip_address)
+      VALUES (${params.userId}, ${params.contentType}, ${params.feature}, ${params.consentText}, ${params.ipAddress})
+    `;
+  } catch (err) {
+    console.error("[consent] failed to record consent (generation proceeds anyway)", err);
+  }
 }
 
 // --- Ad Studio (storyboard-first, scene-by-scene ad production) ---

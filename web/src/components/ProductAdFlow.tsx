@@ -32,6 +32,7 @@ export function ProductAdFlow() {
   const [productUrl, setProductUrl] = useState("");
   const [characterId, setCharacterId] = useState("harper");
   const [ownCharacter, setOwnCharacter] = useState<File | null>(null);
+  const [characterConsent, setCharacterConsent] = useState(false);
   const [brief, setBrief] = useState("");
   const [references, setReferences] = useState("");
   const [model, setModel] = useState<ProductAdModel>("veo");
@@ -79,8 +80,10 @@ export function ProductAdFlow() {
     const metadata = { continuityLock, productIntegrityLock, cameraPlan, dialogueCues, voiceId: selectedCharacter.defaultVoiceId };
     const form = new FormData();
     form.append("product_image", product);
-    if (ownCharacter) form.append("character_image", ownCharacter);
-    else form.append("character_id", characterId);
+    if (ownCharacter) {
+      form.append("character_image", ownCharacter);
+      form.append("character_consent", String(characterConsent));
+    } else form.append("character_id", characterId);
     form.append("brief", brief);
     form.append("youtube_references", references);
     form.append("model", model);
@@ -140,7 +143,13 @@ export function ProductAdFlow() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">{CHARACTERS.map((item) => <button key={item.id} onClick={() => { setCharacterId(item.id); setOwnCharacter(null); }} className={`rounded-2xl border p-3 text-center ${characterId === item.id && !ownCharacter ? "border-purple bg-purple/10" : "border-border bg-white"}`}><img src={item.imageUrl} alt={item.name} className="mx-auto mb-2 h-16 w-16 rounded-full object-cover" /><span className="text-xs font-bold">{item.name}</span></button>)}</div>
         <label className="block cursor-pointer rounded-2xl border-2 border-dashed border-border p-4 text-center"><span className="text-sm font-semibold">Or upload your own character image</span><input className="sr-only" type="file" accept="image/*" onChange={(event) => chooseCharacter(event.target.files?.[0])} /></label>
         {ownCharacter && <p className="text-xs text-muted">Selected: {ownCharacter.name}</p>}
-        <div className="flex gap-3"><button onClick={() => setStep(1)} className="w-1/3 rounded-full border border-border py-3 text-sm font-bold">Back</button><button onClick={() => setStep(3)} className="flex-1 rounded-full bg-purple py-3 text-sm font-bold text-white">Continue</button></div>
+        {ownCharacter && (
+          <label className="flex items-start gap-2 text-xs text-muted">
+            <input type="checkbox" className="mt-0.5" checked={characterConsent} onChange={(e) => setCharacterConsent(e.target.checked)} />
+            <span>I confirm I own the rights to this image, or have the explicit permission of the person shown, to generate a video using their likeness.</span>
+          </label>
+        )}
+        <div className="flex gap-3"><button onClick={() => setStep(1)} className="w-1/3 rounded-full border border-border py-3 text-sm font-bold">Back</button><button onClick={() => setStep(3)} disabled={!!ownCharacter && !characterConsent} className="flex-1 rounded-full bg-purple py-3 text-sm font-bold text-white disabled:opacity-50">Continue</button></div>
       </div>}
 
       {status === "idle" && step === 3 && <div className="space-y-4">
