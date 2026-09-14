@@ -14,7 +14,29 @@ type Slot = {
   video_model: string | null;
   video_url: string | null;
   status: string;
+  reference_ids: string[];
 };
+
+type ReferenceKind = "character" | "location" | "product" | "vibe";
+
+type Reference = {
+  id: string;
+  kind: ReferenceKind;
+  name: string;
+  image_url: string;
+};
+
+const REFERENCE_KINDS: { id: ReferenceKind; label: string; hint: string }[] = [
+  { id: "character", label: "Character", hint: "A face/outfit that should look identical in every scene it appears in." },
+  { id: "location", label: "Location", hint: "A specific place that should stay recognizable across scenes." },
+  { id: "product", label: "Product", hint: "An object/logo that needs to stay exact - no redesigning it shot to shot." },
+  { id: "vibe", label: "Vibe", hint: "A mood board, not a literal thing - tone, light, and color only, never copied 1:1." },
+];
+
+const IMAGE_ENGINES: { id: "nanobanana" | "gpt"; label: string }[] = [
+  { id: "nanobanana", label: "Nano Banana Pro" },
+  { id: "gpt", label: "GPT Image" },
+];
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -27,18 +49,354 @@ async function postJson(url: string, body: Record<string, unknown>) {
   return data;
 }
 
+function ReferenceLibrary({
+  projectId,
+  references,
+  onAdd,
+  onRemove,
+  onUpdate,
+}: {
+  projectId: string;
+  references: Reference[];
+  onAdd: (ref: Reference) => void;
+  onRemove: (id: string) => void;
+  onUpdate: (id: string, imageUrl: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<ReferenceKind>("character");
+  const [prompt, setPrompt] = useState("");
+  const [engine, setEngine] = useState<"nanobanana" | "gpt">("nanobanana");
+  const [variants, setVariants] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [refiningId, setRefiningId] = useState<string | null>(null);
+  const [refinePrompt, setRefinePrompt] = useState("");
+  const [refineEngine, setRefineEngine] = useState<"nanobanana" | "gpt">("nanobanana");
+  const [refineVariants, setRefineVariants] = useState<string[]>([]);
+  const [refineBusy, setRefineBusy] = useState(false);
+  const [refineError, setRefineError] = useState("");
+
+  function startRefine(id: string) {
+    setRefiningId(id);
+    setRefinePrompt("");
+    setRefineVariants([]);
+    setRefineError("");
+  }
+
+  async function generateRefineVariants(baseImageUrl: string) {
+    if (!refinePrompt.trim()) return;
+    setRefineBusy(true);
+    setRefineError("");
+    try {
+      const data = await postJson("/api/grid-storyboard/reference/generate", {
+        projectId,
+        prompt: refinePrompt,
+        engine: refineEngine,
+        numImages: 4,
+        baseImageUrls: [baseImageUrl],
+      });
+      setRefineVariants(data.imageUrls);
+    } catch (err) {
+      setRefineError(err instanceof Error ? err.message : "Could not generate options");
+    } finally {
+      setRefineBusy(false);
+    }
+  }
+
+  async function pickRefineVariant(referenceId: string, imageUrl: string) {
+    setRefineBusy(true);
+    setRefineError("");
+    try {
+      await postJson("/api/grid-storyboard/reference/create", { referenceId, imageUrl });
+      onUpdate(referenceId, imageUrl);
+      setRefiningId(null);
+    } catch (err) {
+      setRefineError(err instanceof Error ? err.message : "Could not save this fix");
+    } finally {
+      setRefineBusy(false);
+    }
+  }
+
+  function reset() {
+    setName("");
+    setPrompt("");
+    setVariants([]);
+    setError("");
+  }
+
+  async function uploadImage(file: File) {
+    if (!name.trim()) {
+      setError("Name this reference first");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.append("projectId", projectId);
+      form.append("kind", kind);
+      form.append("name", name.trim());
+      form.append("image", file);
+      const res = await fetch("/api/grid-storyboard/reference/upload", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Upload failed");
+      onAdd(data.reference);
+      reset();
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add this reference");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateVariants() {
+    if (!prompt.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await postJson("/api/grid-storyboard/reference/generate", { projectId, prompt, engine, numImages: 4 });
+      setVariants(data.imageUrls);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate options");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickVariant(imageUrl: string) {
+    if (!name.trim()) {
+      setError("Name this reference first");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const data = await postJson("/api/grid-storyboard/reference/create", { projectId, kind, name: name.trim(), imageUrl });
+      onAdd(data.reference);
+      reset();
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this reference");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeReference(id: string) {
+    onRemove(id);
+    try {
+      await postJson("/api/grid-storyboard/reference/delete", { referenceId: id });
+    } catch {
+      // Best-effort - it's already gone from the UI either way.
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-border bg-white/70 p-5">
+      <div>
+        <p className="text-sm font-bold">Cast & Locations</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">
+          Build these first, once each - every scene that uses one reuses the exact same image, which is what
+          actually keeps a face, a product, or a place looking the same from shot to shot. Design them with any AI
+          chat you like (Claude, ChatGPT, whatever) - describe a look, iterate in plain language until it&apos;s
+          right, then bring the result here.
+        </p>
+      </div>
+
+      {references.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {references.map((ref) => (
+              <div key={ref.id} className="flex items-center gap-2 rounded-xl border border-border bg-white p-1.5 pr-2">
+                <img src={ref.image_url} alt={ref.name} className="h-10 w-10 rounded-lg object-cover" />
+                <div className="leading-tight">
+                  <p className="text-xs font-semibold">{ref.name}</p>
+                  <p className="text-[10px] text-muted">{REFERENCE_KINDS.find((k) => k.id === ref.kind)?.label}</p>
+                </div>
+                <button onClick={() => startRefine(ref.id)} className="ml-1 text-xs text-purple underline">
+                  Fix/refine
+                </button>
+                <button onClick={() => removeReference(ref.id)} className="text-xs text-coral-dark">
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {refiningId && (
+            <div className="space-y-2 rounded-xl border border-border bg-white p-4">
+              {(() => {
+                const ref = references.find((r) => r.id === refiningId);
+                if (!ref) return null;
+                return (
+                  <>
+                    <p className="text-xs font-semibold">
+                      Fixing &quot;{ref.name}&quot; - missing something, or something&apos;s wrong? Fix it here once and every scene
+                      using this reference picks it up automatically.
+                    </p>
+                    <div className="flex gap-1">
+                      <input
+                        className="flex-1 rounded-full border border-border px-3 py-1.5 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+                        placeholder='What should change? e.g. "add a helmet"'
+                        value={refinePrompt}
+                        onChange={(e) => setRefinePrompt(e.target.value)}
+                      />
+                      <select
+                        className="rounded-lg border border-border p-1.5 text-xs"
+                        value={refineEngine}
+                        onChange={(e) => setRefineEngine(e.target.value as "nanobanana" | "gpt")}
+                      >
+                        {IMAGE_ENGINES.map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => generateRefineVariants(ref.image_url)}
+                        disabled={refineBusy || !refinePrompt.trim()}
+                        className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                      >
+                        Generate 4
+                      </button>
+                    </div>
+                    {refineVariants.length > 0 && (
+                      <div className="grid grid-cols-4 gap-2">
+                        {refineVariants.map((url) => (
+                          <button
+                            key={url}
+                            onClick={() => pickRefineVariant(ref.id, url)}
+                            disabled={refineBusy}
+                            className="overflow-hidden rounded-xl border-2 border-transparent hover:border-purple"
+                          >
+                            <img src={url} alt="Option" className="aspect-square w-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {refineError && <p className="text-[10px] text-coral-dark">{refineError}</p>}
+                    <button onClick={() => setRefiningId(null)} className="text-xs text-muted underline">
+                      Cancel
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold">
+          + Add a character, location, product, or vibe
+        </button>
+      ) : (
+        <div className="space-y-3 rounded-xl border border-border bg-white p-4">
+          <div className="flex flex-wrap gap-2">
+            {REFERENCE_KINDS.map((k) => (
+              <button
+                key={k.id}
+                onClick={() => setKind(k.id)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                  kind === k.id ? "bg-purple text-white shadow-soft" : "border border-border bg-white text-muted"
+                }`}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] italic text-muted">{REFERENCE_KINDS.find((k) => k.id === kind)?.hint}</p>
+
+          <input
+            className="w-full rounded-full border border-border px-3 py-2 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+            placeholder={kind === "vibe" ? 'Name it, e.g. "Cloudy grey morning"' : "Name it, e.g. \"Harper\" or \"Store front\""}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+
+          <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border p-3 text-center text-xs">
+            Upload a photo
+            <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
+          </label>
+
+          <p className="text-center text-[10px] text-muted">— or describe one and pick from a few options —</p>
+
+          {kind === "vibe" && (
+            <p className="text-[11px] italic text-muted">
+              Pro tip: don&apos;t reference a photo of the exact thing you&apos;re building, or the model just
+              recreates it 1:1. Use an image from the same world that isn&apos;t your actual subject - it&apos;ll
+              borrow the mood without copying the content.
+            </p>
+          )}
+
+          <div className="flex gap-1">
+            <input
+              className="flex-1 rounded-full border border-border px-3 py-1.5 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+              placeholder="Describe the look..."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            <select className="rounded-lg border border-border p-1.5 text-xs" value={engine} onChange={(e) => setEngine(e.target.value as "nanobanana" | "gpt")}>
+              {IMAGE_ENGINES.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.label}
+                </option>
+              ))}
+            </select>
+            <button onClick={generateVariants} disabled={busy || !prompt.trim()} className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
+              {busy && variants.length === 0 ? "…" : "Generate 4"}
+            </button>
+          </div>
+
+          {variants.length > 0 && (
+            <div className="grid grid-cols-4 gap-2">
+              {variants.map((url) => (
+                <button key={url} onClick={() => pickVariant(url)} disabled={busy} className="overflow-hidden rounded-xl border-2 border-transparent hover:border-purple">
+                  <img src={url} alt="Option" className="aspect-square w-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {error && <p className="text-[10px] text-coral-dark">{error}</p>}
+
+          <button
+            onClick={() => {
+              reset();
+              setOpen(false);
+            }}
+            className="text-xs text-muted underline"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SlotCard({
   slot,
+  references,
   onUpdate,
 }: {
   slot: Slot;
+  references: Reference[];
   onUpdate: (patch: Partial<Slot>) => void;
 }) {
   const [prompt, setPrompt] = useState(slot.prompt ?? "");
   const [model, setModel] = useState(slot.video_model ?? "veo");
   const [genPrompt, setGenPrompt] = useState("");
+  const [genEngine, setGenEngine] = useState<"nanobanana" | "gpt">("nanobanana");
+  const [selectedRefs, setSelectedRefs] = useState<string[]>(slot.reference_ids ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  function toggleRef(id: string) {
+    setSelectedRefs((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
+  }
 
   async function uploadImage(file: File) {
     setBusy(true);
@@ -63,8 +421,13 @@ function SlotCard({
     setBusy(true);
     setError("");
     try {
-      const data = await postJson("/api/grid-storyboard/slot/generate-image", { slotId: slot.id, prompt: genPrompt });
-      onUpdate({ image_url: data.imageUrl, status: "image_ready" });
+      const data = await postJson("/api/grid-storyboard/slot/generate-image", {
+        slotId: slot.id,
+        prompt: genPrompt,
+        engine: genEngine,
+        referenceIds: selectedRefs,
+      });
+      onUpdate({ image_url: data.imageUrl, status: "image_ready", reference_ids: selectedRefs });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate this image");
     } finally {
@@ -105,6 +468,27 @@ function SlotCard({
             Upload an image
             <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
           </label>
+
+          {references.length > 0 && (
+            <div className="space-y-1 rounded-xl border border-border p-2">
+              <p className="text-[10px] font-semibold text-muted">Use from Cast & Locations (optional):</p>
+              <div className="flex flex-wrap gap-1">
+                {references.map((ref) => (
+                  <button
+                    key={ref.id}
+                    onClick={() => toggleRef(ref.id)}
+                    className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] ${
+                      selectedRefs.includes(ref.id) ? "border-purple bg-purple text-white" : "border-border bg-white text-muted"
+                    }`}
+                  >
+                    <img src={ref.image_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                    {ref.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-1">
             <input
               className="flex-1 rounded-full border border-border px-3 py-1.5 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
@@ -112,6 +496,13 @@ function SlotCard({
               value={genPrompt}
               onChange={(e) => setGenPrompt(e.target.value)}
             />
+            <select className="rounded-lg border border-border p-1.5 text-xs" value={genEngine} onChange={(e) => setGenEngine(e.target.value as "nanobanana" | "gpt")}>
+              {IMAGE_ENGINES.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.label}
+                </option>
+              ))}
+            </select>
             <button onClick={generateImage} disabled={busy || !genPrompt.trim()} className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
               Go
             </button>
@@ -123,7 +514,7 @@ function SlotCard({
           <textarea
             className="w-full rounded-xl border border-border p-2 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
             rows={2}
-            placeholder="Describe how this shot should move..."
+            placeholder="Shot type, camera move, and the action - e.g. close-up, slow push-in, she looks up and smiles"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
@@ -138,6 +529,14 @@ function SlotCard({
               </button>
             ))}
           </div>
+          <details className="text-[10px] text-muted">
+            <summary className="cursor-pointer font-semibold">Writing dialogue? A few tips</summary>
+            <ul className="mt-1 list-disc space-y-1 pl-4">
+              <li>Use &quot;...&quot; inside a line for a natural pause, or drop in a short direction mid-line - both shape delivery, not just words.</li>
+              <li>Clip feels rushed? Make it longer. Feels dull or dragging? Make it shorter - the model paces the same line differently to fit the time you give it.</li>
+              <li>Reusing the same reference image and a similarly-worded prompt keeps a character&apos;s voice consistent across scenes - changing the location or wording can shift it.</li>
+            </ul>
+          </details>
           <div className="flex items-center gap-2">
             <select className="rounded-lg border border-border p-1.5 text-xs" value={model} onChange={(e) => setModel(e.target.value)}>
               {AD_STUDIO_MODELS.map((m) => (
@@ -162,6 +561,7 @@ function SlotCard({
 export default function AdsGridPage() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [references, setReferences] = useState<Reference[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showExample, setShowExample] = useState(true);
@@ -206,13 +606,19 @@ export default function AdsGridPage() {
                 Hide
               </button>
             </div>
-            <ol className="list-decimal space-y-1 pl-5 text-muted">
-              <li>Add a scene, then upload a photo of your product/character - or describe one and we&apos;ll generate it.</li>
+            <ol className="list-decimal space-y-1.5 pl-5 text-muted">
               <li>
-                Write how the camera should move for that shot, e.g. <em>&quot;slow push-in on the product, golden hour light&quot;</em> - or click one of the example
-                camera moves to get started, then add your own detail.
+                <strong>Cast & Locations first.</strong> Nail down each character, location, and product once - design them with any AI chat you like, upload a real photo, or generate
+                and pick from a few options here.
               </li>
-              <li>Pick a video model and generate - each generation is 1 credit, so you only ever pay for scenes you actually want.</li>
+              <li>
+                <strong>Add a scene</strong> and bring in the references it needs - the same face/place/product stays consistent because we reuse the exact same image, not a fresh
+                description each time.
+              </li>
+              <li>
+                <strong>Describe the shot simply:</strong> shot type, camera move, and the action - that&apos;s usually enough. A few keywords work as well as a long paragraph.
+              </li>
+              <li>Pick a video model and generate - each generation is 1 credit, so you only ever pay for scenes you actually want. Iterate with any model - Veo, Kling, Seedance, MiniMax, or Grok.</li>
               <li>Repeat for as many scenes as your story needs, then head to the combine tool below to stitch them into one video, in order.</li>
             </ol>
           </div>
@@ -226,9 +632,17 @@ export default function AdsGridPage() {
           </button>
         ) : (
           <>
+            <ReferenceLibrary
+              projectId={projectId}
+              references={references}
+              onAdd={(ref) => setReferences((prev) => [...prev, ref])}
+              onRemove={(id) => setReferences((prev) => prev.filter((r) => r.id !== id))}
+              onUpdate={(id, imageUrl) => setReferences((prev) => prev.map((r) => (r.id === id ? { ...r, image_url: imageUrl } : r)))}
+            />
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {slots.map((slot) => (
-                <SlotCard key={slot.id} slot={slot} onUpdate={(patch) => updateSlot(slot.id, patch)} />
+                <SlotCard key={slot.id} slot={slot} references={references} onUpdate={(patch) => updateSlot(slot.id, patch)} />
               ))}
               <button onClick={addSlot} className="flex aspect-video items-center justify-center rounded-2xl border-2 border-dashed border-border text-sm font-semibold text-muted hover:bg-white/50">
                 + Add scene

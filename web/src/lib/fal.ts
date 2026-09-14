@@ -332,16 +332,47 @@ export async function uploadBufferToFal(data: Buffer, contentType: string, fileN
 export const TEXT_TO_IMAGE_ENDPOINT = "fal-ai/gemini-3-pro-image-preview";
 export const IMAGE_EDIT_ENDPOINT = "fal-ai/gemini-3-pro-image-preview/edit";
 
+// GPT Image 2.5 (2026-09-14) - confirmed via fal's own OpenAPI schema
+// (openai/gpt-image-2.5/sunburst/{text-to-image,edit}), added as a second
+// real image-engine choice alongside Nano Banana Pro per direct request
+// ("add gpt to the model list"). Checked first whether OpenAI has a fal
+// VIDEO model (searched fal's full text-to-video catalog, 138 models,
+// keyword "sora"/"gpt" - zero OpenAI entries exist there), so this is
+// image-only, same category as Nano Banana Pro, not a video engine. Same
+// `prompt` + `image_urls` (array, edit) / `prompt`-only (text-to-image)
+// shape as Nano Banana Pro, so it slots into the same functions below
+// rather than needing its own code path.
+export const GPT_IMAGE_TEXT_TO_IMAGE_ENDPOINT = "openai/gpt-image-2.5/sunburst/text-to-image";
+export const GPT_IMAGE_EDIT_ENDPOINT = "openai/gpt-image-2.5/sunburst/edit";
+
+export type ImageEngine = "nanobanana" | "gpt";
+
+export const IMAGE_ENGINES: Record<ImageEngine, { label: string; textToImageEndpoint: string; editEndpoint: string }> = {
+  nanobanana: { label: "Nano Banana Pro", textToImageEndpoint: TEXT_TO_IMAGE_ENDPOINT, editEndpoint: IMAGE_EDIT_ENDPOINT },
+  gpt: { label: "GPT Image", textToImageEndpoint: GPT_IMAGE_TEXT_TO_IMAGE_ENDPOINT, editEndpoint: GPT_IMAGE_EDIT_ENDPOINT },
+};
+
+export function isImageEngine(value: string): value is ImageEngine {
+  return value === "nanobanana" || value === "gpt";
+}
+
 async function pollForImageUrl(endpoint: string, requestId: string, timeoutMs: number, label: string): Promise<string> {
+  const urls = await pollForImageUrls(endpoint, requestId, timeoutMs, label);
+  return urls[0];
+}
+
+async function pollForImageUrls(endpoint: string, requestId: string, timeoutMs: number, label: string): Promise<string[]> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const status = await getFalJobStatus(endpoint, requestId);
     if (status === "FAILED") throw new Error(`${label} failed`);
     if (status === "COMPLETED") {
       const result = await getFalJobResult(endpoint, requestId);
-      const imageUrl = (result as { images?: Array<{ url?: string }> }).images?.[0]?.url;
-      if (!imageUrl) throw new Error(`${label} returned no image`);
-      return imageUrl;
+      const urls = ((result as { images?: Array<{ url?: string }> }).images ?? [])
+        .map((i) => i.url)
+        .filter((u): u is string => !!u);
+      if (!urls.length) throw new Error(`${label} returned no image`);
+      return urls;
     }
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
@@ -356,4 +387,28 @@ export async function generateImageFromPrompt(prompt: string): Promise<string> {
 export async function editImageWithPrompt(imageUrl: string, editPrompt: string): Promise<string> {
   const requestId = await submitFalJob(IMAGE_EDIT_ENDPOINT, { prompt: editPrompt, image_urls: [imageUrl] });
   return pollForImageUrl(IMAGE_EDIT_ENDPOINT, requestId, 90_000, "Scene image edit");
+}
+
+// Powers the "Cast & Locations" reference library (2026-09-14): given zero
+// reference images, generates from scratch (text-to-image); given one or
+// more, edits/composites them (same real fal-verified behavior as
+// editImageWithPrompt, just generalized to N references and either
+// engine). `numImages` (both engines support up to 10 in one call) returns
+// several variants at once so the user can pick the best - the same
+// "generate a grid, choose one" pattern proven in the Runway workflow
+// video studied 2026-09-14 for real, generalizable technique (never any
+// content from that video itself).
+export async function generateImageVariants(
+  prompt: string,
+  engine: ImageEngine,
+  referenceImageUrls: string[] = [],
+  numImages = 1,
+): Promise<string[]> {
+  const cfg = IMAGE_ENGINES[engine];
+  const useEdit = referenceImageUrls.length > 0;
+  const endpoint = useEdit ? cfg.editEndpoint : cfg.textToImageEndpoint;
+  const input: Record<string, unknown> = { prompt, num_images: numImages };
+  if (useEdit) input.image_urls = referenceImageUrls;
+  const requestId = await submitFalJob(endpoint, input);
+  return pollForImageUrls(endpoint, requestId, 120_000, "Reference image generation");
 }

@@ -280,6 +280,37 @@ export async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // "Cast & Locations" reference library (2026-09-14) - real engineering
+  // for character/product/location fidelity across scenes, per direct
+  // request. A named, reusable reference (a character's face, a specific
+  // location/set, a product, or a "vibe" mood board) lives once per
+  // project; a scene picks which of these apply to it, and the SAME
+  // uploaded/generated image bytes get passed into the image-edit call for
+  // every scene that uses it (see generateImageVariants in fal.ts) -
+  // consistency comes from reusing one real reference image, not from
+  // re-describing the same thing in words each time and hoping the model
+  // renders it the same way twice. 'vibe' is deliberately a separate kind
+  // from the others: a mood/style/atmosphere reference (e.g. "cloudy grey
+  // medieval light") is meant to influence tone, not be copied literally
+  // into the frame the way a character's face or a product should be -
+  // the prompt-builder (see reference/add and slot/generate-image routes)
+  // treats the two differently for exactly this reason.
+  await sql`
+    CREATE TABLE IF NOT EXISTS storyboard_references (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id UUID NOT NULL REFERENCES grid_storyboard_projects(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL, -- 'character' | 'location' | 'product' | 'vibe'
+      name TEXT NOT NULL,
+      image_url TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  // Which references (if any) a scene should stay consistent with - a
+  // simple text[] rather than a join table since a slot's reference list
+  // is always read/written as one unit (never queried from the reference
+  // side), and Neon's driver passes JS string arrays through to a text[]
+  // column natively.
+  await sql`ALTER TABLE grid_storyboard_slots ADD COLUMN IF NOT EXISTS reference_ids TEXT[] NOT NULL DEFAULT '{}'`;
   // Character-video generation (2026-09-11) - pick one of the pre-made
   // AI actors, choose a voice (a Lucy preset -> Kling Avatar lip-sync, or
   // "veo" -> Veo generates its own dialogue+voice), type text. Billed
@@ -386,6 +417,21 @@ export async function initSchema() {
   // only ever uses Kling Avatar directly (audio drives the whole
   // generation from the start), so there's no silent version to keep.
   await sql`ALTER TABLE subscription_video_jobs ADD COLUMN IF NOT EXISTS silent_video_url TEXT`;
+  // Honest lip-sync choice (2026-09-14) - previously pay-as-you-go always
+  // attempted real lip-sync the moment audio was added, with no way to opt
+  // out even though non-Kling engines' two-step lip-sync pass doesn't
+  // always land well (per direct feedback: "rather than force lip-sync and
+  // hope it lands, give the user the choice, honestly labeled"). 'lipsync'
+  // preserves the exact prior behavior (Kling Avatar in one step, or a
+  // silent render + real Kling lipsync pass for every other engine).
+  // 'voiceover' is new: renders silent/ambient exactly the same way, but
+  // muxes the audio track on afterward via fal's plain ffmpeg
+  // merge-audio-video utility (see FFMPEG_MERGE_ENDPOINT in fal.ts) instead
+  // of attempting to reshape the mouth at all - the most reliable option
+  // precisely because it never tries to sync anything. Applies to Kling too
+  // in 'voiceover' mode (skips Avatar, uses the normal image/text-to-video
+  // endpoint like every other engine).
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS lip_sync_mode TEXT NOT NULL DEFAULT 'lipsync'`;
 }
 
 // Generic runtime settings, switchable from the admin dashboard without a
@@ -895,6 +941,7 @@ export type VideoPaygoJob = {
   merge_request_id: string | null;
   modal_job_id: string | null;
   preset_voice_id: string | null;
+  lip_sync_mode: "lipsync" | "voiceover";
   status: "pending" | "in_progress" | "completed" | "failed";
   video_url: string | null;
   silent_video_url: string | null;
@@ -911,12 +958,14 @@ export async function createVideoPaygoJob(params: {
   inputAudioUrl?: string | null;
   needsMerge?: boolean;
   presetVoiceId?: string | null;
+  lipSyncMode?: "lipsync" | "voiceover";
 }): Promise<string> {
   const rows = await sql`
-    INSERT INTO video_paygo_jobs (user_id, engine, prompt, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id)
+    INSERT INTO video_paygo_jobs (user_id, engine, prompt, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id, lip_sync_mode)
     VALUES (
       ${params.userId}, ${params.engine}, ${params.prompt}, ${params.falEndpoint},
-      ${params.inputImageUrl ?? null}, ${params.inputAudioUrl ?? null}, ${params.needsMerge ?? false}, ${params.presetVoiceId ?? null}
+      ${params.inputImageUrl ?? null}, ${params.inputAudioUrl ?? null}, ${params.needsMerge ?? false}, ${params.presetVoiceId ?? null},
+      ${params.lipSyncMode ?? "lipsync"}
     )
     RETURNING id
   `;
@@ -1284,6 +1333,18 @@ export type GridStoryboardSlot = {
   video_fal_request_id: string | null;
   status: GridStoryboardSlotStatus;
   error: string | null;
+  reference_ids: string[];
+  created_at: string;
+};
+
+export type StoryboardReferenceKind = "character" | "location" | "product" | "vibe";
+
+export type StoryboardReference = {
+  id: string;
+  project_id: string;
+  kind: StoryboardReferenceKind;
+  name: string;
+  image_url: string;
   created_at: string;
 };
 
@@ -1328,6 +1389,57 @@ export async function getGridStoryboardSlotProjectOwner(slotId: string): Promise
 
 export async function setGridStoryboardSlotImage(slotId: string, imageUrl: string) {
   await sql`UPDATE grid_storyboard_slots SET image_url = ${imageUrl}, status = 'image_ready' WHERE id = ${slotId}`;
+}
+
+export async function setGridStoryboardSlotReferences(slotId: string, referenceIds: string[]) {
+  await sql`UPDATE grid_storyboard_slots SET reference_ids = ${referenceIds} WHERE id = ${slotId}`;
+}
+
+export async function createStoryboardReference(params: {
+  projectId: string;
+  kind: StoryboardReferenceKind;
+  name: string;
+  imageUrl: string;
+}): Promise<StoryboardReference> {
+  const rows = await sql`
+    INSERT INTO storyboard_references (project_id, kind, name, image_url)
+    VALUES (${params.projectId}, ${params.kind}, ${params.name}, ${params.imageUrl})
+    RETURNING *
+  `;
+  return rows[0] as StoryboardReference;
+}
+
+export async function listStoryboardReferences(projectId: string): Promise<StoryboardReference[]> {
+  const rows = await sql`SELECT * FROM storyboard_references WHERE project_id = ${projectId} ORDER BY created_at ASC`;
+  return rows as StoryboardReference[];
+}
+
+export async function getStoryboardReferencesByIds(ids: string[]): Promise<StoryboardReference[]> {
+  if (ids.length === 0) return [];
+  const rows = await sql`SELECT * FROM storyboard_references WHERE id = ANY(${ids})`;
+  return rows as StoryboardReference[];
+}
+
+export async function getStoryboardReferenceProjectOwner(referenceId: string): Promise<string | null> {
+  const rows = await sql`
+    SELECT p.user_id FROM storyboard_references r JOIN grid_storyboard_projects p ON p.id = r.project_id
+    WHERE r.id = ${referenceId}
+  `;
+  return rows[0] ? (rows[0].user_id as string) : null;
+}
+
+export async function deleteStoryboardReference(referenceId: string) {
+  await sql`DELETE FROM storyboard_references WHERE id = ${referenceId}`;
+}
+
+// "Fix it at the reference level" (2026-09-14) - real, generalized
+// technique: when a character/location/product reference is missing a
+// detail (a specific outfit, a held item, a helmet), regenerating the
+// REFERENCE itself and updating it in place means every scene that already
+// points at this reference id automatically inherits the fix on its next
+// generation - no need to hunt down and redo every scene individually.
+export async function updateStoryboardReferenceImage(referenceId: string, imageUrl: string) {
+  await sql`UPDATE storyboard_references SET image_url = ${imageUrl} WHERE id = ${referenceId}`;
 }
 
 export async function setGridStoryboardSlotVideoRequest(slotId: string, prompt: string, videoModel: string, requestId: string) {

@@ -10,7 +10,16 @@ import {
   setVideoPaygoJobResolvedAudio,
   setVideoPaygoJobSilentVideo,
 } from "@/lib/db";
-import { getFalJobStatus, getFalJobResult, submitLipsyncJob, submitFalJob, uploadBufferToFal, LIPSYNC_ENDPOINT } from "@/lib/fal";
+import {
+  getFalJobStatus,
+  getFalJobResult,
+  submitLipsyncJob,
+  submitMergeAudioVideo,
+  submitFalJob,
+  uploadBufferToFal,
+  LIPSYNC_ENDPOINT,
+  FFMPEG_MERGE_ENDPOINT,
+} from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
 import { VIDEO_PAYGO_ENGINES, buildFalInput, type VideoEngine } from "@/lib/videoPaygo";
 import { probeAudioDurationSeconds, padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
@@ -100,9 +109,16 @@ export async function GET(req: NextRequest) {
   // is still named merge_request_id (no schema change needed - same
   // one-extra-fal-job-after-the-video shape either way).
   if (job.merge_request_id) {
+    // Which fal job is being polled depends on which choice the user made
+    // up front (see lip_sync_mode's column comment in db.ts): a real
+    // lip-sync attempt polls Kling's lipsync endpoint, a plain voiceover
+    // polls the ffmpeg audio-mux endpoint instead - same "IN_PROGRESS"
+    // handling either way, just a different vendor job underneath.
+    const isVoiceover = job.lip_sync_mode === "voiceover";
+    const mergeEndpoint = isVoiceover ? FFMPEG_MERGE_ENDPOINT : LIPSYNC_ENDPOINT;
     let mergeStatus;
     try {
-      mergeStatus = await getFalJobStatus(LIPSYNC_ENDPOINT, job.merge_request_id);
+      mergeStatus = await getFalJobStatus(mergeEndpoint, job.merge_request_id);
     } catch {
       // Transient error checking status (not a real vendor failure) - try
       // again on the next poll instead of failing the job.
@@ -110,13 +126,13 @@ export async function GET(req: NextRequest) {
     }
     if (mergeStatus === "COMPLETED") {
       try {
-        const result = await getFalJobResult(LIPSYNC_ENDPOINT, job.merge_request_id);
+        const result = await getFalJobResult(mergeEndpoint, job.merge_request_id);
         const videoUrl = result.video?.url;
-        if (!videoUrl) throw new Error("lip-sync result had no video url");
+        if (!videoUrl) throw new Error(isVoiceover ? "audio merge result had no video url" : "lip-sync result had no video url");
         await completeVideoPaygoJob(job.id, videoUrl);
         return NextResponse.json({ status: "COMPLETED", videoUrl, silentVideoUrl: job.silent_video_url });
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to fetch lip-synced result";
+        const message = err instanceof Error ? err.message : isVoiceover ? "Failed to fetch the combined result" : "Failed to fetch lip-synced result";
         // Atomic claim - only refund if THIS call actually transitioned the
         // job to failed, so two overlapping polls can't both refund it.
         if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
@@ -124,7 +140,7 @@ export async function GET(req: NextRequest) {
       }
     }
     if (mergeStatus === "FAILED") {
-      if (await failVideoPaygoJob(job.id, "Lip-syncing your audio to the video failed")) {
+      if (await failVideoPaygoJob(job.id, isVoiceover ? "Adding your audio to the video failed" : "Lip-syncing your audio to the video failed")) {
         await refundVideoCredit(user.id);
       }
       return NextResponse.json({ status: "FAILED", error: "Generation failed - your credit has been refunded" });
@@ -147,13 +163,16 @@ export async function GET(req: NextRequest) {
 
       if (job.needs_merge && job.input_audio_url) {
         // Keep the raw, silent engine output around (2026-09-12) - it's
-        // about to become submitLipsyncJob's input below, but was
+        // about to become the merge/lipsync step's input below, but was
         // previously discarded right after. Saved so a customer can
-        // download both this and the lip-synced result once the job
-        // finishes - see the silent_video_url column comment in db.ts.
+        // download both this and the final result once the job finishes -
+        // see the silent_video_url column comment in db.ts.
         await setVideoPaygoJobSilentVideo(job.id, videoUrl);
-        const lipsyncRequestId = await submitLipsyncJob(videoUrl, job.input_audio_url);
-        await setVideoPaygoJobMergeRequestId(job.id, lipsyncRequestId);
+        const mergeRequestId =
+          job.lip_sync_mode === "voiceover"
+            ? await submitMergeAudioVideo(videoUrl, job.input_audio_url)
+            : await submitLipsyncJob(videoUrl, job.input_audio_url);
+        await setVideoPaygoJobMergeRequestId(job.id, mergeRequestId);
         return NextResponse.json({ status: "IN_PROGRESS" });
       }
 

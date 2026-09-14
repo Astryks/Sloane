@@ -1725,6 +1725,7 @@ function PayAsYouGoVideoSection() {
   const media = useReferenceMedia();
   const audio = useMultiAudio();
   const [audioMode, setAudioMode] = useState<PaygoAudioMode>("none");
+  const [lipSyncMode, setLipSyncMode] = useState<"lipsync" | "voiceover">("lipsync");
   const [presetVoiceId, setPresetVoiceId] = useState(PRESET_VOICES[0].id);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
@@ -1795,6 +1796,7 @@ function PayAsYouGoVideoSection() {
       form.append("engine", engine);
       form.append("prompt", prompt);
       form.append("audio_mode", audioMode);
+      if (audioMode !== "none") form.append("lip_sync_mode", lipSyncMode);
       if (media.imageBlob) form.append("reference_image", media.imageBlob, "reference.jpg");
       if (audioMode === "own" && audio.selectedBlob) form.append("reference_audio", audio.selectedBlob);
       if (audioMode === "lucy") form.append("preset_voice_id", presetVoiceId);
@@ -1920,11 +1922,36 @@ function PayAsYouGoVideoSection() {
           )}
 
           {(audioMode === "own" || audioMode === "lucy") && (
-            <p className="text-xs italic leading-relaxed text-muted">
-              {engine === "kling"
-                ? "Kling lip-syncs your photo directly to this audio in one step - the mouth movements actually follow what's said."
-                : `${VIDEO_PAYGO_ENGINES[engine].label} renders the scene first, then a separate lip-sync pass matches the mouth movements to this audio afterward - two steps instead of one, same real lip-sync result.`}
-            </p>
+            <div className="space-y-2 rounded-2xl border border-border bg-white/70 p-3">
+              <p className="text-xs font-semibold text-foreground">Should the mouth try to match this audio?</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLipSyncMode("lipsync")}
+                  className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                    lipSyncMode === "lipsync" ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
+                  }`}
+                >
+                  Lip-sync it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLipSyncMode("voiceover")}
+                  className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                    lipSyncMode === "voiceover" ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
+                  }`}
+                >
+                  Just play it as a voiceover
+                </button>
+              </div>
+              <p className="text-xs italic leading-relaxed text-muted">
+                {lipSyncMode === "lipsync"
+                  ? engine === "kling"
+                    ? "Kling lip-syncs your photo directly to this audio in one step - real mouth movement, but not guaranteed to land perfectly."
+                    : `${VIDEO_PAYGO_ENGINES[engine].label} renders the scene first, then a separate lip-sync pass matches the mouth movements afterward - two steps instead of one, and honestly the weaker of the two options here.`
+                  : "The most reliable choice: your audio plays under the video with no attempt to match mouth movements - nothing to look uncanny if it misses."}
+              </p>
+            </div>
           )}
 
           <textarea
@@ -1963,8 +1990,8 @@ function PayAsYouGoVideoSection() {
 
       <p className="text-xs italic leading-relaxed text-muted">
         Same flat price per video regardless of engine - real clip length differs (Kling is a hard 5s, the other four are 8s).
-        Every engine gives you real lip-sync when you add audio: Kling does it in one step (needs a photo); every
-        other engine renders the scene first, then a separate lip-sync pass matches the mouth movements afterward.
+        When you add audio, you choose: a real lip-sync attempt, or a plain voiceover with no mouth-matching at all -
+        your call, honestly labeled either way.
       </p>
     </Card>
   );

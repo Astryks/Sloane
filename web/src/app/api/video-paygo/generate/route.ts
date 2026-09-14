@@ -19,6 +19,7 @@ const MAX_PROMPT_LENGTH = 600;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 type AudioMode = "none" | "own" | "lucy";
+type LipSyncMode = "lipsync" | "voiceover";
 
 // Pay-as-you-go now accepts an optional reference photo/video-frame and/or
 // an optional audio track alongside the text prompt, on any of the five
@@ -67,12 +68,16 @@ export async function POST(req: NextRequest) {
     const referenceAudio = form.get("reference_audio");
     const audioMode = (String(form.get("audio_mode") ?? "none") || "none") as AudioMode;
     const presetVoiceId = String(form.get("preset_voice_id") ?? "");
+    const lipSyncMode = (String(form.get("lip_sync_mode") ?? "lipsync") || "lipsync") as LipSyncMode;
 
     if (!VIDEO_PAYGO_ENGINES[engine]) {
       return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
     }
     if (!["none", "own", "lucy"].includes(audioMode)) {
       return NextResponse.json({ error: "Unknown audio option" }, { status: 400 });
+    }
+    if (!["lipsync", "voiceover"].includes(lipSyncMode)) {
+      return NextResponse.json({ error: "Unknown lip-sync option" }, { status: 400 });
     }
     const wantsLucyVoice = audioMode === "lucy";
     if (wantsLucyVoice && !PRESET_VOICES.find((v) => v.id === presetVoiceId)) {
@@ -83,12 +88,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Add the audio you want on this video" }, { status: 400 });
     }
     const hasImage = referenceImage instanceof Blob && referenceImage.size > 0;
-    const useKlingAvatar = engine === "kling" && (hasAudio || wantsLucyVoice);
+    // Kling Avatar is only used when the user actually wants a lip-sync
+    // attempt - in "voiceover" mode Kling behaves like every other engine
+    // (renders normally, audio muxed on after, no mouth-sync attempt).
+    const useKlingAvatar = engine === "kling" && (hasAudio || wantsLucyVoice) && lipSyncMode === "lipsync";
     // Kling Avatar's own audio already carries every word the video needs -
     // the only case a text prompt can be skipped entirely. A Lucy voice
     // still needs the prompt (it's the TTS script - see phase 0 in
     // status/route.ts), same as every non-Kling path.
-    const promptOptional = engine === "kling" && hasAudio;
+    const promptOptional = useKlingAvatar && hasAudio;
     if (!prompt && !promptOptional) {
       return NextResponse.json(
         { error: wantsLucyVoice ? "Write what you want the voice to say" : "Describe the video you want" },
@@ -98,7 +106,7 @@ export async function POST(req: NextRequest) {
     if (prompt.length > MAX_PROMPT_LENGTH) {
       return NextResponse.json({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
     }
-    if ((hasAudio || wantsLucyVoice) && engine === "kling" && !hasImage) {
+    if ((hasAudio || wantsLucyVoice) && useKlingAvatar && !hasImage) {
       return NextResponse.json(
         { error: wantsLucyVoice ? "Kling needs a photo (or video) to lip-sync the voice to" : "Kling needs a photo (or video) to lip-sync your audio to" },
         { status: 400 },
@@ -169,7 +177,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
-    const needsMerge = (hasAudio || wantsLucyVoice) && engine !== "kling";
+    // "voiceover" mode never uses Avatar (even on Kling) - every engine
+    // renders normally, then gets its audio muxed on afterward, so
+    // needsMerge now also fires for Kling whenever lip-sync wasn't chosen.
+    const needsMerge = (hasAudio || wantsLucyVoice) && !useKlingAvatar;
     const falEndpoint = useKlingAvatar
       ? VIDEO_PAYGO_ENGINES.kling.falAvatarEndpoint!
       : hasImage
@@ -185,6 +196,7 @@ export async function POST(req: NextRequest) {
       inputAudioUrl,
       needsMerge,
       presetVoiceId: wantsLucyVoice ? presetVoiceId : null,
+      lipSyncMode,
     });
 
     try {
