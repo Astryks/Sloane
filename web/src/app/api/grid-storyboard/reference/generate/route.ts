@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getGridStoryboardProjectOwner, initSchema } from "@/lib/db";
-import { generateImageVariants, isImageEngine } from "@/lib/fal";
+import { generateImageVariants, hasEnoughFalBalanceToGenerate, isImageEngine } from "@/lib/fal";
 
 const MAX_PROMPT_LENGTH = 500;
 const MAX_VARIANTS = 4;
@@ -42,6 +42,19 @@ export async function POST(req: NextRequest) {
     const owner = await getGridStoryboardProjectOwner(projectId);
     if (!owner) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     if (owner !== user.id) return NextResponse.json({ error: "Not your project" }, { status: 403 });
+
+    // Same real-time balance guard as video-paygo/generate - catches an
+    // exhausted/locked fal account before it ever reaches fal's API, so the
+    // user sees a clean, honest message instead of fal's raw account-status
+    // response text leaking straight into the UI (a real bug found live,
+    // 2026-09-14 - the account genuinely ran out of balance and every image
+    // route was surfacing the raw "{"detail":"User is locked..."}" JSON).
+    if (!(await hasEnoughFalBalanceToGenerate())) {
+      return NextResponse.json(
+        { error: "Image generation is temporarily paused while we top up - please try again shortly." },
+        { status: 503 },
+      );
+    }
 
     const imageUrls = await generateImageVariants(prompt, engine, baseImageUrls, numImages);
     return NextResponse.json({ imageUrls });

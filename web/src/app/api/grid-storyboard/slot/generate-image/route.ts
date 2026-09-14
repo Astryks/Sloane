@@ -8,7 +8,7 @@ import {
   setGridStoryboardSlotReferences,
   type StoryboardReference,
 } from "@/lib/db";
-import { generateImageVariants, isImageEngine } from "@/lib/fal";
+import { generateImageVariants, hasEnoughFalBalanceToGenerate, isImageEngine } from "@/lib/fal";
 
 const MAX_PROMPT_LENGTH = 500;
 const MAX_REFERENCES = 6;
@@ -62,6 +62,13 @@ export async function POST(req: NextRequest) {
     const owner = await getGridStoryboardSlotProjectOwner(slotId);
     if (!owner) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
     if (owner !== user.id) return NextResponse.json({ error: "Not your project" }, { status: 403 });
+
+    if (!(await hasEnoughFalBalanceToGenerate())) {
+      return NextResponse.json(
+        { error: "Image generation is temporarily paused while we top up - please try again shortly." },
+        { status: 503 },
+      );
+    }
 
     const references = await getStoryboardReferencesByIds(referenceIds);
     const finalPrompt = buildReferencePrompt(prompt, references);

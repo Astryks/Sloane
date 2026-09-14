@@ -220,7 +220,7 @@ function ReferenceLibrary({
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-white/70 p-5">
+    <div className="space-y-3 rounded-2xl border border-border bg-surface p-5">
       <div>
         <p className="text-sm font-bold">Cast & Locations</p>
         <p className="mt-1 text-xs leading-relaxed text-muted">
@@ -646,7 +646,7 @@ export default function AdsGridPage() {
       <SiteHeader title="Ads" subtitle="Build a storyboard one scene at a time, then combine them into one video." />
       <main className="mx-auto max-w-5xl space-y-6 px-4 py-10">
         {showExample && (
-          <div className="rounded-2xl border border-border bg-white/70 p-5 text-sm">
+          <div className="rounded-2xl border border-border bg-surface p-5 text-sm">
             <div className="mb-2 flex items-center justify-between">
               <p className="font-bold">How this works: create a storyboard, one scene at a time</p>
               <button onClick={() => setShowExample(false)} className="text-xs text-muted underline">

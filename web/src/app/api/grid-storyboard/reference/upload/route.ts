@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { createStoryboardReference, getGridStoryboardProjectOwner, initSchema, type StoryboardReferenceKind } from "@/lib/db";
-import { uploadBufferToFal } from "@/lib/fal";
+import { hasEnoughFalBalanceToGenerate, uploadBufferToFal } from "@/lib/fal";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const MAX_NAME_LENGTH = 60;
@@ -35,6 +35,17 @@ export async function POST(req: NextRequest) {
     const owner = await getGridStoryboardProjectOwner(projectId);
     if (!owner) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     if (owner !== user.id) return NextResponse.json({ error: "Not your project" }, { status: 403 });
+
+    // fal locks the whole account (storage included, not just generation)
+    // when balance runs out - same guard as generation routes, so an
+    // exhausted/locked account shows a clean message here too instead of
+    // fal's raw "User is locked..." response text (real bug, 2026-09-14).
+    if (!(await hasEnoughFalBalanceToGenerate())) {
+      return NextResponse.json(
+        { error: "Uploads are temporarily paused while we top up - please try again shortly." },
+        { status: 503 },
+      );
+    }
 
     const imageUrl = await uploadBufferToFal(Buffer.from(await image.arrayBuffer()), image.type, "reference.jpg");
     const reference = await createStoryboardReference({ projectId, kind, name, imageUrl });

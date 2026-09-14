@@ -20,6 +20,20 @@
   --blue-wash: #eaf1f6;
   --purple: #9b7dc0;
   --purple-wash: #f3edf9;
+
+  /* `cream`/`mint` were used across page.tsx, ads/page.tsx, and
+     stitch/page.tsx (bg-cream, bg-mint, border-mint) without ever being
+     added here - Tailwind v4 silently generates no rule for an
+     unrecognized color name, so every one of those was a real, invisible
+     no-op (confirmed via getComputedStyle: backgroundColor came back
+     transparent) - found 2026-09-14 while fixing a direct report that
+     panels were hard to read. `cream` matches the page's own
+     `--background` (it was standing in for the page bg, so make it real);
+     `mint` is a new, deliberately deeper green (#3f8068) chosen for a
+     real >=4.5:1 contrast ratio against white button text, not just
+     "any green" - the existing `--sage` is too light for that (2.3:1). */
+  --cream: #fdf6f0;
+  --mint: #3f8068;
 }
 
 @theme inline {
@@ -40,6 +54,8 @@
   --color-blue-wash: var(--blue-wash);
   --color-purple: var(--purple);
   --color-purple-wash: var(--purple-wash);
+  --color-cream: var(--cream);
+  --color-mint: var(--mint);
   --font-sans: var(--font-nunito);
 }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getGridStoryboardSlotProjectOwner, initSchema, setGridStoryboardSlotImage } from "@/lib/db";
-import { uploadBufferToFal } from "@/lib/fal";
+import { hasEnoughFalBalanceToGenerate, uploadBufferToFal } from "@/lib/fal";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
@@ -23,6 +23,13 @@ export async function POST(req: NextRequest) {
     const owner = await getGridStoryboardSlotProjectOwner(slotId);
     if (!owner) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
     if (owner !== user.id) return NextResponse.json({ error: "Not your project" }, { status: 403 });
+
+    if (!(await hasEnoughFalBalanceToGenerate())) {
+      return NextResponse.json(
+        { error: "Uploads are temporarily paused while we top up - please try again shortly." },
+        { status: 503 },
+      );
+    }
 
     const imageUrl = await uploadBufferToFal(Buffer.from(await image.arrayBuffer()), image.type, "scene.jpg");
     await setGridStoryboardSlotImage(slotId, imageUrl);
