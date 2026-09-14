@@ -896,10 +896,14 @@ const PRODUCT_AD_SCRIPT =
 // images are almost all downloaded stock/editorial photography used as
 // internal mood-board references (one has a visible Getty Images
 // watermark, confirmed by looking at the actual embedded images before
-// adding anything) - not ours to republish. Only JoJo's own brand assets
-// (their logo, app-store badges, end card - no third-party photography in
-// any of them) are included here, on scenes 1/17/18. Every other scene
-// stays text-only rather than using a stock photo we don't have rights to.
+// adding anything) - not ours to republish. Scenes 1/17/18 use JoJo's own
+// brand assets instead (their logo, app-store badges, end card - no
+// third-party photography in any of them). Every other scene (2-16) uses
+// an original illustration generated from that scene's own shot
+// description, in a consistent flat-illustration storyboard style - not a
+// recreation of her actual reference photos, a new image made from the
+// same brief, so visitors can see what a real storyboard image + video
+// pairing looks like without reproducing anyone else's copyrighted photos.
 const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
   {
     audio: "Are you ready to take a ride on #PASABAYDELIVERY?\n\nWith Jojo, where I'm going I'll bring it there\nSa Jojo, sabay kita!",
@@ -909,62 +913,77 @@ const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
   {
     audio: "Meet Bea.",
     video: "Show an online seller surrounded by packages to be sent. Incidental props show her very millennial office space - plants, inspirational quotes.",
+    image: "/product-showcase/jojo/scene-2.png",
   },
   {
     audio: "She is in Pasig and she needs to send a package to Makati.\n\nNasa Pasig siya at kailangan niyang magpadala ng package to Makati.",
     video: "Image of a map or something similar, then there's an arrow going from point A to B",
+    image: "/product-showcase/jojo/scene-3.png",
   },
   {
     audio: "Meet Mario.",
     video: "Show Mario, smiling",
+    image: "/product-showcase/jojo/scene-4.png",
   },
   {
     audio: "He is also from Pasig but he commutes to Makati every day.\n\nTaga-Pasig rin siya pero nagko-commute siya papuntang Makati every day.",
     video: "Show Mario in a crowded MRT.\nClose up of hand hanging on a hand grip\nFull shot Mario sideways, getting through the train motion and handling the hand grip",
+    image: "/product-showcase/jojo/scene-5.png",
   },
   {
     audio: "What if there's a way for them to help one another?",
     video: "Split screen - show Bea looking right frame, Mario looking back at Bea.",
+    image: "/product-showcase/jojo/scene-6.png",
   },
   {
     audio: "It's possible with #PASABAYDELIVERY or Crowdshipping",
     video: "“#PasabayDelivery” term appears on screen and when it is mentioned, the characters can smile as if in agreement",
+    image: "/product-showcase/jojo/scene-7.png",
   },
   {
     audio: "Through Jojo app,",
     video: "Show the hand of Bea holding a phone",
+    image: "/product-showcase/jojo/scene-8.png",
   },
   {
     audio: "pwedeng ipasabay ni Bea ang package niya kay Mario",
     video: "Frontal shot of Bea holding the phone with Jojo app.\n\nWe show a graphic with 'We found a match'\nWe split the screen again with the mid shot of Mario, with his phone and smiling.",
+    image: "/product-showcase/jojo/scene-9.png",
   },
   {
     audio: "at pwedeng kumita si Mario ng extra money on his way to Makati.",
     video: "Show Mario getting the box from Bea and heading to Makati with it.\nClose up & mid shot of package delivery, full shot of Mario commuting with package",
+    image: "/product-showcase/jojo/scene-10.png",
   },
   {
     audio: "The sender gets fast, secure and convenient shipping",
     video: "Show a smiling Bea looking at her phone. Split screen with the app animation showing the confirmed booking",
+    image: "/product-showcase/jojo/scene-11.png",
   },
   {
     audio: "while helping a fellow Filipino turn his commute into cash.",
     video: "The receiver is typing on a computer, Mario enters the frame in a funny way and delivers the item.\nNext frame, a blue piggy bank and Mario inserting a bill inside.",
+    image: "/product-showcase/jojo/scene-12.png",
   },
   {
     audio: "Ang mga Jojo transporters ay verified at rated by the community.\n\nPwede pang i-track ang delivery live via the app para siguradong in good hands ang package mo.",
     video: "Jojo Transporter profile tagged as 4.9 stars rating plus the number of trips\n\nReal-time app tracking screenshot - show movement",
+    image: "/product-showcase/jojo/scene-13.png",
   },
   {
     audio: "Hindi diyan nagtatapos ang pagtutulungan sa Jojo!",
     video: "Show Bea and Mario talking with the package. The two are being replicated to represent other senders and transporters.",
+    image: "/product-showcase/jojo/scene-14.png",
   },
   {
     audio: "Ang bawat #PasabayDelivery ay nakakatulong rin sa pagbawas ng traffic at polusyon sa Pilipinas.",
     video: "We see Mario blowing a dark cloud out of the frame",
+    image: "/product-showcase/jojo/scene-15.png",
   },
   {
     audio: "After all, no extra cars or trucks will be added on the road, wala rin extra wrapping bags ang kailangan kapag nagpasabay ka kay Jojo!",
     video: "We see Bea, air in the wind, breathing clean air while the many moving vehicles are slowly reduced",
+    image: "/product-showcase/jojo/scene-16.png",
   },
   {
     audio: "Send through Jojo or be a Jojo.\n\nDownload the Jojo app at makisabay na!",
@@ -1172,7 +1191,7 @@ function ProductAdSection() {
               <thead>
                 <tr className="text-left text-muted">
                   <th className="w-10 border-b border-border pb-1 pr-2 font-semibold">#</th>
-                  <th className="w-20 border-b border-border pb-1 pr-2 font-semibold">Image</th>
+                  <th className="w-28 border-b border-border pb-1 pr-2 font-semibold">Image</th>
                   <th className="border-b border-border pb-1 pr-3 font-semibold">Audio</th>
                   <th className="border-b border-border pb-1 font-semibold">Video</th>
                 </tr>
@@ -1184,7 +1203,7 @@ function ProductAdSection() {
                     <td className="border-b border-border py-2 pr-2">
                       {scene.image && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={scene.image} alt={`Scene ${i + 1} brand asset`} className="h-14 w-14 rounded-lg border border-border object-contain bg-white" />
+                        <img src={scene.image} alt={`Scene ${i + 1} storyboard image`} className="h-24 w-24 rounded-lg border border-border object-cover bg-white" />
                       )}
                     </td>
                     <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-foreground">{scene.audio}</td>
@@ -1195,10 +1214,11 @@ function ProductAdSection() {
             </table>
           </div>
           <p className="mt-2 text-[11px] italic text-muted">
-            Shared with us directly by the director - her real storyboard, transcribed here scene by scene.
-            Reference images are shown only where they&apos;re JoJo&apos;s own brand assets (logo, app badges, end
-            card) - the rest of her original scene references were licensed stock photography, so they&apos;re
-            described in words here instead of reproduced.
+            Shared with us directly by the director - her real storyboard, transcribed here scene by scene. On
+            scenes 1, 17, and 18 the image is JoJo&apos;s own brand asset (logo, app badges, end card). Everywhere
+            else, her original reference was licensed stock photography, so instead of reproducing that, we
+            generated a new illustration from the same shot description - a real example of a storyboard image for
+            each scene, just not her actual photo.
           </p>
         </details>
 
