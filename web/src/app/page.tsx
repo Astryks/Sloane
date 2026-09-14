@@ -1057,6 +1057,40 @@ function ProductAdSection() {
         Honest caveat: a snapshot from 2026-09-12, not a permanent ranking - these models change constantly.
       </p>
 
+      <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-purple">Real case study</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          We spoke with a film director about how she actually plans an ad, using a real one she directed as the
+          example: a launch spot for JoJo, a Philippines crowdshipping startup - regular people request local
+          deliveries, and other regular people who are already headed that way opt in to fulfill them for extra
+          cash. Her ad went on to get <strong>1.7M views on Facebook</strong>.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          Her storyboard broke the ad into clear beats, the same shape a lot of strong short ads follow: a fun cold
+          open, introduce two ordinary people who each have half of a problem, show the problem, introduce the app
+          as the thing that connects them, show the transaction actually happening, back it up with trust signals
+          (ratings, live tracking), then close on a bigger mission (less traffic and pollution) plus a clear call
+          to download. Every scene has its own shot description and its own line of narration - a storyboard, not
+          just a script.
+        </p>
+        <div className="mx-auto mt-3 max-w-md overflow-hidden rounded-2xl border border-border">
+          <iframe
+            src="https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2Fjojo-pasabay-delivery%2F2521431254554554%2F&show_text=false&width=560&t=0"
+            width="100%"
+            height="314"
+            style={{ border: "none", overflow: "hidden" }}
+            scrolling="no"
+            frameBorder="0"
+            allowFullScreen
+            title="JoJo Pasabay Delivery ad on Facebook"
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          That&apos;s the real, finished ad, embedded directly from JoJo&apos;s own Facebook page - not made by us,
+          shown here purely as a real example of a storyboard becoming a finished ad.
+        </p>
+      </div>
+
       <div className="rounded-2xl border border-purple/20 bg-white/80 p-4 text-center">
         <p className="text-sm font-bold text-foreground">Want to build an ad like this yourself?</p>
         <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted">
