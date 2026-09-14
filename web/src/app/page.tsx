@@ -10,8 +10,6 @@ import { DeliverySliders, DEFAULT_DELIVERY, type Delivery } from "@/components/D
 import { WaitingGame } from "@/components/WaitingGame";
 import { useAccessToken } from "@/lib/useAccessToken";
 import { useFreeTierId } from "@/lib/useFreeTierId";
-import { PLANS, VIDEO_CREDIT_COSTS } from "@/lib/plans";
-import { CHARACTERS, LUCY_VOICE_CREDIT_COST } from "@/lib/characters";
 import { VIDEO_PAYGO_ENGINES, VIDEO_CREDIT_PACKS, type VideoEngine } from "@/lib/videoPaygo";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
@@ -582,42 +580,6 @@ function VideoResultPlayer({
   );
 }
 
-// Replaces the old "paste your access code above" gating message on
-// Custom/Cinematic/Character (2026-09-13, per direct request, alongside
-// removing the home page's access-code paste box entirely) - a single
-// purple button, styled like pay-as-you-go's real Generate button, that
-// reveals the actual sign-in-or-pay-as-you-go options on click rather than
-// stating them unconditionally up front.
-function GenerateVideoCTA() {
-  const [showOptions, setShowOptions] = useState(false);
-  return (
-    <div>
-      <button
-        onClick={() => setShowOptions(true)}
-        className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft"
-      >
-        Generate my video
-      </button>
-      {showOptions && (
-        <p className="mt-3 rounded-2xl bg-white/70 p-3 text-sm text-muted">
-          <a href="/account" className="font-semibold text-purple underline">
-            Sign in
-          </a>{" "}
-          with a Video plan (or{" "}
-          <a href="/billing" className="font-semibold text-purple underline">
-            see plans
-          </a>
-          ), or{" "}
-          <a href="#pay-as-you-go" className="font-semibold text-purple underline">
-            try it out with pay as you go
-          </a>{" "}
-          first - no subscription needed.
-        </p>
-      )}
-    </div>
-  );
-}
-
 // Shared image/video-upload control used by all 3 upload-driven video modes.
 // Accepts MULTIPLE photos/videos at once - upload a few and pick which one
 // actually gets used, since every engine we call (Kling Avatar, Veo image-
@@ -862,312 +824,6 @@ function MultiAudioField({ audio }: { audio: ReturnType<typeof useMultiAudio> })
   );
 }
 
-function VideoIntroSection() {
-  const videoCredits = PLANS.video.videoCreditsPerMonth;
-  return (
-    <Card wash="bg-purple-wash/90" iconColor="text-purple" icon="🎬" title="Video" subtitle="Four ways to make a video with Lucy - pick what fits.">
-      <ul className="grid gap-2 text-sm leading-relaxed text-muted sm:grid-cols-2">
-        <li>
-          <strong className="text-foreground">Your video, hyper-realistic.</strong> Your own photo/video + a script -
-          exactly your face, powered by Kling.
-        </li>
-        <li>
-          <strong className="text-foreground">Cinematic.</strong> Your photo + a scene you describe - Veo generates
-          the shot.
-        </li>
-        <li>
-          <strong className="text-foreground">Pick a character.</strong> 5 ready-made AI actors, always the same
-          face.
-        </li>
-        <li>
-          <strong className="text-foreground">Pay as you go.</strong> Any prompt (+ optional photo/audio), any
-          engine, no subscription.
-        </li>
-      </ul>
-      <p className="rounded-2xl bg-white/70 p-3 text-xs leading-relaxed text-muted">
-        The first three modes share one Video-plan balance: {videoCredits} credits/month. Whichever mode you use,
-        your photo, video, and any audio are sent to third-party AI vendors (Kling, Veo, Seedance, and the fal.ai
-        platform we use to reach them) for processing.
-      </p>
-    </Card>
-  );
-}
-
-// --- Mode 1: your own photo/video, hyper-realistic, exactly your likeness ---
-
-function CustomVideoSection() {
-  const { token } = useAccessToken();
-  const media = useReferenceMedia();
-  const [script, setScript] = useState("");
-  const [voiceMode, setVoiceMode] = useState<"preset" | "own">("preset");
-  const [presetVoiceId, setPresetVoiceId] = useState(PRESET_VOICES[0].id);
-  const ownVoice = useMultiAudio();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ videoUrl: string; jobId: string } | null>(null);
-
-  async function handleGenerate() {
-    if (!media.imageBlob) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const form = new FormData();
-      form.append("access_token", token ?? "");
-      form.append("script", script);
-      form.append("reference_image", media.imageBlob, "reference.jpg");
-      form.append("voice_mode", voiceMode);
-      if (voiceMode === "preset") {
-        form.append("preset_voice_id", presetVoiceId);
-      } else {
-        // Their own recorded/uploaded voice sample, or - if they uploaded a
-        // video and never separately gave a voice sample - the original
-        // video file itself: the backend already transcodes any container
-        // (including a video's own audio track) into the reference clip.
-        const audioSource = ownVoice.selectedBlob ?? media.videoFile;
-        if (!audioSource) throw new Error("Add a short sample of your voice, or upload a video that has your voice in it");
-        form.append("reference_audio", audioSource);
-      }
-      const res = await fetch("/api/generate-custom-video", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Generation failed");
-      const jobId = data.jobId as string;
-      const { videoUrl } = await pollVideoJob("/api/generate-custom-video/status", jobId, token);
-      setResult({ videoUrl, jobId });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <Card
-      id="hyper-realistic"
-      wash="bg-purple-wash/90"
-      iconColor="text-purple"
-      icon="🪞"
-      title="Your video, hyper-realistic"
-      subtitle="Upload your photo or a short video of yourself, type what to say - we animate exactly your face to say it."
-    >
-      <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
-        <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/kirsty-kling-dub.mp4" controls loop muted playsInline />
-        <p className="mt-1.5 text-xs text-muted">Example: a real photo, dubbed with a Lucy voice via Kling.</p>
-      </div>
-
-      <ReferenceMediaField media={media} label="Upload your photo(s) or video(s)" />
-
-      <textarea
-        className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-        rows={3}
-        placeholder="Type what you want to say..."
-        value={script}
-        onChange={(e) => setScript(e.target.value)}
-      />
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => setVoiceMode("preset")}
-          className={`flex-1 rounded-full py-2 text-xs font-semibold ${voiceMode === "preset" ? "bg-purple text-white shadow-soft" : "border border-border bg-white text-muted"}`}
-        >
-          Pick a Lucy voice
-        </button>
-        <button
-          onClick={() => setVoiceMode("own")}
-          className={`flex-1 rounded-full py-2 text-xs font-semibold ${voiceMode === "own" ? "bg-purple text-white shadow-soft" : "border border-border bg-white text-muted"}`}
-        >
-          Use my own voice
-        </button>
-      </div>
-
-      {voiceMode === "preset" ? (
-        <select
-          value={presetVoiceId}
-          onChange={(e) => setPresetVoiceId(e.target.value)}
-          className="w-full rounded-2xl border border-border bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple"
-        >
-          {PRESET_VOICES.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.label}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <>
-          <MultiAudioField audio={ownVoice} />
-          {ownVoice.items.length === 0 && media.videoFile && (
-            <p className="text-xs text-muted">No sample given - we&apos;ll use the audio from your uploaded video instead.</p>
-          )}
-        </>
-      )}
-
-      {!token ? (
-        <GenerateVideoCTA />
-      ) : (
-        <button
-          onClick={handleGenerate}
-          disabled={loading || !media.imageBlob || !script.trim() || (voiceMode === "own" && !ownVoice.selectedBlob && !media.videoFile)}
-          className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft disabled:opacity-50"
-        >
-          {loading ? "Generating… (usually 30-90s)" : `Generate (${LUCY_VOICE_CREDIT_COST} video credits)`}
-        </button>
-      )}
-
-      {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
-      {result && <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="custom" accessToken={token} />}
-      <p className="text-xs text-muted">Powered by Kling - the only engine in our tests that reliably keeps your exact face, not a lookalike.</p>
-    </Card>
-  );
-}
-
-// --- Mode 2: cinematic scenes with Veo, from your own photo ---
-
-type CinematicAudioSource = "engine_native" | "own_upload" | "lucy_preset" | "lucy_cloned";
-
-// Guides people toward a genuinely more detailed prompt (Veo's real output
-// quality tracks how specific the description is), quoting the real prompt
-// used for the moon-surface demo clip on this page as a worked example.
-const CINEMATIC_PROMPT_PLACEHOLDER = `Describe the scene in detail - the more specific, the better the result. For example, for the astronaut-on-the-moon video above, we used: "Cinematic wide shot on the lunar surface: this exact same woman walks slowly beside a NASA-style lunar rover, dust kicking up under her boots, Earth hanging in the black sky. In the mid-ground a futuristic..."`;
-
-function CinematicVideoSection() {
-  const { token } = useAccessToken();
-  const media = useReferenceMedia();
-  const [prompt, setPrompt] = useState("");
-  const [audioSource, setAudioSource] = useState<CinematicAudioSource>("engine_native");
-  const [presetVoiceId, setPresetVoiceId] = useState(PRESET_VOICES[0].id);
-  const ownAudio = useMultiAudio();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ videoUrl: string; jobId: string; silentVideoUrl: string | null } | null>(null);
-  const cinematicCredits = Math.round(8 / VIDEO_CREDIT_COSTS.cinematicSecondsPerCredit);
-
-  async function handleGenerate() {
-    if (!media.imageBlob) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      // Real bug fixed here: "My own audio"/"Clone my voice" silently
-      // omitted reference_audio if none was ever added, wasting a round-
-      // trip on a request the server was always going to reject - check
-      // client-side first instead, matching CustomVideoSection's pattern.
-      if ((audioSource === "own_upload" || audioSource === "lucy_cloned") && !ownAudio.selectedBlob) {
-        throw new Error(audioSource === "own_upload" ? "Add the audio you want on this video" : "Add a short sample of your voice to clone");
-      }
-      const form = new FormData();
-      form.append("access_token", token ?? "");
-      form.append("prompt", prompt);
-      form.append("reference_image", media.imageBlob, "reference.jpg");
-      form.append("audio_source", audioSource);
-      if (audioSource === "lucy_preset") form.append("preset_voice_id", presetVoiceId);
-      if ((audioSource === "own_upload" || audioSource === "lucy_cloned") && ownAudio.selectedBlob) {
-        form.append("reference_audio", ownAudio.selectedBlob);
-      }
-      const res = await fetch("/api/generate-cinematic-video", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Generation failed");
-      const jobId = data.jobId as string;
-      const { videoUrl, silentVideoUrl } = await pollVideoJob("/api/generate-cinematic-video/status", jobId, token);
-      setResult({ videoUrl, jobId, silentVideoUrl });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const AUDIO_OPTIONS: { id: CinematicAudioSource; label: string }[] = [
-    { id: "engine_native", label: "Veo's own voice" },
-    { id: "own_upload", label: "My own audio" },
-    { id: "lucy_preset", label: "A Lucy voice" },
-    { id: "lucy_cloned", label: "Clone my voice" },
-  ];
-
-  return (
-    <Card
-      id="cinematic"
-      wash="bg-purple-wash/90"
-      iconColor="text-purple"
-      icon="🎬"
-      title="Cinematic"
-      subtitle="Your photo + a scene you describe - Veo generates the shot around it."
-    >
-      <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
-        <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/kirsty-moon-veo-audio.mp4" controls loop muted playsInline />
-        <p className="mt-1.5 text-xs text-muted">Example: the moon-surface scene, from the prompt below.</p>
-      </div>
-
-      <ReferenceMediaField media={media} label="Upload your photo(s) or video(s)" />
-
-      <textarea
-        className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-        rows={4}
-        placeholder={CINEMATIC_PROMPT_PLACEHOLDER}
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-      />
-
-      <div className="grid grid-cols-2 gap-2">
-        {AUDIO_OPTIONS.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => setAudioSource(o.id)}
-            className={`rounded-2xl border p-2 text-xs font-semibold ${audioSource === o.id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"}`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-
-      {audioSource === "lucy_preset" && (
-        <select
-          value={presetVoiceId}
-          onChange={(e) => setPresetVoiceId(e.target.value)}
-          className="w-full rounded-2xl border border-border bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple"
-        >
-          {PRESET_VOICES.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.label}
-            </option>
-          ))}
-        </select>
-      )}
-      {(audioSource === "own_upload" || audioSource === "lucy_cloned") && <MultiAudioField audio={ownAudio} />}
-      {audioSource !== "engine_native" && (
-        <p className="text-xs italic text-muted">
-          {audioSource === "lucy_cloned" ? "This clones your voice reading the text above." : "Your audio is layered onto the finished video afterward - not lip-synced frame-by-frame the way our Kling modes are, since Veo doesn't support that."}
-        </p>
-      )}
-
-      {!token ? (
-        <GenerateVideoCTA />
-      ) : (
-        <button
-          onClick={handleGenerate}
-          disabled={
-            loading ||
-            !media.imageBlob ||
-            !prompt.trim() ||
-            ((audioSource === "own_upload" || audioSource === "lucy_cloned") && !ownAudio.selectedBlob)
-          }
-          className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft disabled:opacity-50"
-        >
-          {loading ? "Generating… (usually 30-90s)" : `Generate (${cinematicCredits} video credits)`}
-        </button>
-      )}
-
-      {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
-      {result && (
-        <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="cinematic" accessToken={token} silentVideoUrl={result.silentVideoUrl} />
-      )}
-      <p className="text-xs text-muted">
-        A real limitation, not hidden: the more your reference photo moves within the scene, the more the face can
-        drift from your real one - Veo regenerates the whole scene rather than animating your exact photo.
-      </p>
-    </Card>
-  );
-}
-
 // Shared "try it yourself" block for showcase/comparison sections (2026-09-13)
 // - these sections show FIXED, already-rendered demo videos, not a live
 // generator, so clicking "Generate my video" here can't actually submit a
@@ -1175,9 +831,6 @@ function CinematicVideoSection() {
 // at the two real ways to actually generate: sign up for a plan, or use
 // pay-as-you-go right now with no subscription at all - that explanation
 // only ever shows up after the click, never in the button label itself.
-// Label kept identical to GenerateVideoCTA below (and the inline
-// button in ProductAdShowcaseSection) on purpose - same button, same
-// wording, wherever it shows up on the page.
 function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [showCta, setShowCta] = useState(false);
@@ -1217,111 +870,6 @@ function TryYourOwnPromptCTA({ defaultPrompt }: { defaultPrompt: string }) {
 
 const MODEL_SHOWCASE_PROMPT =
   'Cinematic wide shot on the lunar surface: this exact same woman walks slowly beside a NASA-style lunar rover, dust kicking up under her boots, Earth hanging in the black sky, dramatic lighting, photorealistic, 4K quality.';
-
-type ShowcaseModel = {
-  id: string;
-  name: string;
-  note: string;
-  videoUrl: string | null;
-  blockedReason?: string;
-};
-
-const SHOWCASE_MODELS: ShowcaseModel[] = [
-  {
-    id: "kling",
-    name: "Kling v3 Pro",
-    note: "Our pick: the best face consistency and scene quality of the five we tested. Note: this is a newer Kling version than the \"Kling 2.1 Master\" you can actually generate with above.",
-    videoUrl: "/model-showcase/moon_kling_v3_pro.mp4",
-  },
-  {
-    id: "veo",
-    name: "Veo 3.1",
-    note: "Strong, reliable cinematic quality - what Cinematic mode above uses today.",
-    videoUrl: "/model-showcase/moon_veo.mp4",
-  },
-  {
-    id: "grok",
-    name: "Grok Imagine 1.5",
-    note: "Usable quality and the cheapest of the five to generate.",
-    videoUrl: "/model-showcase/moon_grok_1.5.mp4",
-  },
-  {
-    id: "minimax",
-    name: "MiniMax H3 Max",
-    note: "Weakest likeness and motion quality of the engines that actually rendered.",
-    videoUrl: "/model-showcase/moon_minimax_h3max.mp4",
-  },
-  {
-    id: "seedance",
-    name: "Seedance 2.0",
-    note: "Couldn't offer us a result on this test - see below.",
-    videoUrl: null,
-    blockedReason:
-      "Seedance can't offer us a realistic video for this scene right now because of their own privacy policy around hyper-realistic AI faces. Every engine has its own quirks scene-to-scene - try your own prompt and photo above and see how it does for you.",
-  },
-];
-
-function ModelShowcaseSection() {
-  const [modelId, setModelId] = useState(SHOWCASE_MODELS[0].id);
-  const model = SHOWCASE_MODELS.find((m) => m.id === modelId)!;
-
-  return (
-    <Card
-      wash="bg-purple-wash/90"
-      iconColor="text-purple"
-      icon="🎞️"
-      title="AI video models"
-      subtitle="We ran the same reference photo and the same prompt through five video engines - tap one to see the result."
-    >
-      <p className="text-sm leading-relaxed text-muted">
-        Pay as you go above lets you generate with Kling, Veo, Grok, MiniMax, or Seedance. Quality, speed, and
-        reliability vary a lot by engine and by scene - here&apos;s the identical lunar scene, run through each one,
-        so you can see the difference before you pick an engine to generate your own.
-      </p>
-
-      {model.videoUrl ? (
-        <video key={model.id} className="mx-auto w-full max-w-xs rounded-xl" src={model.videoUrl} controls loop muted playsInline />
-      ) : (
-        <div className="rounded-2xl border border-coral-dark/30 bg-white/70 p-4 text-sm text-coral-dark">
-          {model.blockedReason}
-        </div>
-      )}
-
-      <div className="flex flex-wrap justify-center gap-3">
-        {SHOWCASE_MODELS.map((m) => (
-          <button
-            key={m.id}
-            onClick={() => setModelId(m.id)}
-            className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
-              modelId === m.id
-                ? "bg-purple text-white shadow-soft"
-                : m.videoUrl
-                  ? "border border-border bg-white text-muted hover:opacity-100"
-                  : "border border-coral-dark/30 bg-white text-coral-dark opacity-80"
-            }`}
-          >
-            {m.name}
-            {!m.videoUrl && " ⚠️"}
-          </button>
-        ))}
-      </div>
-
-      <p className="text-xs text-muted">{model.note}</p>
-
-      <p className="text-xs text-muted">
-        Caveat: these models change constantly - the labs and fal ship new versions often. This is a snapshot of
-        where each one stood when we tested it (2026-09-12), not a permanent ranking.
-      </p>
-
-      <div className="rounded-2xl bg-white/70 p-3">
-        <p className="mb-2 text-xs font-semibold text-muted">
-          That&apos;s the exact prompt we used above - want to try your own?
-        </p>
-        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} />
-      </div>
-    </Card>
-  );
-}
 
 // --- "Just for fun" product-ad showcase: Harper + our own product, real 2-scene ad ---
 
@@ -1380,7 +928,7 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
   },
 ];
 
-function ProductAdShowcaseSection() {
+function ReviewsSection() {
   const [modelId, setModelId] = useState(PRODUCT_AD_MODELS[0].id);
   const model = PRODUCT_AD_MODELS.find((m) => m.id === modelId)!;
   const [yogaPrompt, setYogaPrompt] = useState(PRODUCT_AD_YOGA_PROMPT);
@@ -1391,16 +939,36 @@ function ProductAdShowcaseSection() {
     <Card
       wash="bg-purple-wash/90"
       iconColor="text-purple"
-      icon="🥤"
-      title="Just for fun: can AI promote your product?"
-      subtitle="We asked each model to put one of our AI characters in a real, spoken, two-scene ad for our own product - no distortion allowed."
+      icon="⭐"
+      title="Our candid reviews"
+      subtitle="Real tests, real footage - no model is best at everything, so here's what we actually saw from each one."
     >
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
+          <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/kirsty-kling-dub.mp4" controls loop muted playsInline />
+          <p className="mt-1.5 text-xs text-muted">
+            A real photo, dubbed with a Lucy voice via Kling. Our pick for this: Kling is the only engine here that
+            reliably keeps your exact face, not a lookalike.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
+          <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/kirsty-moon-veo-audio.mp4" controls loop muted playsInline />
+          <p className="mt-1.5 text-xs text-muted">
+            A photo dropped into a fully new scene, generated by Veo from a detailed text prompt - strong,
+            reliable cinematic quality when you don&apos;t need to keep your exact background.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-white/70 p-3">
+        <p className="mb-2 text-xs font-semibold text-muted">That&apos;s the exact prompt behind the moon clip above - want to try your own version?</p>
+        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} />
+      </div>
+
       <p className="text-sm leading-relaxed text-muted">
-        Harper (one of our AI characters) actually speaks the script below, in her own voice, and changes both
-        outfit and location partway through - a yoga mat to a corner office, holding the tumbler the whole time.
-        Since no engine here can take two reference photos of a real person in one generation, we built each
-        scene as its own separate video (its own reference photo, its own line of the script, its own lip-sync
-        pass), then stitched the two scenes together afterward.
+        Below is a tougher test: the same product, the same script, the same AI character (Harper), run through
+        five engines - a two-scene ad, yoga mat to corner office, with real spoken dialogue and a real product
+        logo to keep intact.
       </p>
       <p className="text-xs italic text-muted">
         To be clear: this tumbler isn&apos;t a real Lucy Labs product - it&apos;s a relabeled stock photo, purely
@@ -1547,169 +1115,6 @@ function ProductAdShowcaseSection() {
   );
 }
 
-function CharacterVideoSection() {
-  const { token } = useAccessToken();
-  const [characterId, setCharacterId] = useState(CHARACTERS[0].id);
-  const [script, setScript] = useState("");
-  const [voiceMode, setVoiceMode] = useState<"default" | "pick" | "own">("default");
-  const [presetVoiceId, setPresetVoiceId] = useState(PRESET_VOICES[0].id);
-  const ownVoice = useMultiAudio();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ videoUrl: string; jobId: string } | null>(null);
-  const [playingId, setPlayingId] = useState<string | null>(null);
-  const previewRef = useRef<HTMLVideoElement | null>(null);
-
-  const character = CHARACTERS.find((c) => c.id === characterId)!;
-
-  // Click a character to select them AND hear/see their intro preview -
-  // same one-shared-element toggle pattern as VoicePicker.tsx's audio
-  // previews (click again to stop, click again to replay).
-  function handlePickCharacter(id: (typeof CHARACTERS)[number]["id"]) {
-    setCharacterId(id);
-    const el = previewRef.current;
-    if (!el) return;
-    if (playingId === id) {
-      el.pause();
-      el.currentTime = 0;
-      setPlayingId(null);
-      return;
-    }
-    el.pause();
-    el.src = `/character-samples/${id}.mp4`;
-    el.currentTime = 0;
-    el.play().catch(() => {});
-    setPlayingId(id);
-  }
-
-  async function handleGenerate() {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const form = new FormData();
-      form.append("access_token", token ?? "");
-      form.append("character_id", characterId);
-      form.append("script", script);
-      if (voiceMode === "own") {
-        if (!ownVoice.selectedBlob) throw new Error("Add a short sample of your voice, or pick a Lucy voice instead");
-        form.append("voice_choice", "__own__");
-        form.append("reference_audio", ownVoice.selectedBlob);
-      } else {
-        form.append("voice_choice", voiceMode === "pick" ? presetVoiceId : character.defaultVoiceId);
-      }
-      const res = await fetch("/api/generate-character-video", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Generation failed");
-      const jobId = data.jobId as string;
-      const { videoUrl } = await pollVideoJob("/api/generate-character-video/status", jobId, token);
-      setResult({ videoUrl, jobId });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <Card
-      wash="bg-purple-wash/90"
-      iconColor="text-purple"
-      icon="🎭"
-      title="Pick a character"
-      subtitle="5 ready-made AI actors, always the same face - tap one to hear them, then type what they should say."
-    >
-      <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
-        <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/ads-veo-demo.mp4" controls loop muted playsInline />
-        <p className="mt-1.5 text-xs text-muted">Example: Harper, one of the 5 characters below.</p>
-      </div>
-
-      <video
-        ref={previewRef}
-        onEnded={() => setPlayingId(null)}
-        controls
-        playsInline
-        className={playingId ? "mx-auto w-full max-w-xs rounded-xl" : "hidden"}
-      />
-      <div className="flex flex-wrap justify-center gap-4">
-        {CHARACTERS.map((c) => (
-          <button key={c.id} onClick={() => handlePickCharacter(c.id)} className="flex flex-col items-center gap-1.5">
-            <span className="relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={c.imageUrl}
-                alt={c.name}
-                className={`h-16 w-16 rounded-full object-cover shadow-soft transition ${
-                  characterId === c.id ? "shadow-soft-lg scale-110 ring-4 ring-purple" : "opacity-70 hover:opacity-100"
-                }`}
-              />
-              {playingId === c.id && (
-                <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] shadow-soft">
-                  🔊
-                </span>
-              )}
-            </span>
-            <span className={`text-xs ${characterId === c.id ? "font-bold text-purple" : "text-muted"}`}>{c.name}</span>
-          </button>
-        ))}
-      </div>
-
-      {!token ? (
-        <GenerateVideoCTA />
-      ) : (
-        <>
-          <textarea
-            className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-            rows={3}
-            placeholder="What should they say?"
-            value={script}
-            onChange={(e) => setScript(e.target.value)}
-          />
-
-          <div className="flex gap-2">
-            {(["default", "pick", "own"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setVoiceMode(m)}
-                className={`flex-1 rounded-full py-2 text-xs font-semibold ${voiceMode === m ? "bg-purple text-white shadow-soft" : "border border-border bg-white text-muted"}`}
-              >
-                {m === "default" ? `${character.name}'s voice` : m === "pick" ? "Another Lucy voice" : "My own voice"}
-              </button>
-            ))}
-          </div>
-          {voiceMode === "pick" && (
-            <select
-              value={presetVoiceId}
-              onChange={(e) => setPresetVoiceId(e.target.value)}
-              className="w-full rounded-2xl border border-border bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple"
-            >
-              {PRESET_VOICES.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
-          )}
-          {voiceMode === "own" && <MultiAudioField audio={ownVoice} />}
-
-          <button
-            onClick={handleGenerate}
-            disabled={loading || !script.trim() || (voiceMode === "own" && !ownVoice.selectedBlob)}
-            className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft disabled:opacity-50"
-          >
-            {loading ? "Generating… (usually 30-90s)" : `Generate (${LUCY_VOICE_CREDIT_COST} video credits)`}
-          </button>
-
-          {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
-          {result && <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="character" accessToken={token} />}
-        </>
-      )}
-
-      <p className="text-xs text-muted">Comes from your Video plan&apos;s 40 credits/month - each video costs {LUCY_VOICE_CREDIT_COST}.</p>
-    </Card>
-  );
-}
-
 type PaygoAudioMode = "none" | "own" | "lucy";
 
 const PAYGO_PROMPT_PLACEHOLDER =
@@ -1820,8 +1225,8 @@ function PayAsYouGoVideoSection() {
       wash="bg-purple-wash/90"
       iconColor="text-purple"
       icon="🎟"
-      title="Pay as you go"
-      subtitle="Any prompt, plus an optional photo/video and audio - pick your engine, no subscription."
+      title="Option 1: Create any video"
+      subtitle="Any prompt, plus an optional photo/video and audio - pick your engine, no subscription, pay per video."
     >
       {!signedIn ? (
         <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">
@@ -1997,6 +1402,43 @@ function PayAsYouGoVideoSection() {
   );
 }
 
+// Three clear video options (2026-09-14, per direct request to clean up
+// what had grown into 6+ overlapping video sections): 1) pay as you go,
+// any prompt/engine, reviews right below it; 2) Ads - a manual storyboard
+// grid at /ads; 3) Stitch - free, combine-your-own-clips at /stitch. Each
+// gets one plain link-out card here rather than being duplicated inline,
+// so this page stays about generating one video at a time and the
+// multi-scene tools live on their own focused pages.
+function VideoOptionCard({
+  number,
+  icon,
+  title,
+  description,
+  href,
+  cta,
+}: {
+  number: number;
+  icon: string;
+  title: string;
+  description: string;
+  href: string;
+  cta: string;
+}) {
+  return (
+    <a href={href} className="block rounded-2xl border border-border bg-white p-5 shadow-soft transition hover:shadow-lg">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-purple-wash text-lg">{icon}</div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-purple">Option {number}</p>
+          <p className="text-base font-bold text-foreground">{title}</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>
+          <span className="mt-3 inline-block text-sm font-semibold text-purple underline">{cta} →</span>
+        </div>
+      </div>
+    </a>
+  );
+}
+
 export default function Home() {
   useEffect(() => {
     // Fire-and-forget: wakes up Modal well before the visitor finishes
@@ -2015,14 +1457,28 @@ export default function Home() {
         />
         <PresetVoiceSection />
         <CloneVoiceSection />
-        <VideoIntroSection />
-        <CustomVideoSection />
-        <CinematicVideoSection />
-        <CharacterVideoSection />
+
         <PayAsYouGoVideoSection />
-        <ModelShowcaseSection />
-        <ProductAdShowcaseSection />
+        <ReviewsSection />
         <ProductAdFlow />
+
+        <VideoOptionCard
+          number={2}
+          icon="🎬"
+          title="Ads: build a storyboard"
+          description="A grid of scenes, built one at a time - bring your own images or generate them, write your own prompts, pick your own model per scene. You only pay for the scenes you generate."
+          href="/ads"
+          cta="Open the storyboard builder"
+        />
+        <VideoOptionCard
+          number={3}
+          icon="🧵"
+          title="Create my video"
+          description="Free. Combine your generated clips (from either option above) into one video, in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
+          href="/stitch"
+          cta="Combine my videos"
+        />
+
         <Footer />
       </main>
     </div>
