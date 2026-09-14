@@ -648,12 +648,20 @@ export default function AdsGridPage() {
         {showExample && (
           <div className="rounded-2xl border border-border bg-white/70 p-5 text-sm">
             <div className="mb-2 flex items-center justify-between">
-              <p className="font-bold">How this works: one grid becomes one ad</p>
+              <p className="font-bold">How this works: create a storyboard, one scene at a time</p>
               <button onClick={() => setShowExample(false)} className="text-xs text-muted underline">
                 Hide
               </button>
             </div>
 
+            <ol className="mb-4 list-decimal space-y-1 pl-5 text-muted">
+              <li>Research your favourite ads or movie scenes.</li>
+              <li>Create a storyboard with images.</li>
+              <li>Use the best AI models to animate it.</li>
+              <li>Stitch all scenes together and bring your ad to life!</li>
+            </ol>
+
+            <p className="mb-2 text-xs font-semibold text-muted">What that looks like below:</p>
             <div className="mb-4 overflow-x-auto">
               <div className="flex min-w-max items-center gap-2 py-1">
                 <div className="w-28 shrink-0 rounded-xl border border-border bg-white p-2 text-center text-[10px] text-muted">
@@ -693,7 +701,8 @@ export default function AdsGridPage() {
               </div>
             </div>
 
-            <ol className="list-decimal space-y-1.5 pl-5 text-muted">
+            <p className="mb-1 text-xs font-semibold text-muted">The details:</p>
+            <ul className="list-disc space-y-1.5 pl-5 text-muted">
               <li>
                 <strong>Cast & Locations first.</strong> Nail down each character, location, and product once - design them with any AI chat you like and upload the result, or generate
                 one right here with GPT Image or Nano Banana Pro (included, no extra charge - only turning a scene into video costs a credit).
@@ -716,7 +725,7 @@ export default function AdsGridPage() {
               <li>
                 When you&apos;re done, click <strong>Create full ad</strong> below - it hands your finished scenes straight to the combine tool, already loaded in order.
               </li>
-            </ol>
+            </ul>
           </div>
         )}
 
