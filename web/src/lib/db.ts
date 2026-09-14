@@ -245,6 +245,41 @@ export async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Grid storyboard (2026-09-14) - the leanest of Ad Studio's three entry
+  // points, per direct instruction: NO auto-generated brief/storyboard,
+  // no auto-picked model, no auto-written camera prompt. The user builds
+  // the grid slot by slot (upload their own image, or generate one here),
+  // writes their own prompt (optional real camera-language example chips
+  // offered client-side, never inserted without them choosing to), picks
+  // their own model, and pays one video credit per slot generated - real,
+  // already-proven billing (spendVideoCredit/refundVideoCredit, the same
+  // mechanism video_paygo_jobs already uses), not new payment
+  // infrastructure. Stitching is deliberately NOT wired in here - the
+  // existing free /stitch tool already does this and works on any video
+  // regardless of where it came from, so there's no reason to duplicate it.
+  await sql`
+    CREATE TABLE IF NOT EXISTS grid_storyboard_projects (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS grid_storyboard_slots (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id UUID NOT NULL REFERENCES grid_storyboard_projects(id) ON DELETE CASCADE,
+      order_index INT NOT NULL,
+      image_url TEXT,
+      prompt TEXT,
+      video_model TEXT,
+      video_url TEXT,
+      video_fal_request_id TEXT,
+      status TEXT NOT NULL DEFAULT 'empty',
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
   // Character-video generation (2026-09-11) - pick one of the pre-made
   // AI actors, choose a voice (a Lucy preset -> Kling Avatar lip-sync, or
   // "veo" -> Veo generates its own dialogue+voice), type text. Billed
@@ -1225,6 +1260,94 @@ export async function approveAdStudioScene(sceneId: string) {
 
 export async function failAdStudioScene(sceneId: string, error: string) {
   await sql`UPDATE ad_studio_scenes SET status = 'failed', error = ${error} WHERE id = ${sceneId}`;
+}
+
+// --- Grid storyboard (manual, pay-per-slot, no auto-generated brief) ---
+
+export type GridStoryboardProject = {
+  id: string;
+  user_id: string;
+  title: string | null;
+  created_at: string;
+};
+
+export type GridStoryboardSlotStatus = "empty" | "image_ready" | "pending_video" | "video_ready" | "failed";
+
+export type GridStoryboardSlot = {
+  id: string;
+  project_id: string;
+  order_index: number;
+  image_url: string | null;
+  prompt: string | null;
+  video_model: string | null;
+  video_url: string | null;
+  video_fal_request_id: string | null;
+  status: GridStoryboardSlotStatus;
+  error: string | null;
+  created_at: string;
+};
+
+export async function createGridStoryboardProject(userId: string, title: string | null): Promise<string> {
+  const rows = await sql`
+    INSERT INTO grid_storyboard_projects (user_id, title) VALUES (${userId}, ${title}) RETURNING id
+  `;
+  return rows[0].id as string;
+}
+
+export async function getGridStoryboardProjectOwner(projectId: string): Promise<string | null> {
+  const rows = await sql`SELECT user_id FROM grid_storyboard_projects WHERE id = ${projectId}`;
+  return rows[0] ? (rows[0].user_id as string) : null;
+}
+
+export async function listGridStoryboardSlots(projectId: string): Promise<GridStoryboardSlot[]> {
+  const rows = await sql`SELECT * FROM grid_storyboard_slots WHERE project_id = ${projectId} ORDER BY order_index ASC`;
+  return rows as GridStoryboardSlot[];
+}
+
+export async function addGridStoryboardSlot(projectId: string): Promise<GridStoryboardSlot> {
+  const rows = await sql`
+    INSERT INTO grid_storyboard_slots (project_id, order_index)
+    SELECT ${projectId}, COALESCE(MAX(order_index), -1) + 1 FROM grid_storyboard_slots WHERE project_id = ${projectId}
+    RETURNING *
+  `;
+  return rows[0] as GridStoryboardSlot;
+}
+
+export async function getGridStoryboardSlot(slotId: string): Promise<GridStoryboardSlot | null> {
+  const rows = await sql`SELECT * FROM grid_storyboard_slots WHERE id = ${slotId}`;
+  return (rows[0] as GridStoryboardSlot) ?? null;
+}
+
+export async function getGridStoryboardSlotProjectOwner(slotId: string): Promise<string | null> {
+  const rows = await sql`
+    SELECT p.user_id FROM grid_storyboard_slots s JOIN grid_storyboard_projects p ON p.id = s.project_id
+    WHERE s.id = ${slotId}
+  `;
+  return rows[0] ? (rows[0].user_id as string) : null;
+}
+
+export async function setGridStoryboardSlotImage(slotId: string, imageUrl: string) {
+  await sql`UPDATE grid_storyboard_slots SET image_url = ${imageUrl}, status = 'image_ready' WHERE id = ${slotId}`;
+}
+
+export async function setGridStoryboardSlotVideoRequest(slotId: string, prompt: string, videoModel: string, requestId: string) {
+  await sql`
+    UPDATE grid_storyboard_slots
+    SET prompt = ${prompt}, video_model = ${videoModel}, video_fal_request_id = ${requestId}, status = 'pending_video'
+    WHERE id = ${slotId}
+  `;
+}
+
+export async function setGridStoryboardSlotVideo(slotId: string, videoUrl: string) {
+  await sql`UPDATE grid_storyboard_slots SET video_url = ${videoUrl}, status = 'video_ready' WHERE id = ${slotId}`;
+}
+
+export async function failGridStoryboardSlot(slotId: string, error: string) {
+  await sql`UPDATE grid_storyboard_slots SET status = 'failed', error = ${error} WHERE id = ${slotId}`;
+}
+
+export async function deleteGridStoryboardSlot(slotId: string) {
+  await sql`DELETE FROM grid_storyboard_slots WHERE id = ${slotId}`;
 }
 
 // --- Character video generation (pre-made AI actors) ---
