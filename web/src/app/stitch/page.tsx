@@ -30,6 +30,34 @@ type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
 
+// Real bug found and fixed 2026-09-14 ("combined video file doesn't
+// work"): ffmpeg's concat FILTER requires every input to already share
+// the same frame size - it doesn't auto-scale. Scenes generated through
+// different models on /ads can be landscape (e.g. Veo, 1344x768) or
+// portrait (e.g. MiniMax, 768x1024); concatenating those as-is produced a
+// file real players correctly refused to open (confirmed live: the
+// output's videoWidth/videoHeight came back 0 and readyState 0/error 4 -
+// not a fluke, a genuinely malformed container). Reads real dimensions
+// via a native <video> element rather than guessing, so the fix works for
+// any mix of aspect ratios, not just the two seen while debugging.
+function getVideoDimensions(file: File): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      const { videoWidth, videoHeight } = video;
+      URL.revokeObjectURL(video.src);
+      if (!videoWidth || !videoHeight) reject(new Error("Could not read this video's dimensions"));
+      else resolve({ width: videoWidth, height: videoHeight });
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(video.src);
+      reject(new Error("Could not read this video's dimensions"));
+    };
+    video.src = URL.createObjectURL(file);
+  });
+}
+
 function StitchPageInner() {
   const searchParams = useSearchParams();
   const [items, setItems] = useState<VideoItem[]>([]);
@@ -121,6 +149,13 @@ function StitchPageInner() {
     setResultUrl(null);
     setProgress(0);
     try {
+      // Target frame size = the first clip's own real dimensions - every
+      // other clip gets scaled to fit inside that box and letterboxed
+      // (black bars, aspect ratio preserved) rather than stretched or
+      // cropped. See getVideoDimensions' comment above for why this step
+      // exists at all.
+      const { width: targetW, height: targetH } = await getVideoDimensions(items[0].file);
+
       const { fetchFile } = await import("@ffmpeg/util");
       const ffmpeg = await getFFmpeg();
       setStatus("processing");
@@ -132,8 +167,14 @@ function StitchPageInner() {
         inputNames.push(name);
       }
 
-      const filterInputs = inputNames.map((_, i) => `[${i}:v]`).join("");
-      const filterComplex = `${filterInputs}concat=n=${inputNames.length}:v=1:a=0[outv]`;
+      const scaleChains = inputNames
+        .map(
+          (_, i) =>
+            `[${i}:v]scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`,
+        )
+        .join(";");
+      const concatInputs = inputNames.map((_, i) => `[v${i}]`).join("");
+      const filterComplex = `${scaleChains};${concatInputs}concat=n=${inputNames.length}:v=1:a=0[outv]`;
       const args = inputNames.flatMap((name) => ["-i", name]);
 
       if (musicFile) {
@@ -174,8 +215,18 @@ function StitchPageInner() {
       // wants - a real ffmpeg.wasm/DOM typing mismatch, not a runtime
       // issue (this core build isn't the SharedArrayBuffer-requiring
       // multi-threaded one).
+      // .slice() copies out exactly the valid bytes into a fresh
+      // ArrayBuffer (byteOffset 0, byteLength matching) before handing it
+      // to Blob - `data.buffer` directly would be wrong if `data` were
+      // ever a view into a larger/shared buffer (defensive, since
+      // @ffmpeg/ffmpeg's readFile shape isn't contractually guaranteed to
+      // always be a byteOffset-0 standalone buffer). Also works around the
+      // same TS typing mismatch the old comment described (Uint8Array's
+      // buffer is typed as ArrayBufferLike, which includes SharedArrayBuffer
+      // - not a runtime concern for this non-threaded core build).
       const data = (await ffmpeg.readFile("output.mp4")) as Uint8Array;
-      const blob = new Blob([data.buffer as ArrayBuffer], { type: "video/mp4" });
+      const bytes = data.slice();
+      const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "video/mp4" });
       setResultUrl(URL.createObjectURL(blob));
       setStatus("done");
     } catch (err) {
@@ -253,7 +304,7 @@ function StitchPageInner() {
           <div className="space-y-3 rounded-2xl border border-border bg-white p-6">
             <p className="text-sm font-semibold">Done</p>
             <video src={resultUrl} controls className="w-full rounded-2xl border border-border" />
-            <a href={resultUrl} download="combined.mp4" className="inline-block rounded-full bg-mint px-4 py-2 text-xs font-semibold text-white">
+            <a href={resultUrl} download="combined.mp4" className="inline-block rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
               Download
             </a>
           </div>
