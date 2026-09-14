@@ -173,6 +173,53 @@ export async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Ad Studio (2026-09-14) - a storyboard-first, scene-by-scene ad
+  // production flow: one project holds an ordered list of scenes, each
+  // scene has its own reference image (regenerable by typing an edit,
+  // not just re-describing from scratch - see fal.ts's editImageWithPrompt)
+  // and its own generated video clip, approved one at a time before the
+  // next scene starts. `mode` distinguishes the three entry points from
+  // the same underlying pipeline: "direct" (fal-style - pick a model,
+  // type a prompt, no storyboard at all), "auto" (the full pipeline with
+  // every approval step skipped), "guided" (the real per-scene review
+  // flow). Deliberately a separate table from product_ad_jobs - that
+  // flow is a fixed 5-shot single-job structure and is PARKED pending
+  // product-identity-drift fixes; this is a variable-length, scene-level
+  // structure built around approving each piece as it's made, not one
+  // big submit-and-wait job.
+  await sql`
+    CREATE TABLE IF NOT EXISTS ad_studio_projects (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL,
+      brief TEXT NOT NULL,
+      video_model TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
+      final_video_url TEXT,
+      silent_video_url TEXT,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS ad_studio_scenes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id UUID NOT NULL REFERENCES ad_studio_projects(id) ON DELETE CASCADE,
+      order_index INT NOT NULL,
+      shot_type TEXT NOT NULL,
+      camera TEXT NOT NULL,
+      action TEXT NOT NULL,
+      dialogue TEXT,
+      image_prompt TEXT NOT NULL,
+      image_url TEXT,
+      image_fal_request_id TEXT,
+      video_url TEXT,
+      video_fal_request_id TEXT,
+      status TEXT NOT NULL DEFAULT 'pending_image',
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
   // Character-video generation (2026-09-11) - pick one of the pre-made
   // AI actors, choose a voice (a Lucy preset -> Kling Avatar lip-sync, or
   // "veo" -> Veo generates its own dialogue+voice), type text. Billed
@@ -954,6 +1001,152 @@ export async function failProductAdJob(jobId: string, error: string): Promise<bo
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+// --- Ad Studio (storyboard-first, scene-by-scene ad production) ---
+
+export type AdStudioMode = "direct" | "auto" | "guided";
+
+export type AdStudioProject = {
+  id: string;
+  user_id: string;
+  mode: AdStudioMode;
+  brief: string;
+  video_model: string;
+  status: "draft" | "in_progress" | "completed" | "failed";
+  final_video_url: string | null;
+  silent_video_url: string | null;
+  error: string | null;
+  created_at: string;
+};
+
+// pending_image -> image_ready (regenerable via editImageWithPrompt, any
+// number of times) -> pending_video -> video_ready -> approved (locked in,
+// won't be touched by a later "regenerate the whole project" action).
+export type AdStudioSceneStatus = "pending_image" | "image_ready" | "pending_video" | "video_ready" | "approved" | "failed";
+
+export type AdStudioScene = {
+  id: string;
+  project_id: string;
+  order_index: number;
+  shot_type: string;
+  camera: string;
+  action: string;
+  dialogue: string | null;
+  image_prompt: string;
+  image_url: string | null;
+  image_fal_request_id: string | null;
+  video_url: string | null;
+  video_fal_request_id: string | null;
+  status: AdStudioSceneStatus;
+  error: string | null;
+  created_at: string;
+};
+
+export async function createAdStudioProject(params: {
+  userId: string;
+  mode: AdStudioMode;
+  brief: string;
+  videoModel: string;
+}): Promise<string> {
+  const rows = await sql`
+    INSERT INTO ad_studio_projects (user_id, mode, brief, video_model)
+    VALUES (${params.userId}, ${params.mode}, ${params.brief}, ${params.videoModel})
+    RETURNING id
+  `;
+  return rows[0].id as string;
+}
+
+export async function getAdStudioProject(projectId: string): Promise<AdStudioProject | null> {
+  const rows = await sql`SELECT * FROM ad_studio_projects WHERE id = ${projectId}`;
+  return (rows[0] as AdStudioProject) ?? null;
+}
+
+export async function getAdStudioProjectOwner(projectId: string): Promise<string | null> {
+  const rows = await sql`SELECT user_id FROM ad_studio_projects WHERE id = ${projectId}`;
+  return rows[0] ? (rows[0].user_id as string) : null;
+}
+
+export async function setAdStudioProjectStatus(projectId: string, status: AdStudioProject["status"]) {
+  await sql`UPDATE ad_studio_projects SET status = ${status} WHERE id = ${projectId}`;
+}
+
+export async function completeAdStudioProject(projectId: string, finalVideoUrl: string, silentVideoUrl: string | null) {
+  await sql`
+    UPDATE ad_studio_projects
+    SET status = 'completed', final_video_url = ${finalVideoUrl}, silent_video_url = ${silentVideoUrl}
+    WHERE id = ${projectId}
+  `;
+}
+
+export async function failAdStudioProject(projectId: string, error: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE ad_studio_projects SET status = 'failed', error = ${error}
+    WHERE id = ${projectId} AND status NOT IN ('failed', 'completed')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function createAdStudioScene(params: {
+  projectId: string;
+  orderIndex: number;
+  shotType: string;
+  camera: string;
+  action: string;
+  dialogue: string | null;
+  imagePrompt: string;
+}): Promise<string> {
+  const rows = await sql`
+    INSERT INTO ad_studio_scenes (project_id, order_index, shot_type, camera, action, dialogue, image_prompt)
+    VALUES (${params.projectId}, ${params.orderIndex}, ${params.shotType}, ${params.camera}, ${params.action}, ${params.dialogue}, ${params.imagePrompt})
+    RETURNING id
+  `;
+  return rows[0].id as string;
+}
+
+export async function getAdStudioScene(sceneId: string): Promise<AdStudioScene | null> {
+  const rows = await sql`SELECT * FROM ad_studio_scenes WHERE id = ${sceneId}`;
+  return (rows[0] as AdStudioScene) ?? null;
+}
+
+export async function getAdStudioSceneProjectOwner(sceneId: string): Promise<string | null> {
+  const rows = await sql`
+    SELECT p.user_id FROM ad_studio_scenes s JOIN ad_studio_projects p ON p.id = s.project_id
+    WHERE s.id = ${sceneId}
+  `;
+  return rows[0] ? (rows[0].user_id as string) : null;
+}
+
+export async function listAdStudioScenes(projectId: string): Promise<AdStudioScene[]> {
+  const rows = await sql`
+    SELECT * FROM ad_studio_scenes WHERE project_id = ${projectId} ORDER BY order_index ASC
+  `;
+  return rows as AdStudioScene[];
+}
+
+export async function setAdStudioSceneImageRequestId(sceneId: string, requestId: string) {
+  await sql`UPDATE ad_studio_scenes SET image_fal_request_id = ${requestId}, status = 'pending_image' WHERE id = ${sceneId}`;
+}
+
+export async function setAdStudioSceneImage(sceneId: string, imageUrl: string) {
+  await sql`UPDATE ad_studio_scenes SET image_url = ${imageUrl}, status = 'image_ready' WHERE id = ${sceneId}`;
+}
+
+export async function setAdStudioSceneVideoRequestId(sceneId: string, requestId: string) {
+  await sql`UPDATE ad_studio_scenes SET video_fal_request_id = ${requestId}, status = 'pending_video' WHERE id = ${sceneId}`;
+}
+
+export async function setAdStudioSceneVideo(sceneId: string, videoUrl: string) {
+  await sql`UPDATE ad_studio_scenes SET video_url = ${videoUrl}, status = 'video_ready' WHERE id = ${sceneId}`;
+}
+
+export async function approveAdStudioScene(sceneId: string) {
+  await sql`UPDATE ad_studio_scenes SET status = 'approved' WHERE id = ${sceneId}`;
+}
+
+export async function failAdStudioScene(sceneId: string, error: string) {
+  await sql`UPDATE ad_studio_scenes SET status = 'failed', error = ${error} WHERE id = ${sceneId}`;
 }
 
 // --- Character video generation (pre-made AI actors) ---

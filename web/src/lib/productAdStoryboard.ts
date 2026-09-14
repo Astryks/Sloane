@@ -50,9 +50,9 @@ const MAX_PROMPT_CHARS = 2200;
 
 // ---- Lighting presets: real color temperatures + light direction, not
 // vague adjectives. Picked deterministically from brief keywords below. ----
-type LightingPreset = { name: string; description: string };
+export type LightingPreset = { name: string; description: string };
 
-const LIGHTING_PRESETS: Record<string, LightingPreset> = {
+export const LIGHTING_PRESETS: Record<string, LightingPreset> = {
   goldenHour: {
     name: "golden hour",
     description: "warm 3200K golden-hour side light, long soft shadows falling camera-left, gentle lens flare",
@@ -76,9 +76,9 @@ const LIGHTING_PRESETS: Record<string, LightingPreset> = {
 };
 
 // ---- Pace presets: real, concrete movement speed/distance/duration. ----
-type PaceKey = "slow" | "medium" | "energetic";
-type Pace = { pushInMeters: number; pushInSeconds: number; label: string };
-const PACE_PRESETS: Record<PaceKey, Pace> = {
+export type PaceKey = "slow" | "medium" | "energetic";
+export type Pace = { pushInMeters: number; pushInSeconds: number; label: string };
+export const PACE_PRESETS: Record<PaceKey, Pace> = {
   slow: { pushInMeters: 0.6, pushInSeconds: 4, label: "slow, deliberate" },
   medium: { pushInMeters: 1.2, pushInSeconds: 3, label: "smooth, confident" },
   energetic: { pushInMeters: 1.8, pushInSeconds: 2, label: "brisk, energetic" },
@@ -103,8 +103,8 @@ const PACE_PRESETS: Record<PaceKey, Pace> = {
 // longer-held shots) - so `reaction` is only used for the energetic pace,
 // inserted as an extra quick cutaway; slow/medium keep the original 5-shot
 // structure, which already matches how calmer ads tend to hold shots.
-type ShotRole = "hero" | "beauty" | "interaction" | "reaction" | "transition" | "lockup";
-const SHOT_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
+export type ShotRole = "hero" | "beauty" | "interaction" | "reaction" | "transition" | "lockup";
+export const SHOT_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
   hero: {
     slow: "35mm lens, low-angle static wide shot, subtle 0.4m creep-in over 5s, subject starts in silhouette as backlight slowly brightens to a full reveal",
     medium: "35mm lens, wide shot, smooth Steadicam push-in 1.2m over 3s, ending on a medium-wide frame, eye-level",
@@ -139,7 +139,7 @@ const SHOT_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
 // ---- Facial-expression direction per shot role/pace - generic, varied
 // emotional beats (not tied to any specific ad), since a flat "confident
 // energy" note on every shot reads as stiff. ----
-const EXPRESSION_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
+export const EXPRESSION_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
   hero: {
     slow: "a calm, warm half-smile, unhurried and self-assured",
     medium: "a confident, welcoming smile building as the frame settles",
@@ -176,7 +176,7 @@ const EXPRESSION_LIBRARY: Record<ShotRole, Partial<Record<PaceKey, string>>> = {
 // never a vague one - this is what "brings the video to life" even from a
 // short, simple brief: the richness lives in this template, not in how
 // much detail the user happened to type.
-function detectMood(brief: string): { lighting: LightingPreset; pace: Pace; paceKey: PaceKey } {
+export function detectMood(brief: string): { lighting: LightingPreset; pace: Pace; paceKey: PaceKey } {
   const text = brief.toLowerCase();
   let lighting = LIGHTING_PRESETS.studio;
   if (/beach|sunset|golden|outdoor|coastal|surf/.test(text)) lighting = LIGHTING_PRESETS.goldenHour;

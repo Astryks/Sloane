@@ -313,3 +313,40 @@ export async function uploadBufferToFal(data: Buffer, contentType: string, fileN
   }
   return file_url as string;
 }
+
+// Ad Studio's scene reference images (2026-09-14). Two separate real
+// endpoints, confirmed via fal's public OpenAPI before writing this (not
+// guessed): flux-pro/v1.1-ultra takes only `prompt` (image_url is optional,
+// for style guidance) - the pure text-to-image generator, used for a
+// scene's FIRST image. flux-pro/kontext requires BOTH `prompt` and
+// `image_url` - single-image editing, used every time a user types what
+// to change about an already-generated scene image rather than
+// re-describing it from scratch.
+export const TEXT_TO_IMAGE_ENDPOINT = "fal-ai/flux-pro/v1.1-ultra";
+export const IMAGE_EDIT_ENDPOINT = "fal-ai/flux-pro/kontext";
+
+async function pollForImageUrl(endpoint: string, requestId: string, timeoutMs: number, label: string): Promise<string> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await getFalJobStatus(endpoint, requestId);
+    if (status === "FAILED") throw new Error(`${label} failed`);
+    if (status === "COMPLETED") {
+      const result = await getFalJobResult(endpoint, requestId);
+      const imageUrl = (result as { images?: Array<{ url?: string }> }).images?.[0]?.url;
+      if (!imageUrl) throw new Error(`${label} returned no image`);
+      return imageUrl;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error(`${label} timed out`);
+}
+
+export async function generateImageFromPrompt(prompt: string): Promise<string> {
+  const requestId = await submitFalJob(TEXT_TO_IMAGE_ENDPOINT, { prompt });
+  return pollForImageUrl(TEXT_TO_IMAGE_ENDPOINT, requestId, 90_000, "Scene image generation");
+}
+
+export async function editImageWithPrompt(imageUrl: string, editPrompt: string): Promise<string> {
+  const requestId = await submitFalJob(IMAGE_EDIT_ENDPOINT, { prompt: editPrompt, image_url: imageUrl });
+  return pollForImageUrl(IMAGE_EDIT_ENDPOINT, requestId, 90_000, "Scene image edit");
+}
