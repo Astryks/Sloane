@@ -20,7 +20,23 @@ export type Subscriber = {
   video_seconds_used: number;
 };
 
+// Real gap found by a read-only audit (2026-09-15, GitHub Codespaces):
+// every DB-touching route calls initSchema() first (34 of them), but
+// nothing validated POSTGRES_URL was actually set before the Neon driver's
+// first real query - a missing/misconfigured env var would surface as
+// whatever generic error the driver happens to throw, not a clear,
+// actionable message, unlike the existing setupError() pattern
+// product-ad/generate/route.ts (and others) already use for their own
+// provider keys (FAL_KEY, MODAL_SUBMIT_URL, etc). Fixed centrally, here,
+// rather than patching every route individually - same DRY reasoning the
+// rest of this file already follows. Every caller already wraps
+// initSchema() in its own try/catch and returns a proper JSON error
+// response (never an unhandled crash) - this only makes THAT message
+// useful instead of a raw driver error a customer would never understand.
 export async function initSchema() {
+  if (!process.env.POSTGRES_URL) {
+    throw new Error("Server misconfiguration: POSTGRES_URL is not set.");
+  }
   await sql`
     CREATE TABLE IF NOT EXISTS subscribers (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

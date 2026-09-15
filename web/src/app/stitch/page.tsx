@@ -197,9 +197,41 @@ function StitchPageInner() {
     });
   }
 
+  // Real object-URL leak fixed here (2026-09-15, found while checking a
+  // read-only audit's finding against a different component and looking
+  // for the same pattern elsewhere): removing a clip never revoked its
+  // previewUrl, and re-running "Combine" never revoked the previous
+  // resultUrl before replacing it - both stayed pinned in browser memory
+  // for the rest of the tab's life. A real leak on a page whose whole
+  // point is combining many clips repeatedly.
   function removeItem(index: number) {
-    setItems((prev) => prev.filter((_, i) => i !== index));
+    setItems((prev) => {
+      const target = prev[index];
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((_, i) => i !== index);
+    });
   }
+
+  // Revokes every still-outstanding object URL (every item's preview, plus
+  // the last combined result) - called on unmount below, and reused by
+  // handleCombine just before it replaces resultUrl with a fresh one.
+  function revokeAllPreviewUrls(currentItems: VideoItem[], currentResultUrl: string | null) {
+    for (const item of currentItems) URL.revokeObjectURL(item.previewUrl);
+    if (currentResultUrl) URL.revokeObjectURL(currentResultUrl);
+  }
+
+  // Tracks the latest items/resultUrl in a ref purely so the unmount
+  // cleanup below reads their real, final values instead of a stale
+  // closure over whatever they were when this effect first ran.
+  const latestStateRef = useRef({ items, resultUrl });
+  useEffect(() => {
+    latestStateRef.current = { items, resultUrl };
+  }, [items, resultUrl]);
+  useEffect(() => {
+    return () => {
+      revokeAllPreviewUrls(latestStateRef.current.items, latestStateRef.current.resultUrl);
+    };
+  }, []);
 
   async function getFFmpeg(): Promise<FFmpeg> {
     if (ffmpegRef.current) return ffmpegRef.current;
@@ -215,6 +247,7 @@ function StitchPageInner() {
   async function handleCombine() {
     if (items.length < 2) return;
     setError("");
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
     setProgress(0);
     try {

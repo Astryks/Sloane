@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CHARACTERS } from "@/lib/characters";
 import { PRODUCT_AD_MODELS, type ProductAdModel } from "@/lib/productAd";
 
@@ -44,10 +44,29 @@ export function ProductAdFlow() {
 
   const selectedCharacter = useMemo(() => CHARACTERS.find((item) => item.id === characterId) ?? CHARACTERS[0], [characterId]);
 
+  // Real object-URL leak fixed here (2026-09-15, found by a read-only
+  // audit): re-choosing a product photo (or navigating away entirely)
+  // never revoked the previous blob URL - each one stays pinned in browser
+  // memory until the tab closes. productUrlRef tracks the live URL so the
+  // unmount cleanup below always revokes the CURRENT one, not a stale
+  // closure over whatever it was when the effect first ran.
+  const productUrlRef = useRef("");
+  useEffect(() => {
+    productUrlRef.current = productUrl;
+  }, [productUrl]);
+  useEffect(() => {
+    return () => {
+      if (productUrlRef.current) URL.revokeObjectURL(productUrlRef.current);
+    };
+  }, []);
+
   function chooseProduct(file: File | undefined) {
     if (!file) return;
     setProduct(file);
-    setProductUrl(URL.createObjectURL(file));
+    setProductUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
   }
 
   function chooseCharacter(file: File | undefined) {
