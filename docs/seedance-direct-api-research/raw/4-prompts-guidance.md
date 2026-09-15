@@ -3,6 +3,8 @@
 Source: https://docs.byteplus.com/en/docs/ModelArk/2222480
 Captured: 2026-09-15, via the Browser pane. Condensed to strip repeated image-placeholder markers ([Output]/[Reference material] blocks with no real text content); every real rule, formula, and FAQ entry is kept in full, including their own example prompts verbatim (useful as reference material even though the public-facing site content recreates the technique with original examples instead of reproducing these).
 
+**Deliberately not saved: the page's ~20 example/before-after images and 4 flowchart SVGs.** These are BytePlus's own proprietary documentation graphics (their generated video stills, comparison shots) - not ours to copy into this repo, same category call as declining to reproduce the JoJo storyboard's actual reference photos earlier this project. Each FAQ entry below already describes in words what its before/after image showed (e.g. "Before: face swaps mid-video, resembles a celebrity / After: face stays consistent with the reference") - that's the part that's actually useful for recovery, and it's fully preserved in the FAQ text below.
+
 ## Basic formula (reference-based generation)
 Three task types, pick a prompt formula per type:
 - **Omni reference** (extract elements - subject/style/scene/sound - to generate a brand-new video): "Reference <Subject_N> in <Image_N> to generate...", "Reference <Action/Camera_movement/Style/Sound_effect> in <Video_N> to generate...", "Reference the timbre in <Audio_N> to generate..."
