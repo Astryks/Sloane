@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Footer } from "@/components/Footer";
 import { SiteHeader } from "@/components/SiteHeader";
 import { RecordOrUpload } from "@/components/RecordOrUpload";
@@ -880,6 +881,42 @@ function TryYourOwnPromptCTA({
 const MODEL_SHOWCASE_PROMPT =
   'Cinematic wide shot on the lunar surface: this exact same woman walks slowly beside a NASA-style lunar rover, dust kicking up under her boots, Earth hanging in the black sky, dramatic lighting, photorealistic, 4K quality.';
 
+// --- Cinematic short storyboard example: the moon-shot prompt above, broken
+// into a real shot-by-shot sequence instead of one single-shot generation.
+// Demonstrates the same storyboarding technique used for the JoJo case
+// study (one clear subject, one camera move per shot, emotion shown through
+// physical action rather than stated outright, a style/quality line to keep
+// results consistent) - real filmmaking/prompt-engineering practice, not
+// specific to any one video model. Since every engine we use only accepts
+// one photo/prompt per generation, each shot below would be its own
+// generation in the storyboard builder, then combined in /stitch.
+const CINEMATIC_STORYBOARD: { shot: string; camera: string; action: string }[] = [
+  {
+    shot: "1. Establishing",
+    camera: "Wide, fixed camera, low angle looking up at the airlock hatch.",
+    action:
+      "The hatch cycles open. She steps out onto the surface for the first time, one hand braced on the frame. Earth hangs small and blue in the black sky behind her.",
+  },
+  {
+    shot: "2. Walking",
+    camera: "Medium tracking shot, camera dollies alongside her at a matching, unhurried pace.",
+    action:
+      "She walks slowly beside the rover, dust kicking up under her boots with every step. Her breathing is visible and steady - deliberate, not rushed.",
+  },
+  {
+    shot: "3. The pause",
+    camera: "Close-up, camera holds completely still.",
+    action:
+      "She stops, tilts her head back, and looks up at Earth. Her shoulders drop, she exhales, and a small, private smile settles in - no dialogue, the moment reads entirely through the face.",
+  },
+  {
+    shot: "4. Walking on",
+    camera: "Wide shot, slow pull-back.",
+    action:
+      "She turns and keeps walking, the rover trailing behind her, both gradually shrinking into the dark horizon as the frame widens.",
+  },
+];
+
 // --- "Just for fun" product-ad showcase: Harper + our own product, real 2-scene ad ---
 
 const PRODUCT_AD_SCRIPT =
@@ -1041,6 +1078,16 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
 ];
 
 function CinematicSceneSection({ onTryItYourself }: { onTryItYourself: (prompt: string, imageBlob: Blob | null) => void }) {
+  const storyboardDetailsRef = useRef<HTMLDetailsElement | null>(null);
+
+  // Same pattern as ProductAdSection's jojo-case-study auto-open - lets a
+  // link from elsewhere on the site land here already expanded.
+  useEffect(() => {
+    if (window.location.hash === "#cinematic-storyboard" && storyboardDetailsRef.current) {
+      storyboardDetailsRef.current.open = true;
+    }
+  }, []);
+
   return (
     <Card
       wash="bg-purple-wash/90"
@@ -1070,6 +1117,49 @@ function CinematicSceneSection({ onTryItYourself }: { onTryItYourself: (prompt: 
         The more specific the prompt, the better the result - describe the lighting, the camera move, and what&apos;s
         actually happening in the scene, the same way you would for a real shoot brief.
       </p>
+
+      <div id="cinematic-storyboard" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-purple">Want a full short film, not just one shot?</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          Every engine we use only takes one photo and one prompt per generation, so a real short film - not just a
+          single clip - means breaking it into a proper shot list first, the same way an actual film crew would,
+          then generating each shot on its own and combining them in our <a href="/stitch" className="font-semibold text-purple underline">free video editor</a>.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          A few rules that make a real difference: keep to <strong>one camera move per shot</strong> (a push, a pan,
+          or a fixed shot - never several stacked together, it destabilizes the result), describe your subject the
+          same specific way every time so they stay consistent shot to shot, and show emotion through a physical
+          detail (a dropped shoulder, an exhale, a small smile) instead of just naming the feeling.
+        </p>
+        <details ref={storyboardDetailsRef} className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">See it applied: the moon shot above, turned into a 4-shot short</summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[480px] border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="w-28 border-b border-border pb-1 pr-2 font-semibold">Shot</th>
+                  <th className="w-1/3 border-b border-border pb-1 pr-3 font-semibold">Camera</th>
+                  <th className="border-b border-border pb-1 font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {CINEMATIC_STORYBOARD.map((s, i) => (
+                  <tr key={i} className="align-top">
+                    <td className="border-b border-border py-2 pr-2 font-semibold text-foreground">{s.shot}</td>
+                    <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-muted">{s.camera}</td>
+                    <td className="whitespace-pre-line border-b border-border py-2 text-muted">{s.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] italic text-muted">
+            The single prompt above compresses all of this into one shot. Written as 4 separate shots instead, each
+            generated on its own and stitched together, it reads as a real short film with a beginning, a quiet
+            middle beat, and an ending - not just one clip.
+          </p>
+        </details>
+      </div>
     </Card>
   );
 }
@@ -1251,6 +1341,17 @@ function ProductAdSection() {
           shown here purely as a real example of a storyboard becoming a finished ad.
         </p>
       </div>
+
+      <Link
+        href="/#cinematic-storyboard"
+        className="flex items-center gap-3 rounded-2xl border border-purple/20 bg-purple-wash p-3 text-left transition hover:shadow-soft"
+      >
+        <span className="text-2xl">🎬</span>
+        <span>
+          <span className="block text-sm font-semibold text-foreground">Making a short film instead of an ad? See how to storyboard one.</span>
+          <span className="block text-xs text-muted">Same idea, applied to a cinematic scene - one shot list, broken into a real sequence.</span>
+        </span>
+      </Link>
 
       <div className="rounded-2xl border border-purple/20 bg-white/80 p-4 text-center">
         <p className="text-sm font-bold text-foreground">Want to build an ad like this yourself?</p>

@@ -1,5 +1,7 @@
 # BytePlus ModelArk direct API research (Seedance 2.0/2.5) — 2026-09-15
 
+**Raw copies of all 5 source docs, saved for recovery** (their site is a JS-rendered SPA behind a login-gated console for some sub-pages — if a link below ever breaks or requires a login we don't have, the full real content is preserved locally): [`raw/1-model-pricing.md`](./raw/1-model-pricing.md), [`raw/2-advanced-creation-rights.md`](./raw/2-advanced-creation-rights.md), [`raw/3-content-pre-filter.md`](./raw/3-content-pre-filter.md), [`raw/4-prompts-guidance.md`](./raw/4-prompts-guidance.md), [`raw/5-virtual-avatar-library.md`](./raw/5-virtual-avatar-library.md).
+
 Real research, not a guess: all 5 docs the user linked were fetched live (BytePlus's docs site is a JS-rendered SPA — a plain fetch only returns the nav shell, so this was done through the Browser pane, not WebFetch, to get real body content). Answers the actual question asked: **go through fal (current, realistic-image block unresolved) or go direct to BytePlus, given their real pricing tiers and volume requirements?**
 
 **Bottom line up front: stay on fal for now.** The $14k/year minimum commitment to unlock anything beyond a 3-requests-per-minute free tier is wildly disproportionate to real current volume (~21 test jobs, 2 real users — see STATUS.md). Direct API becomes worth it once volume genuinely justifies the subscription math below, or if the realistic-face block turns into a real blocker for a paying customer and fal support's answer (still pending) is unhelpful. Full reasoning in "Recommendation," below.
