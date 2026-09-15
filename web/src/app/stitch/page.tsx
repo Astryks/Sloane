@@ -139,7 +139,16 @@ function StitchPageInner() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [audioTrackError, setAudioTrackError] = useState("");
-  const [totalVideoDuration, setTotalVideoDuration] = useState(0);
+  // Each clip's own real duration, and the in/out range the user actually
+  // wants used from it (2026-09-16, per direct request: "can it also mask
+  // parts of the video clips... users want only a part of the clip and
+  // hide the other bit"). Kept as separate id-keyed maps rather than on
+  // VideoItem directly so adding a file stays instant (no need to await a
+  // metadata read before it appears in the list) - the effect below fills
+  // these in shortly after, same real-world lag the existing preview
+  // thumbnail already has.
+  const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
+  const [itemTrims, setItemTrims] = useState<Record<string, { start: number; end: number }>>({});
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const preloadedRef = useRef(false);
@@ -192,31 +201,67 @@ function StitchPageInner() {
     setItems((prev) => (prev.length + added.length > MAX_FILES ? prev : [...prev, ...added]));
   }
 
-  // Keeps a live estimate of the combined video's real total length so the
-  // audio-track placement inputs below can show/clamp against a real
-  // number ("your video is currently ~1:47") instead of an unlabeled
-  // seconds field - recomputed whenever the clip list changes. Cheap: only
-  // reads each file's metadata (getVideoMeta), never decodes/re-encodes
-  // anything.
+  // Reads each clip's real duration (cheap - metadata only, never decodes
+  // or re-encodes anything) so the trim controls below can show/clamp
+  // against a real per-clip length, and defaults each new clip's trim
+  // range to its full length (start=0, end=duration) the first time it's
+  // seen. Existing trims are preserved across re-runs (e.g. reordering, or
+  // adding one more clip) rather than reset - only clips no longer in the
+  // list get dropped from the map. Recomputed whenever the clip list
+  // itself changes.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (items.length === 0) {
-        if (!cancelled) setTotalVideoDuration(0);
+        if (!cancelled) {
+          setItemDurations({});
+          setItemTrims({});
+        }
         return;
       }
       try {
         const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
-        if (!cancelled) setTotalVideoDuration(metas.reduce((sum, m) => sum + m.duration, 0));
+        if (cancelled) return;
+        const durations: Record<string, number> = {};
+        metas.forEach((m, i) => {
+          durations[items[i].id] = m.duration;
+        });
+        setItemDurations(durations);
+        setItemTrims((prev) => {
+          const next: Record<string, { start: number; end: number }> = {};
+          items.forEach((item, i) => {
+            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration };
+          });
+          return next;
+        });
       } catch {
-        // Leave the last known total as-is - handleCombine will surface any
-        // real problem with a clip when the user actually combines.
+        // Leave whatever's already known as-is - handleCombine will surface
+        // any real problem with a clip when the user actually combines.
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [items]);
+
+  // Live estimate of the combined video's real total length, honoring
+  // every clip's own trim range - drives the "your video is currently
+  // ~1:47 long" line in the audio-tracks section below. A plain derived
+  // value, not its own effect/state: it only ever depends on values
+  // already in hand, so there's nothing to keep in sync by hand.
+  const totalVideoDuration = items.reduce((sum, item) => {
+    const trim = itemTrims[item.id];
+    if (trim) return sum + Math.max(0, trim.end - trim.start);
+    return sum + (itemDurations[item.id] ?? 0);
+  }, 0);
+
+  function updateItemTrim(id: string, patch: Partial<{ start: number; end: number }>) {
+    setItemTrims((prev) => {
+      const current = prev[id];
+      if (!current) return prev;
+      return { ...prev, [id]: { ...current, ...patch } };
+    });
+  }
 
   // Adds a new audio track, defaulted to play once from the start of the
   // final video for the file's own natural length - the least-surprising
@@ -326,7 +371,22 @@ function StitchPageInner() {
       // exists at all.
       const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
       const { width: targetW, height: targetH } = metas[0];
-      const totalDuration = metas.reduce((sum, m) => sum + m.duration, 0);
+      // Each clip's real in/out range (2026-09-16, per direct request:
+      // "can it also mask parts of the video clips... users want only a
+      // part of the clip"). Re-clamped here against this clip's ACTUAL
+      // measured duration rather than trusting itemTrims state verbatim -
+      // it could in principle be stale if a file was somehow replaced
+      // without the tracking effect re-running yet. A trim that's missing
+      // (not yet computed) or degenerate (end<=start) falls back to the
+      // clip's full real length, so nothing silently breaks for a clip
+      // whose trim hasn't loaded yet.
+      const trims = items.map((item, i) => {
+        const t = itemTrims[item.id];
+        const dur = metas[i].duration;
+        if (!t || t.end - t.start <= 0) return { start: 0, end: dur };
+        return { start: Math.max(0, Math.min(t.start, dur)), end: Math.max(0, Math.min(t.end, dur)) };
+      });
+      const totalDuration = trims.reduce((sum, t) => sum + (t.end - t.start), 0);
 
       const { fetchFile } = await import("@ffmpeg/util");
       const ffmpeg = await getFFmpeg();
@@ -359,7 +419,7 @@ function StitchPageInner() {
       const scaleChains = inputNames
         .map(
           (_, i) =>
-            `[${i}:v]scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`,
+            `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=PTS-STARTPTS,scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`,
         )
         .join(";");
       const concatVideoInputs = inputNames.map((_, i) => `[v${i}]`).join("");
@@ -373,8 +433,8 @@ function StitchPageInner() {
       const audioChains = inputNames
         .map((_, i) =>
           hasAudio[i]
-            ? `[${i}:a]loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a${i}]`
-            : `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${metas[i].duration}[a${i}]`,
+            ? `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`
+            : `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${trims[i].end - trims[i].start}[a${i}]`,
         )
         .join(";");
       const concatAudioInputs = inputNames.map((_, i) => `[a${i}]`).join("");
@@ -434,6 +494,17 @@ function StitchPageInner() {
         finalAudioLabel,
         "-c:v",
         "libx264",
+        // Real speed fix (2026-09-16, direct report "it's a bit slow"):
+        // no -preset was set at all, meaning libx264 defaulted to "medium"
+        // - a real, avoidable cost given this runs single-threaded WASM
+        // encoding in the browser, not native/hardware-accelerated ffmpeg.
+        // "veryfast" trades a slightly larger output file for meaningfully
+        // faster encoding at the SAME visual quality (preset controls the
+        // encoder's search effort/compression efficiency, not the quality
+        // target - crf still controls that). The right lever for "slow" is
+        // this, not lowering crf, which would actually reduce quality.
+        "-preset",
+        "veryfast",
         "-crf",
         "18",
         "-pix_fmt",
@@ -488,21 +559,58 @@ function StitchPageInner() {
         {items.length > 0 && (
           <div className="space-y-2 rounded-2xl border border-border bg-white p-4">
             <p className="text-xs font-semibold text-muted">Order (top to bottom):</p>
-            {items.map((item, i) => (
-              <div key={item.id} className="flex items-center gap-2 rounded-xl border border-border p-2">
-                <video src={item.previewUrl} className="h-12 w-20 rounded-lg object-cover" muted />
-                <span className="flex-1 truncate text-xs">{item.file.name}</span>
-                <button onClick={() => moveItem(i, -1)} disabled={i === 0} className="rounded-full border border-border px-2 py-1 text-xs disabled:opacity-30">
-                  ↑
-                </button>
-                <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1} className="rounded-full border border-border px-2 py-1 text-xs disabled:opacity-30">
-                  ↓
-                </button>
-                <button onClick={() => removeItem(i)} className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark">
-                  Remove
-                </button>
-              </div>
-            ))}
+            {items.map((item, i) => {
+              const duration = itemDurations[item.id];
+              const trim = itemTrims[item.id];
+              const trimmed = trim && duration != null && (trim.start > 0 || trim.end < duration);
+              return (
+                <div key={item.id} className="space-y-1.5 rounded-xl border border-border p-2">
+                  <div className="flex items-center gap-2">
+                    <video src={item.previewUrl} className="h-12 w-20 rounded-lg object-cover" muted />
+                    <span className="flex-1 truncate text-xs">{item.file.name}</span>
+                    <button onClick={() => moveItem(i, -1)} disabled={i === 0} className="rounded-full border border-border px-2 py-1 text-xs disabled:opacity-30">
+                      ↑
+                    </button>
+                    <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1} className="rounded-full border border-border px-2 py-1 text-xs disabled:opacity-30">
+                      ↓
+                    </button>
+                    <button onClick={() => removeItem(i)} className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark">
+                      Remove
+                    </button>
+                  </div>
+                  {trim && duration != null && (
+                    <div className="flex flex-wrap items-center gap-2 pl-1 text-xs text-muted">
+                      <span>Use from</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={Math.max(0, trim.end - 0.1)}
+                        step={1}
+                        value={Math.round(trim.start)}
+                        onChange={(e) => updateItemTrim(item.id, { start: Math.max(0, Math.min(Number(e.target.value) || 0, trim.end - 0.1)) })}
+                        className="w-14 rounded-lg border border-border px-2 py-1 text-center"
+                      />
+                      <span className="italic">({formatTime(trim.start)})</span>
+                      <span>to</span>
+                      <input
+                        type="number"
+                        min={trim.start + 0.1}
+                        max={Math.round(duration)}
+                        step={1}
+                        value={Math.round(trim.end)}
+                        onChange={(e) => updateItemTrim(item.id, { end: Math.max(trim.start + 0.1, Math.min(Number(e.target.value) || 0, duration)) })}
+                        className="w-14 rounded-lg border border-border px-2 py-1 text-center"
+                      />
+                      <span className="italic">({formatTime(trim.end)})</span>
+                      <span>of {formatTime(duration)} - the rest of the clip is hidden, not deleted.</span>
+                    </div>
+                  )}
+                  {trimmed && (
+                    <p className="pl-1 text-[11px] italic text-muted">Only {formatTime(trim!.end - trim!.start)} of this clip will be used.</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
