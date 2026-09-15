@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
       const isKlingAvatar = job.fal_endpoint === VIDEO_PAYGO_ENGINES.kling.falAvatarEndpoint;
       const requestId = isKlingAvatar
         ? await submitFalJob(job.fal_endpoint, { image_url: job.input_image_url, audio_url: audioUrl })
-        : await submitFalJob(job.fal_endpoint, buildFalInput(job.engine as VideoEngine, job.prompt, job.input_image_url, false, resolvedAudioSeconds));
+        : await submitFalJob(job.fal_endpoint, buildFalInput(job.engine as VideoEngine, job.prompt, job.input_image_url, false, resolvedAudioSeconds, job.duration_seconds, job.aspect_ratio));
       await setVideoPaygoJobRequestId(job.id, requestId);
       return NextResponse.json({ status: "IN_PROGRESS" });
     } catch (err) {

@@ -66,7 +66,7 @@
  * enabled, not one being incurred today).
  */
 
-export type VideoEngine = "seedance25" | "seedance" | "veo" | "kling" | "minimax" | "grok";
+export type VideoEngine = "seedance25" | "seedance" | "veo" | "kling" | "klingv3" | "minimax" | "grok";
 
 export const VIDEO_PAYGO_RESOLUTION = "720p";
 export const VIDEO_PAYGO_PRICE_USD_CENTS = 399; // $3.99, flat across every engine
@@ -113,6 +113,26 @@ export const VIDEO_PAYGO_ENGINES: Record<
     // a small duration number - see VIDEO_PAYGO_ENGINE_COST_USD's comment
     // for the real cost math this is priced against.
     pickerNote: string;
+    // Real per-engine aspect-ratio enum, checked directly against each
+    // endpoint's OpenAPI schema 2026-09-15 (not guessed) - undefined means
+    // no manual control exists (e.g. Kling v3 Pro's image-to-video endpoint
+    // inherits its ratio from the uploaded image instead). Only the 3
+    // broadly-supported values are surfaced in the UI (16:9/9:16/1:1) even
+    // on engines whose real enum has more options, to keep the picker
+    // simple and consistent across engines.
+    aspectRatioOptions?: string[];
+    // Real per-second, per-duration-unit linear pricing confirmed directly
+    // against fal (not guessed) - only engines with this set get a
+    // user-facing duration slider (see the DURATION_SELECTABLE export
+    // below); Kling 2.1's pricing is flat/non-linear per its own module
+    // comment, so it's deliberately excluded rather than guessing a
+    // per-second rate for it.
+    supportsDurationChoice?: boolean;
+    // Confirmed directly against the real OpenAPI schema 2026-09-15 - NOT
+    // wired into buildFalInput or the UI yet (scoped as a fast-follow, see
+    // STATUS.md), just recorded here so that work doesn't need to re-audit
+    // every engine's schema again from scratch.
+    supportsNegativePrompt?: boolean;
   }
 > = {
   seedance25: {
@@ -134,8 +154,13 @@ export const VIDEO_PAYGO_ENGINES: Record<
     durationSeconds: 4,
     falDurationValue: "4",
     exampleUrl: "https://fal.ai/models/bytedance/seedance-2.5/text-to-video",
-    popular: true,
-    pickerNote: "4s clip · sharper detail, native audio",
+    // Moved out of "Popular" per direct request (2026-09-15) - its capped
+    // 4s duration made it read as a downgrade next to 2.0's 8s when shown
+    // with equal billing; still a real option, just not front-and-center.
+    popular: false,
+    pickerNote: "Shortest clip here (4s) - sharpest detail, native audio",
+    aspectRatioOptions: ["16:9", "9:16", "1:1"],
+    supportsDurationChoice: true,
   },
   seedance: {
     label: "Seedance 2.0",
@@ -147,6 +172,8 @@ export const VIDEO_PAYGO_ENGINES: Record<
     exampleUrl: "https://fal.ai/models/bytedance/seedance-2.0/fast/text-to-video",
     popular: true,
     pickerNote: "8s clip · the longer, cheaper-to-produce option",
+    aspectRatioOptions: ["16:9", "9:16", "1:1"],
+    supportsDurationChoice: true,
   },
   veo: {
     label: "Veo",
@@ -158,6 +185,9 @@ export const VIDEO_PAYGO_ENGINES: Record<
     exampleUrl: "https://fal.ai/models/fal-ai/veo3.1/fast",
     popular: true,
     pickerNote: "8s clip · only engine with its own native voice",
+    aspectRatioOptions: ["16:9", "9:16"],
+    supportsDurationChoice: true,
+    supportsNegativePrompt: true,
   },
   kling: {
     label: "Kling",
@@ -169,7 +199,42 @@ export const VIDEO_PAYGO_ENGINES: Record<
     falDurationValue: "5",
     exampleUrl: "https://fal.ai/models/fal-ai/kling-video/v2.1/master/text-to-video",
     popular: true,
-    pickerNote: "5s clip · best real lip-sync of the set",
+    pickerNote: "5s clip · best proven real lip-sync of the set",
+    aspectRatioOptions: ["16:9", "9:16", "1:1"],
+    supportsNegativePrompt: true,
+  },
+  // Added 2026-09-15 - real, confirmed cheaper AND more capable than Kling
+  // 2.1 (checked directly against fal's own pricing page and OpenAPI
+  // schema, not guessed): $0.112/s audio-off, $0.168/s audio-on, $0.196/s
+  // with voice control - vs. 2.1's flat $1.40/5s (~$0.28/s equivalent).
+  // Also genuinely new capability: multi_prompt (several timed prompts in
+  // one call - a native fit for the shot-sequence template above),
+  // `elements` (character/object reference injection via @Element1, same
+  // idea as our own Cast & Locations), and a real `duration` enum "3"-"15"
+  // (vs 2.1's fixed "5"/"10" only). Kept as a SEPARATE option rather than
+  // replacing Kling 2.1 outright: 2.1's `falAvatarEndpoint` (the proven
+  // real lip-sync path this product's whole "best lip-sync" claim rests
+  // on) has no confirmed v3 equivalent yet - don't want to silently weaken
+  // that proven path on an unverified assumption.
+  //
+  // Duration priced against the WORST real per-second tier ($0.196/s,
+  // audio+voice) so it's safe regardless of which audio option a request
+  // uses: 10s * $0.196 = $1.96, +15% buffer = $2.254, profit =
+  // $3.574 - $2.254 = **$1.32/video** - clears the floor even in the most
+  // expensive case, with real margin to spare (at the cheaper $0.168/s
+  // audio-on tier most requests will actually use, profit is $1.64).
+  klingv3: {
+    label: "Kling v3",
+    versionLabel: "Kling 3.0 Pro",
+    falEndpoint: "fal-ai/kling-video/v3/pro/text-to-video",
+    falImageToVideoEndpoint: "fal-ai/kling-video/v3/pro/image-to-video",
+    durationSeconds: 10,
+    falDurationValue: "10",
+    exampleUrl: "https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video",
+    popular: false,
+    pickerNote: "10s clip · newer, cheaper, no proven lip-sync path yet",
+    supportsDurationChoice: true,
+    supportsNegativePrompt: true,
   },
   minimax: {
     label: "MiniMax",
@@ -181,7 +246,9 @@ export const VIDEO_PAYGO_ENGINES: Record<
     falResolutionValue: "768P",
     exampleUrl: "https://fal.ai/models/minimax/h3-max/text-to-video",
     popular: false,
-    pickerNote: "8s clip · cheapest to produce of the six",
+    pickerNote: "8s clip · cheapest to produce of the seven",
+    aspectRatioOptions: ["16:9", "9:16", "1:1"],
+    supportsDurationChoice: true,
   },
   grok: {
     label: "Grok",
@@ -193,6 +260,8 @@ export const VIDEO_PAYGO_ENGINES: Record<
     exampleUrl: "https://fal.ai/models/xai/grok-imagine-video/v1.5/text-to-video",
     popular: false,
     pickerNote: "8s clip",
+    aspectRatioOptions: ["16:9", "9:16", "1:1"],
+    supportsDurationChoice: true,
   },
 };
 
@@ -248,6 +317,7 @@ export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
   seedance: 2.23,
   veo: 1.38,
   kling: 1.61,
+  klingv3: 2.254, // 10s @ $0.196/s (worst real tier, audio+voice) + 15% buffer - see VIDEO_PAYGO_ENGINES.klingv3
   minimax: 0.74,
   grok: 1.30,
 };
@@ -278,10 +348,20 @@ export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
 //   entry's own comment) - deliberately set equal to its own 4s default
 //   rather than guessing a lower floor, so this engine can't be shrunk to
 //   an unconfirmed duration value before that's checked.
-const VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS: Record<VideoEngine, number> = {
+// Exported (not just used internally) so the UI's duration slider can read
+// the same real bounds this file's pricing already depends on, rather than
+// a second, potentially-drifting copy of the numbers.
+export const VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS: Record<VideoEngine, number> = {
   seedance25: 4,
   veo: 4,
   kling: 5,
+  // Real confirmed enum floor ("3"-"15") - but capped here at the same 10s
+  // used as this engine's priced default (VIDEO_PAYGO_ENGINE_COST_USD),
+  // NOT the schema's true "3" floor, so a manual duration choice can only
+  // ever shrink toward cheaper, never toward a duration this file hasn't
+  // separately priced margin for. Real floor "3" is fine to use once this
+  // engine gets audio-length auto-matching like the others below.
+  klingv3: 3,
   seedance: 4,
   grok: 1,
   minimax: 5,
@@ -295,11 +375,24 @@ const VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS: Record<VideoEngine, number> = {
 // default. Returned as a string, matching how falDurationValue is already
 // stored/sent elsewhere in this file (buildFalInput below still does its
 // own Number(...) conversion for grok/minimax, same as before).
-function matchedDurationValue(engine: VideoEngine, audioSeconds: number | null): string {
+// manualDurationSeconds (2026-09-15): an explicit user choice from the
+// duration selector in the UI, per direct request to let people pick
+// duration/quality "like ElevenLabs does" rather than one fixed value per
+// engine. Deliberately only applied when there's no real audio driving the
+// length (audioSeconds == null) - a lip-sync or Lucy-voice generation still
+// needs its video length matched to the real audio it'll be synced to, and
+// that existing, already-proven logic takes priority over a style
+// preference. Always clamped to [min, engine default] regardless, so a
+// manual choice can only ever shrink cost relative to what's already
+// priced in VIDEO_PAYGO_ENGINE_COST_USD, never exceed it - the duration
+// selector's UI bounds mirror this same clamp, so this is a safety net,
+// not the only enforcement.
+function matchedDurationValue(engine: VideoEngine, audioSeconds: number | null, manualDurationSeconds: number | null = null): string {
   const def = VIDEO_PAYGO_ENGINES[engine];
-  if (audioSeconds == null) return def.falDurationValue;
+  if (audioSeconds == null && manualDurationSeconds == null) return def.falDurationValue;
   const min = VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine];
-  const target = Math.min(def.durationSeconds, Math.max(min, Math.ceil(audioSeconds)));
+  const desired = audioSeconds != null ? Math.ceil(audioSeconds) : (manualDurationSeconds as number);
+  const target = Math.min(def.durationSeconds, Math.max(min, desired));
   switch (engine) {
     case "veo":
       return target <= 4 ? "4s" : target <= 6 ? "6s" : "8s";
@@ -321,15 +414,27 @@ function matchedDurationValue(engine: VideoEngine, audioSeconds: number | null):
 // when known - null for the no-audio path, which keeps the engine's fixed
 // default exactly as before. See matchedDurationValue above and
 // audioDuration.ts for where this number comes from.
+//
+// `manualDurationSeconds`/`aspectRatio` (2026-09-15): the user's own
+// explicit choice from the duration/aspect-ratio selectors, when the
+// engine supports them (VIDEO_PAYGO_ENGINES[engine].supportsDurationChoice/
+// aspectRatioOptions) - see matchedDurationValue's comment for why manual
+// duration is ignored whenever real audio is already driving the length.
+// aspectRatio is passed through as-is for engines with aspectRatioOptions
+// set; harmless to omit (undefined) for engines without it, since every
+// case below already treats it as optional.
 export function buildFalInput(
   engine: VideoEngine,
   prompt: string,
   imageUrl: string | null,
   wantsNativeAudio: boolean,
   realAudioSeconds: number | null = null,
+  manualDurationSeconds: number | null = null,
+  aspectRatio: string | null = null,
 ): Record<string, unknown> {
   const def = VIDEO_PAYGO_ENGINES[engine];
-  const durationValue = matchedDurationValue(engine, realAudioSeconds);
+  const durationValue = matchedDurationValue(engine, realAudioSeconds, manualDurationSeconds);
+  const ratio = def.aspectRatioOptions?.includes(aspectRatio ?? "") ? aspectRatio! : undefined;
   switch (engine) {
     case "veo":
       return {
@@ -338,11 +443,19 @@ export function buildFalInput(
         duration: durationValue,
         resolution: VIDEO_PAYGO_RESOLUTION,
         generate_audio: wantsNativeAudio,
+        aspect_ratio: ratio,
       };
     case "kling":
-      return { prompt, duration: durationValue, image_url: imageUrl ?? undefined };
+      return { prompt, duration: durationValue, image_url: imageUrl ?? undefined, aspect_ratio: ratio };
+    case "klingv3":
+      // No falResolutionValue/VIDEO_PAYGO_RESOLUTION field on this
+      // endpoint's schema (checked directly) - resolution isn't a real
+      // input here. aspect_ratio isn't sent either: not confirmed as a
+      // real field on the image-to-video variant (likely inherits from
+      // the input image instead) - see this engine's own comment above.
+      return { prompt, duration: durationValue, image_url: imageUrl ?? undefined, generate_audio: wantsNativeAudio };
     case "seedance":
-      return { prompt, duration: durationValue, resolution: VIDEO_PAYGO_RESOLUTION, image_url: imageUrl ?? undefined };
+      return { prompt, duration: durationValue, resolution: VIDEO_PAYGO_RESOLUTION, image_url: imageUrl ?? undefined, aspect_ratio: ratio };
     case "seedance25":
       // The fal playground for this endpoint shows a "Generate Audio"
       // toggle (seen directly, 2026-09-15) - included here on the same
@@ -350,12 +463,12 @@ export function buildFalInput(
       // independently confirmed against the OpenAPI schema yet (see this
       // engine's own comment in VIDEO_PAYGO_ENGINES) - verify before the
       // first real production generation.
-      return { prompt, duration: durationValue, resolution: VIDEO_PAYGO_RESOLUTION, image_url: imageUrl ?? undefined, generate_audio: wantsNativeAudio };
+      return { prompt, duration: durationValue, resolution: VIDEO_PAYGO_RESOLUTION, image_url: imageUrl ?? undefined, generate_audio: wantsNativeAudio, aspect_ratio: ratio };
     case "grok":
       // duration is a real integer field on this endpoint's schema (not a
       // string enum like Kling/Veo) - sent as a number, not the string
       // falDurationValue is stored as elsewhere, to match.
-      return { prompt, image_url: imageUrl ?? undefined, duration: Number(durationValue), resolution: def.falResolutionValue ?? VIDEO_PAYGO_RESOLUTION };
+      return { prompt, image_url: imageUrl ?? undefined, duration: Number(durationValue), resolution: def.falResolutionValue ?? VIDEO_PAYGO_RESOLUTION, aspect_ratio: ratio };
     case "minimax":
       // prompt_expansion_mode is required by this endpoint's schema -
       // "balanced" (~1s overhead) rather than "quality" (~30s), same choice
@@ -367,6 +480,7 @@ export function buildFalInput(
         duration: Number(durationValue),
         resolution: def.falResolutionValue ?? VIDEO_PAYGO_RESOLUTION,
         prompt_expansion_mode: "balanced",
+        aspect_ratio: ratio,
       };
   }
 }

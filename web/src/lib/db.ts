@@ -432,6 +432,16 @@ export async function initSchema() {
   // in 'voiceover' mode (skips Avatar, uses the normal image/text-to-video
   // endpoint like every other engine).
   await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS lip_sync_mode TEXT NOT NULL DEFAULT 'lipsync'`;
+  // 2026-09-15: user-chosen duration/aspect ratio, per direct request to
+  // expose these like ElevenLabs does rather than one fixed value per
+  // engine. Persisted on the job (not just passed straight to buildFalInput
+  // in generate/route.ts) so a Lucy-voice generation - deferred to
+  // status/route.ts's phase 0 until the TTS pass resolves - still honors
+  // the original choice instead of silently falling back to the engine
+  // default. Both nullable: null means "use the engine's own default",
+  // same behavior as before this column existed.
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS duration_seconds INTEGER`;
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS aspect_ratio TEXT`;
 }
 
 // Generic runtime settings, switchable from the admin dashboard without a
@@ -942,6 +952,8 @@ export type VideoPaygoJob = {
   modal_job_id: string | null;
   preset_voice_id: string | null;
   lip_sync_mode: "lipsync" | "voiceover";
+  duration_seconds: number | null;
+  aspect_ratio: string | null;
   status: "pending" | "in_progress" | "completed" | "failed";
   video_url: string | null;
   silent_video_url: string | null;
@@ -959,13 +971,15 @@ export async function createVideoPaygoJob(params: {
   needsMerge?: boolean;
   presetVoiceId?: string | null;
   lipSyncMode?: "lipsync" | "voiceover";
+  durationSeconds?: number | null;
+  aspectRatio?: string | null;
 }): Promise<string> {
   const rows = await sql`
-    INSERT INTO video_paygo_jobs (user_id, engine, prompt, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id, lip_sync_mode)
+    INSERT INTO video_paygo_jobs (user_id, engine, prompt, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id, lip_sync_mode, duration_seconds, aspect_ratio)
     VALUES (
       ${params.userId}, ${params.engine}, ${params.prompt}, ${params.falEndpoint},
       ${params.inputImageUrl ?? null}, ${params.inputAudioUrl ?? null}, ${params.needsMerge ?? false}, ${params.presetVoiceId ?? null},
-      ${params.lipSyncMode ?? "lipsync"}
+      ${params.lipSyncMode ?? "lipsync"}, ${params.durationSeconds ?? null}, ${params.aspectRatio ?? null}
     )
     RETURNING id
   `;

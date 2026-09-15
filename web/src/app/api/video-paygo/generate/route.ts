@@ -9,7 +9,7 @@ import {
   setVideoPaygoJobModalId,
   failVideoPaygoJob,
 } from "@/lib/db";
-import { VIDEO_PAYGO_ENGINES, buildFalInput, type VideoEngine } from "@/lib/videoPaygo";
+import { VIDEO_PAYGO_ENGINES, VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS, buildFalInput, type VideoEngine } from "@/lib/videoPaygo";
 import { submitFalJob, uploadBufferToFal, hasEnoughFalBalanceToGenerate } from "@/lib/fal";
 import { submitModalJob } from "@/lib/modal";
 import { probeAudioDurationSeconds, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
@@ -69,9 +69,40 @@ export async function POST(req: NextRequest) {
     const audioMode = (String(form.get("audio_mode") ?? "none") || "none") as AudioMode;
     const presetVoiceId = String(form.get("preset_voice_id") ?? "");
     const lipSyncMode = (String(form.get("lip_sync_mode") ?? "lipsync") || "lipsync") as LipSyncMode;
+    const durationField = form.get("duration_seconds");
+    const aspectRatioField = form.get("aspect_ratio");
 
     if (!VIDEO_PAYGO_ENGINES[engine]) {
       return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
+    }
+    // Both optional - null means "use the engine's own default", same
+    // behavior as before either field existed. Server-side clamped to the
+    // same real bounds the UI's selector is built from
+    // (VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS / the engine's own priced
+    // default) rather than trusting the client - a tampered request
+    // asking for more than the engine's priced-in max could otherwise
+    // silently exceed the cost this generation's $3.99 charge was sized
+    // against.
+    const engineDef = VIDEO_PAYGO_ENGINES[engine];
+    let requestedDurationSeconds: number | null = null;
+    if (durationField != null && String(durationField).length > 0) {
+      const n = Number(durationField);
+      if (!Number.isFinite(n)) {
+        return NextResponse.json({ error: "Invalid duration" }, { status: 400 });
+      }
+      if (!engineDef.supportsDurationChoice) {
+        return NextResponse.json({ error: `${engineDef.label} doesn't support a custom duration` }, { status: 400 });
+      }
+      const min = VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine];
+      requestedDurationSeconds = Math.min(engineDef.durationSeconds, Math.max(min, Math.round(n)));
+    }
+    let requestedAspectRatio: string | null = null;
+    if (aspectRatioField != null && String(aspectRatioField).length > 0) {
+      const val = String(aspectRatioField);
+      if (!engineDef.aspectRatioOptions?.includes(val)) {
+        return NextResponse.json({ error: `${engineDef.label} doesn't support that aspect ratio` }, { status: 400 });
+      }
+      requestedAspectRatio = val;
     }
     if (!["none", "own", "lucy"].includes(audioMode)) {
       return NextResponse.json({ error: "Unknown audio option" }, { status: 400 });
@@ -197,6 +228,8 @@ export async function POST(req: NextRequest) {
       needsMerge,
       presetVoiceId: wantsLucyVoice ? presetVoiceId : null,
       lipSyncMode,
+      durationSeconds: requestedDurationSeconds,
+      aspectRatio: requestedAspectRatio,
     });
 
     try {
@@ -210,7 +243,7 @@ export async function POST(req: NextRequest) {
       }
       const falInput = useKlingAvatar
         ? { image_url: inputImageUrl, audio_url: inputAudioUrl }
-        : buildFalInput(engine, prompt, inputImageUrl, !needsMerge && engine === "veo", ownAudioSeconds);
+        : buildFalInput(engine, prompt, inputImageUrl, !needsMerge && engine === "veo", ownAudioSeconds, requestedDurationSeconds, requestedAspectRatio);
       const requestId = await submitFalJob(falEndpoint, falInput);
       await setVideoPaygoJobRequestId(jobId, requestId);
       return NextResponse.json({ jobId });

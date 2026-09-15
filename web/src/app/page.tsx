@@ -10,7 +10,7 @@ import { DeliverySliders, DEFAULT_DELIVERY, type Delivery } from "@/components/D
 import { WaitingGame } from "@/components/WaitingGame";
 import { useAccessToken } from "@/lib/useAccessToken";
 import { useFreeTierId } from "@/lib/useFreeTierId";
-import { VIDEO_PAYGO_ENGINES, VIDEO_CREDIT_PACKS, type VideoEngine } from "@/lib/videoPaygo";
+import { VIDEO_PAYGO_ENGINES, VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS, VIDEO_CREDIT_PACKS, type VideoEngine } from "@/lib/videoPaygo";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
 
@@ -1493,6 +1493,13 @@ function PayAsYouGoVideoSection({
   const [balance, setBalance] = useState(0);
   const [authChecked, setAuthChecked] = useState(false);
   const [engine, setEngine] = useState<VideoEngine>("veo");
+  // Duration/aspect ratio choices (2026-09-15) - null means "use the
+  // engine's own default", same as before either control existed. Reset
+  // whenever the engine changes since each engine's real bounds/options
+  // differ (see videoPaygo.ts's VIDEO_PAYGO_ENGINES) - a value valid on one
+  // engine may not even be offered on the next.
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+  const [aspectRatio, setAspectRatio] = useState<string | null>(null);
   const media = useReferenceMedia();
   const audio = useMultiAudio();
   const [audioMode, setAudioMode] = useState<PaygoAudioMode>("none");
@@ -1591,6 +1598,12 @@ function PayAsYouGoVideoSection({
       form.append("prompt", prompt);
       form.append("audio_mode", audioMode);
       if (audioMode !== "none") form.append("lip_sync_mode", lipSyncMode);
+      if (durationSeconds != null && VIDEO_PAYGO_ENGINES[engine].supportsDurationChoice) {
+        form.append("duration_seconds", String(durationSeconds));
+      }
+      if (aspectRatio && VIDEO_PAYGO_ENGINES[engine].aspectRatioOptions?.includes(aspectRatio)) {
+        form.append("aspect_ratio", aspectRatio);
+      }
       if (media.imageBlob) form.append("reference_image", media.imageBlob, "reference.jpg");
       if (audioMode === "own" && audio.selectedBlob) form.append("reference_audio", audio.selectedBlob);
       if (audioMode === "lucy") form.append("preset_voice_id", presetVoiceId);
@@ -1681,7 +1694,11 @@ function PayAsYouGoVideoSection({
                   {entries.map(([id, e]) => (
                     <div key={id}>
                       <button
-                        onClick={() => setEngine(id)}
+                        onClick={() => {
+                          setEngine(id);
+                          setDurationSeconds(null);
+                          setAspectRatio(null);
+                        }}
                         className={`w-full rounded-2xl border p-2 text-center text-xs transition ${
                           engine === id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
                         }`}
@@ -1708,6 +1725,53 @@ function PayAsYouGoVideoSection({
             Only Veo can speak on its own with no audio given - every other engine renders silent unless you add
             your own audio or pick a Lucy voice below.
           </p>
+
+          {VIDEO_PAYGO_ENGINES[engine].supportsDurationChoice && (
+            <div className="rounded-2xl bg-white/70 p-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-muted">
+                  Duration: <span className="text-foreground">{durationSeconds ?? VIDEO_PAYGO_ENGINES[engine].durationSeconds}s</span>
+                </label>
+                <span className="text-[11px] text-muted">
+                  {VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}-{VIDEO_PAYGO_ENGINES[engine].durationSeconds}s, same $3.99 price
+                </span>
+              </div>
+              <input
+                type="range"
+                min={VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}
+                max={VIDEO_PAYGO_ENGINES[engine].durationSeconds}
+                step={1}
+                value={durationSeconds ?? VIDEO_PAYGO_ENGINES[engine].durationSeconds}
+                onChange={(e) => setDurationSeconds(Number(e.target.value))}
+                className="mt-2 w-full accent-purple"
+                disabled={audioMode !== "none"}
+              />
+              {audioMode !== "none" && (
+                <p className="mt-1 text-[11px] italic text-muted">
+                  Locked while audio is set - the clip is matched to your audio&apos;s real length instead.
+                </p>
+              )}
+            </div>
+          )}
+
+          {!!VIDEO_PAYGO_ENGINES[engine].aspectRatioOptions?.length && (
+            <div className="rounded-2xl bg-white/70 p-3">
+              <label className="text-xs font-semibold text-muted">Aspect ratio</label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {VIDEO_PAYGO_ENGINES[engine].aspectRatioOptions!.map((ratio) => (
+                  <button
+                    key={ratio}
+                    onClick={() => setAspectRatio(ratio)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                      (aspectRatio ?? "16:9") === ratio ? "border-purple bg-purple text-white" : "border-border bg-white text-muted"
+                    }`}
+                  >
+                    {ratio === "16:9" ? "16:9 · landscape" : ratio === "9:16" ? "9:16 · vertical" : "1:1 · square"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <ReferenceMediaField media={media} label="Add photo(s) or video(s) (optional)" />
 
