@@ -15,10 +15,21 @@
 // made for the server-side Ad Studio stitcher (scripts/ad_studio_stitch.py)
 // and for the same reason: the faster stream-copy demuxer needs every
 // input to share the exact codec/resolution, which isn't guaranteed for
-// arbitrary user-uploaded clips from different sources. Video-only (no
-// audio track in the output) to match that same server-side tool and
-// avoid the real failure mode of some clips having an audio stream and
-// others not.
+// arbitrary user-uploaded clips from different sources.
+//
+// Audio pipeline (2026-09-15, real rework - the previous version dropped
+// every clip's own audio unconditionally, which meant per-scene dialogue
+// was silently lost the moment you combined scenes): each clip's own
+// audio (if it has one) is kept and loudness-normalized (EBU R128 via
+// `loudnorm`) so a line from one generation doesn't suddenly feel louder/
+// quieter or tonally different from the next - the same problem Premiere's
+// "match loudness" does. A clip with no audio stream at all (silent
+// renders happen) gets real digital silence generated to match its exact
+// duration, not skipped, so the concatenated audio timeline always lines
+// up with the concatenated video timeline. If music is added, it's
+// decoded once, looped/trimmed to the *entire* combined duration, and
+// mixed under the now-continuous dialogue track at a fixed lower volume -
+// one continuous bed for the whole ad, never cut or restarted per scene.
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -40,22 +51,41 @@ const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" -
 // not a fluke, a genuinely malformed container). Reads real dimensions
 // via a native <video> element rather than guessing, so the fix works for
 // any mix of aspect ratios, not just the two seen while debugging.
-function getVideoDimensions(file: File): Promise<{ width: number; height: number }> {
+function getVideoMeta(file: File): Promise<{ width: number; height: number; duration: number }> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     video.preload = "metadata";
     video.onloadedmetadata = () => {
-      const { videoWidth, videoHeight } = video;
+      const { videoWidth, videoHeight, duration } = video;
       URL.revokeObjectURL(video.src);
-      if (!videoWidth || !videoHeight) reject(new Error("Could not read this video's dimensions"));
-      else resolve({ width: videoWidth, height: videoHeight });
+      if (!videoWidth || !videoHeight || !isFinite(duration)) reject(new Error("Could not read this video's info"));
+      else resolve({ width: videoWidth, height: videoHeight, duration });
     };
     video.onerror = () => {
       URL.revokeObjectURL(video.src);
-      reject(new Error("Could not read this video's dimensions"));
+      reject(new Error("Could not read this video's info"));
     };
     video.src = URL.createObjectURL(file);
   });
+}
+
+// ffmpeg.wasm has no ffprobe-style structured metadata call - `-i <file>`
+// with no output "fails" (there's nothing to write), but its stderr log
+// still lists every real stream it found first, the same info ffprobe
+// would give natively. Read here instead of assuming every clip has audio.
+async function hasAudioStream(ffmpeg: FFmpeg, filename: string): Promise<boolean> {
+  let found = false;
+  const onLog = ({ message }: { message: string }) => {
+    if (/Stream #\d+:\d+.*Audio:/.test(message)) found = true;
+  };
+  ffmpeg.on("log", onLog);
+  try {
+    await ffmpeg.exec(["-i", filename]);
+  } catch {
+    // Expected - `-i` alone with no output always reports non-zero.
+  }
+  ffmpeg.off("log", onLog);
+  return found;
 }
 
 function StitchPageInner() {
@@ -152,9 +182,11 @@ function StitchPageInner() {
       // Target frame size = the first clip's own real dimensions - every
       // other clip gets scaled to fit inside that box and letterboxed
       // (black bars, aspect ratio preserved) rather than stretched or
-      // cropped. See getVideoDimensions' comment above for why this step
+      // cropped. See getVideoMeta's comment above for why this step
       // exists at all.
-      const { width: targetW, height: targetH } = await getVideoDimensions(items[0].file);
+      const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
+      const { width: targetW, height: targetH } = metas[0];
+      const totalDuration = metas.reduce((sum, m) => sum + m.duration, 0);
 
       const { fetchFile } = await import("@ffmpeg/util");
       const ffmpeg = await getFFmpeg();
@@ -167,47 +199,87 @@ function StitchPageInner() {
         inputNames.push(name);
       }
 
+      // Real per-clip check (2026-09-15) - a silent render (some engines
+      // never add audio unless asked) can't just be skipped in the audio
+      // concat below, or the audio timeline would drift out of sync with
+      // the video timeline the moment one clip is missing a track. Real
+      // digital silence, exactly as long as that clip, keeps both
+      // timelines lined up regardless of which clips happen to have audio.
+      // Sequential, not Promise.all - a real bug hit here first: ffmpeg's
+      // "log" event is one shared stream on this one instance, so running
+      // these concurrently let one probe's listener catch another probe's
+      // log lines (a later silent clip was misread as having audio because
+      // an earlier clip's real audio line arrived while both listeners
+      // were attached at once).
+      const hasAudio: boolean[] = [];
+      for (const name of inputNames) {
+        hasAudio.push(await hasAudioStream(ffmpeg, name));
+      }
+
       const scaleChains = inputNames
         .map(
           (_, i) =>
             `[${i}:v]scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`,
         )
         .join(";");
-      const concatInputs = inputNames.map((_, i) => `[v${i}]`).join("");
-      const filterComplex = `${scaleChains};${concatInputs}concat=n=${inputNames.length}:v=1:a=0[outv]`;
+      const concatVideoInputs = inputNames.map((_, i) => `[v${i}]`).join("");
+
+      // Loudness-normalize every real dialogue/audio track to the same
+      // target (EBU R128, -16 LUFS - the standard streaming/social-video
+      // level) so one scene's line doesn't jump louder or quieter than the
+      // next just because it came from a different generation - the same
+      // job Premiere's "match loudness" does, done here with ffmpeg's own
+      // `loudnorm` filter.
+      const audioChains = inputNames
+        .map((_, i) =>
+          hasAudio[i]
+            ? `[${i}:a]loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a${i}]`
+            : `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${metas[i].duration}[a${i}]`,
+        )
+        .join(";");
+      const concatAudioInputs = inputNames.map((_, i) => `[a${i}]`).join("");
+
       const args = inputNames.flatMap((name) => ["-i", name]);
+      let filterComplex = `${scaleChains};${audioChains};${concatVideoInputs}concat=n=${inputNames.length}:v=1:a=0[outv];${concatAudioInputs}concat=n=${inputNames.length}:v=0:a=1[dialogue]`;
+      let finalAudioLabel = "[dialogue]";
 
       if (musicFile) {
         // Optional: lay the user's own uploaded track under the combined
-        // video (2026-09-14) - their choice, their music, never picked or
-        // generated by us. -shortest trims whichever is longer (usually the
-        // music) to match the video's real length instead of leaving dead
-        // air or an abrupt music cutoff mid-clip.
+        // dialogue (2026-09-14, reworked 2026-09-15 to mix rather than
+        // replace) - their choice, their music, never picked or generated
+        // by us. Looped (`-stream_loop -1`) then trimmed to the *entire*
+        // combined duration so it plays as one continuous bed across every
+        // scene rather than being cut off mid-song or restarting per clip.
+        // `normalize=0` on amix keeps the manual volume balance below (full
+        // dialogue, quieter music) instead of amix's default auto-gain,
+        // which would otherwise quietly turn the dialogue down too.
         await ffmpeg.writeFile("music.audio", await fetchFile(musicFile));
-        args.push("-i", "music.audio");
-        args.push(
-          "-filter_complex",
-          filterComplex,
-          "-map",
-          "[outv]",
-          "-map",
-          `${inputNames.length}:a:0`,
-          "-c:v",
-          "libx264",
-          "-crf",
-          "18",
-          "-pix_fmt",
-          "yuv420p",
-          "-c:a",
-          "aac",
-          "-b:a",
-          "192k",
-          "-shortest",
-          "output.mp4",
-        );
-      } else {
-        args.push("-filter_complex", filterComplex, "-map", "[outv]", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "output.mp4");
+        args.push("-stream_loop", "-1", "-i", "music.audio");
+        const musicIdx = inputNames.length;
+        filterComplex += `;[${musicIdx}:a]volume=0.25,atrim=duration=${totalDuration},asetpts=PTS-STARTPTS[musicbed];[dialogue][musicbed]amix=inputs=2:duration=first:normalize=0[finalaudio]`;
+        finalAudioLabel = "[finalaudio]";
       }
+
+      args.push(
+        "-filter_complex",
+        filterComplex,
+        "-map",
+        "[outv]",
+        "-map",
+        finalAudioLabel,
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-shortest",
+        "output.mp4",
+      );
 
       await ffmpeg.exec(args);
       // readFile's Uint8Array is typed against ArrayBufferLike (which
@@ -312,8 +384,8 @@ function StitchPageInner() {
 
         <p className="text-xs text-muted">
           {musicFile
-            ? "Your uploaded track plays under the combined video. Source clips' own audio (dialogue, native sound) is still dropped - this keeps combining reliable across clips from different sources."
-            : "Note: the combined video has no audio track, even if your source clips did - this keeps combining reliable across clips from different sources. Add your own music above if you want sound."}
+            ? "Each clip's own dialogue/audio is kept and loudness-matched so scenes don't jump in volume, then your uploaded track plays underneath as one continuous bed across the whole thing - not cut or restarted per scene."
+            : "Each clip's own dialogue/audio is kept and loudness-matched, so scenes don't jump in volume or tone from one to the next. A clip with no audio at all gets real silence instead of being skipped, so timing stays in sync. Add your own music above if you want a bed underneath."}
         </p>
       </main>
     </div>
