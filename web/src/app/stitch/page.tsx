@@ -69,6 +69,24 @@ function getVideoMeta(file: File): Promise<{ width: number; height: number; dura
   });
 }
 
+function getAudioDuration(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const audio = document.createElement("audio");
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => {
+      const { duration } = audio;
+      URL.revokeObjectURL(audio.src);
+      if (!isFinite(duration)) reject(new Error("Could not read this music file's length"));
+      else resolve(duration);
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(audio.src);
+      reject(new Error("Could not read this music file's length"));
+    };
+    audio.src = URL.createObjectURL(file);
+  });
+}
+
 // ffmpeg.wasm has no ffprobe-style structured metadata call - `-i <file>`
 // with no output "fails" (there's nothing to write), but its stderr log
 // still lists every real stream it found first, the same info ffprobe
@@ -96,6 +114,10 @@ function StitchPageInner() {
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [musicDuration, setMusicDuration] = useState(0);
+  const [musicStart, setMusicStart] = useState(0);
+  const [musicEnd, setMusicEnd] = useState(0);
+  const [musicError, setMusicError] = useState("");
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const preloadedRef = useRef(false);
@@ -146,6 +168,23 @@ function StitchPageInner() {
       previewUrl: URL.createObjectURL(file),
     }));
     setItems((prev) => (prev.length + added.length > MAX_FILES ? prev : [...prev, ...added]));
+  }
+
+  // Lets someone pick just the part of their music file they actually
+  // want (e.g. skip a quiet intro, start right at the chorus) instead of
+  // always using it from 0:00 - per direct request. Defaults to the whole
+  // file so nothing changes for anyone who doesn't touch the range.
+  async function handleMusicFile(file: File) {
+    setMusicError("");
+    try {
+      const duration = await getAudioDuration(file);
+      setMusicFile(file);
+      setMusicDuration(duration);
+      setMusicStart(0);
+      setMusicEnd(duration);
+    } catch (err) {
+      setMusicError(err instanceof Error ? err.message : "Could not read this music file");
+    }
   }
 
   function moveItem(index: number, direction: -1 | 1) {
@@ -246,15 +285,30 @@ function StitchPageInner() {
       if (musicFile) {
         // Optional: lay the user's own uploaded track under the combined
         // dialogue (2026-09-14, reworked 2026-09-15 to mix rather than
-        // replace) - their choice, their music, never picked or generated
-        // by us. Looped (`-stream_loop -1`) then trimmed to the *entire*
-        // combined duration so it plays as one continuous bed across every
-        // scene rather than being cut off mid-song or restarting per clip.
-        // `normalize=0` on amix keeps the manual volume balance below (full
-        // dialogue, quieter music) instead of amix's default auto-gain,
-        // which would otherwise quietly turn the dialogue down too.
-        await ffmpeg.writeFile("music.audio", await fetchFile(musicFile));
-        args.push("-stream_loop", "-1", "-i", "music.audio");
+        // replace, and again to support picking just part of the file -
+        // per direct request, "select parts of their audio file... from 35
+        // seconds onward to 50 seconds"). Real gotcha found while testing
+        // this against a local ffmpeg build before trusting it in-browser:
+        // `-stream_loop` does NOT compose with `-ss`/`-to` on the same
+        // input - combined, it played the trimmed range once and stopped
+        // (confirmed: a 15s trim with `-to` set produced exactly 15s of
+        // output no matter how long the requested total was), and `-ss`
+        // alone with `-stream_loop` produced corrupt non-monotonic
+        // timestamps. The two-pass fix that actually works: extract the
+        // chosen range into its own file first (a plain re-encode, sample-
+        // accurate regardless of the source container), then loop *that*
+        // file with no -ss/-to involved at all - confirmed clean in a
+        // local test (a 15s segment looped to fill a 40s target came back
+        // as exactly 40.000000s). The final result is trimmed once more to
+        // the *entire* combined duration so it plays as one continuous bed
+        // across every scene rather than being cut off mid-song or
+        // restarting per clip. `normalize=0` on amix keeps the manual
+        // volume balance below (full dialogue, quieter music) instead of
+        // amix's default auto-gain, which would otherwise quietly turn the
+        // dialogue down too.
+        await ffmpeg.writeFile("music.raw", await fetchFile(musicFile));
+        await ffmpeg.exec(["-ss", String(musicStart), "-to", String(musicEnd), "-i", "music.raw", "music_trimmed.wav"]);
+        args.push("-stream_loop", "-1", "-i", "music_trimmed.wav");
         const musicIdx = inputNames.length;
         filterComplex += `;[${musicIdx}:a]volume=0.25,atrim=duration=${totalDuration},asetpts=PTS-STARTPTS[musicbed];[dialogue][musicbed]amix=inputs=2:duration=first:normalize=0[finalaudio]`;
         finalAudioLabel = "[finalaudio]";
@@ -348,18 +402,50 @@ function StitchPageInner() {
             we&apos;ll lay it under the combined video, trimmed to fit.
           </p>
           {musicFile ? (
-            <div className="flex items-center gap-2 rounded-xl border border-border p-2">
-              <span className="flex-1 truncate text-xs">{musicFile.name}</span>
-              <button onClick={() => setMusicFile(null)} className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark">
-                Remove
-              </button>
+            <div className="space-y-2 rounded-xl border border-border p-2">
+              <div className="flex items-center gap-2">
+                <span className="flex-1 truncate text-xs">{musicFile.name}</span>
+                <button
+                  onClick={() => {
+                    setMusicFile(null);
+                    setMusicError("");
+                  }}
+                  className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark"
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted">
+                <span>Use from</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={musicEnd}
+                  step={1}
+                  value={Math.round(musicStart)}
+                  onChange={(e) => setMusicStart(Math.max(0, Math.min(Number(e.target.value) || 0, musicEnd)))}
+                  className="w-16 rounded-lg border border-border px-2 py-1 text-center"
+                />
+                <span>to</span>
+                <input
+                  type="number"
+                  min={musicStart}
+                  max={Math.round(musicDuration)}
+                  step={1}
+                  value={Math.round(musicEnd)}
+                  onChange={(e) => setMusicEnd(Math.max(musicStart, Math.min(Number(e.target.value) || 0, musicDuration)))}
+                  className="w-16 rounded-lg border border-border px-2 py-1 text-center"
+                />
+                <span>seconds (of {Math.round(musicDuration)}s total) - it&apos;ll loop that part to fill the ad if it&apos;s shorter.</span>
+              </div>
             </div>
           ) : (
             <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border p-3 text-center text-xs">
               Choose a music file
-              <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && setMusicFile(e.target.files[0])} />
+              <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && handleMusicFile(e.target.files[0])} />
             </label>
           )}
+          {musicError && <p className="text-xs text-coral-dark">{musicError}</p>}
         </div>
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
