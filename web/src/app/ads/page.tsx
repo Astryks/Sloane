@@ -738,6 +738,17 @@ export default function AdsGridPage() {
                 <span className="block text-xs text-muted">A director&apos;s real storyboard for JoJo, scene by scene, next to the finished ad it became.</span>
               </span>
             </Link>
+
+            <Link
+              href="/#cinematic-storyboard"
+              className="mt-3 flex items-center gap-3 rounded-2xl border border-purple/20 bg-purple-wash p-3 text-left transition hover:shadow-soft"
+            >
+              <span className="text-2xl">🎬</span>
+              <span>
+                <span className="block text-xs font-bold text-foreground">Making a short film instead? See how to storyboard one</span>
+                <span className="block text-xs text-muted">Same idea applied to a cinematic scene - one shot list, broken into a real sequence.</span>
+              </span>
+            </Link>
           </div>
         )}
 
