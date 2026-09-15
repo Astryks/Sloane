@@ -39,7 +39,31 @@ import { SiteHeader } from "@/components/SiteHeader";
 type VideoItem = { file: File; id: string; previewUrl: string };
 type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
 
+// A single audio layer placed on the COMBINED video's own timeline - e.g.
+// "this song plays from 1:23 to 1:45 of the final video" - not a trim of
+// the source file's own internal range (that was the previous single-
+// music feature; see handleCombine's real ffmpeg comment for why this
+// version doesn't need that trick at all). Several of these can exist at
+// once (2026-09-15, per direct request: "one can be for sound, one for
+// audio... make it very intuitive"), each independently positioned.
+type AudioTrack = {
+  id: string;
+  file: File;
+  label: string; // free text, e.g. "Music" / "SFX" - purely for the user's own organization, never sent to ffmpeg
+  sourceDuration: number; // the uploaded file's own real length
+  startSec: number; // where this track starts playing, in the FINAL video's timeline
+  endSec: number; // where it stops - (endSec - startSec) is how long it plays for
+};
+
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
+const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
+
+function formatTime(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
 
 // Real bug found and fixed 2026-09-14 ("combined video file doesn't
 // work"): ffmpeg's concat FILTER requires every input to already share
@@ -113,11 +137,9 @@ function StitchPageInner() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [musicFile, setMusicFile] = useState<File | null>(null);
-  const [musicDuration, setMusicDuration] = useState(0);
-  const [musicStart, setMusicStart] = useState(0);
-  const [musicEnd, setMusicEnd] = useState(0);
-  const [musicError, setMusicError] = useState("");
+  const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [audioTrackError, setAudioTrackError] = useState("");
+  const [totalVideoDuration, setTotalVideoDuration] = useState(0);
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const preloadedRef = useRef(false);
@@ -170,21 +192,67 @@ function StitchPageInner() {
     setItems((prev) => (prev.length + added.length > MAX_FILES ? prev : [...prev, ...added]));
   }
 
-  // Lets someone pick just the part of their music file they actually
-  // want (e.g. skip a quiet intro, start right at the chorus) instead of
-  // always using it from 0:00 - per direct request. Defaults to the whole
-  // file so nothing changes for anyone who doesn't touch the range.
-  async function handleMusicFile(file: File) {
-    setMusicError("");
+  // Keeps a live estimate of the combined video's real total length so the
+  // audio-track placement inputs below can show/clamp against a real
+  // number ("your video is currently ~1:47") instead of an unlabeled
+  // seconds field - recomputed whenever the clip list changes. Cheap: only
+  // reads each file's metadata (getVideoMeta), never decodes/re-encodes
+  // anything.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (items.length === 0) {
+        if (!cancelled) setTotalVideoDuration(0);
+        return;
+      }
+      try {
+        const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
+        if (!cancelled) setTotalVideoDuration(metas.reduce((sum, m) => sum + m.duration, 0));
+      } catch {
+        // Leave the last known total as-is - handleCombine will surface any
+        // real problem with a clip when the user actually combines.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [items]);
+
+  // Adds a new audio track, defaulted to play once from the start of the
+  // final video for the file's own natural length - the least-surprising
+  // starting point, adjustable afterward via the start/end fields below.
+  // Per direct request ("one can be for sound, one can be for audio... make
+  // it very intuitive"): several of these can exist at once, each
+  // independently placed on the combined video's timeline.
+  async function addAudioTrack(file: File) {
+    setAudioTrackError("");
     try {
       const duration = await getAudioDuration(file);
-      setMusicFile(file);
-      setMusicDuration(duration);
-      setMusicStart(0);
-      setMusicEnd(duration);
+      setAudioTracks((prev) => {
+        if (prev.length >= MAX_AUDIO_TRACKS) return prev;
+        return [
+          ...prev,
+          {
+            id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
+            file,
+            label: "",
+            sourceDuration: duration,
+            startSec: 0,
+            endSec: Math.round(duration),
+          },
+        ];
+      });
     } catch (err) {
-      setMusicError(err instanceof Error ? err.message : "Could not read this music file");
+      setAudioTrackError(err instanceof Error ? err.message : "Could not read this audio file");
     }
+  }
+
+  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "label" | "startSec" | "endSec">>) {
+    setAudioTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }
+
+  function removeAudioTrack(id: string) {
+    setAudioTracks((prev) => prev.filter((t) => t.id !== id));
   }
 
   function moveItem(index: number, direction: -1 | 1) {
@@ -315,36 +383,46 @@ function StitchPageInner() {
       let filterComplex = `${scaleChains};${audioChains};${concatVideoInputs}concat=n=${inputNames.length}:v=1:a=0[outv];${concatAudioInputs}concat=n=${inputNames.length}:v=0:a=1[dialogue]`;
       let finalAudioLabel = "[dialogue]";
 
-      if (musicFile) {
-        // Optional: lay the user's own uploaded track under the combined
-        // dialogue (2026-09-14, reworked 2026-09-15 to mix rather than
-        // replace, and again to support picking just part of the file -
-        // per direct request, "select parts of their audio file... from 35
-        // seconds onward to 50 seconds"). Real gotcha found while testing
-        // this against a local ffmpeg build before trusting it in-browser:
-        // `-stream_loop` does NOT compose with `-ss`/`-to` on the same
-        // input - combined, it played the trimmed range once and stopped
-        // (confirmed: a 15s trim with `-to` set produced exactly 15s of
-        // output no matter how long the requested total was), and `-ss`
-        // alone with `-stream_loop` produced corrupt non-monotonic
-        // timestamps. The two-pass fix that actually works: extract the
-        // chosen range into its own file first (a plain re-encode, sample-
-        // accurate regardless of the source container), then loop *that*
-        // file with no -ss/-to involved at all - confirmed clean in a
-        // local test (a 15s segment looped to fill a 40s target came back
-        // as exactly 40.000000s). The final result is trimmed once more to
-        // the *entire* combined duration so it plays as one continuous bed
-        // across every scene rather than being cut off mid-song or
-        // restarting per clip. `normalize=0` on amix keeps the manual
-        // volume balance below (full dialogue, quieter music) instead of
-        // amix's default auto-gain, which would otherwise quietly turn the
-        // dialogue down too.
-        await ffmpeg.writeFile("music.raw", await fetchFile(musicFile));
-        await ffmpeg.exec(["-ss", String(musicStart), "-to", String(musicEnd), "-i", "music.raw", "music_trimmed.wav"]);
-        args.push("-stream_loop", "-1", "-i", "music_trimmed.wav");
-        const musicIdx = inputNames.length;
-        filterComplex += `;[${musicIdx}:a]volume=0.25,atrim=duration=${totalDuration},asetpts=PTS-STARTPTS[musicbed];[dialogue][musicbed]amix=inputs=2:duration=first:normalize=0[finalaudio]`;
-        finalAudioLabel = "[finalaudio]";
+      if (audioTracks.length > 0) {
+        // Each track is placed on the FINAL video's own timeline (e.g. "a
+        // song plays from 1:23 to 1:45"), not trimmed from the source
+        // file's own internal range - the previous single-music feature
+        // did the latter (pick which part of the file to use, then loop
+        // that part to fill the whole video); this is a genuinely
+        // different placement, not a bigger version of the same thing.
+        // Real simplification found while building this: the old
+        // trim-then-loop feature needed a separate pre-pass exec because
+        // `-stream_loop` doesn't compose with `-ss`/`-to` on the same
+        // input (see git history for the full story) - but that
+        // restriction is specifically about INPUT seek options. Looping
+        // the file whole via `-stream_loop -1` and then cutting it down
+        // with `atrim` inside the filter graph afterward composes just
+        // fine, since no seek option is ever applied to the same input -
+        // so this version needs no pre-pass at all, even though it now
+        // supports several tracks at once. `adelay` (ms, per channel)
+        // shifts each track to its real start position on the timeline;
+        // `amix`'s `duration=first` keeps the combined result exactly as
+        // long as the dialogue track regardless of how far any music track
+        // was delayed or looped, so no extra final trim is needed either.
+        const trackLabels: string[] = [];
+        for (let i = 0; i < audioTracks.length; i++) {
+          const track = audioTracks[i];
+          const start = Math.max(0, Math.min(track.startSec, totalDuration));
+          const end = Math.max(start, Math.min(track.endSec, totalDuration));
+          const duration = end - start;
+          if (duration <= 0) continue; // nothing real to place for this track
+          const name = `audiotrack${i}.raw`;
+          await ffmpeg.writeFile(name, await fetchFile(track.file));
+          args.push("-stream_loop", "-1", "-i", name);
+          const inputIndex = inputNames.length + trackLabels.length;
+          const startMs = Math.round(start * 1000);
+          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},volume=0.25,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS[track${i}]`;
+          trackLabels.push(`[track${i}]`);
+        }
+        if (trackLabels.length > 0) {
+          filterComplex += `;[dialogue]${trackLabels.join("")}amix=inputs=${1 + trackLabels.length}:duration=first:normalize=0[finalaudio]`;
+          finalAudioLabel = "[finalaudio]";
+        }
       }
 
       args.push(
@@ -428,57 +506,73 @@ function StitchPageInner() {
           </div>
         )}
 
-        <div className="space-y-2 rounded-2xl border border-border bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Add your own music (optional)</p>
+        <div className="space-y-3 rounded-2xl border border-border bg-white p-4">
+          <p className="text-xs font-semibold text-muted">Audio tracks (optional)</p>
           <p className="text-xs text-muted">
-            We never pick or generate music for you - if you have a track you have the rights to use, add it here and
-            we&apos;ll lay it under the combined video, trimmed to fit.
+            We never pick or generate music for you - add your own track(s) if you have the rights to use them.
+            Add more than one if you want, say, music under the whole thing and a separate sound effect that only
+            plays for a few seconds partway through.
+            {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
-          {musicFile ? (
-            <div className="space-y-2 rounded-xl border border-border p-2">
-              <div className="flex items-center gap-2">
-                <span className="flex-1 truncate text-xs">{musicFile.name}</span>
-                <button
-                  onClick={() => {
-                    setMusicFile(null);
-                    setMusicError("");
-                  }}
-                  className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark"
-                >
-                  Remove
-                </button>
+
+          {audioTracks.map((track) => {
+            const overshoots = track.endSec > totalVideoDuration && totalVideoDuration > 0;
+            const loops = track.endSec - track.startSec > track.sourceDuration;
+            return (
+              <div key={track.id} className="space-y-2 rounded-xl border border-border p-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder={`Label (e.g. "Music" or "SFX")`}
+                    value={track.label}
+                    onChange={(e) => updateAudioTrack(track.id, { label: e.target.value })}
+                    className="w-40 rounded-lg border border-border px-2 py-1 text-xs"
+                  />
+                  <span className="flex-1 truncate text-xs text-muted">{track.file.name}</span>
+                  <button onClick={() => removeAudioTrack(track.id)} className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark">
+                    Remove
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                  <span>Plays from</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={Math.round(track.startSec)}
+                    onChange={(e) => updateAudioTrack(track.id, { startSec: Math.max(0, Number(e.target.value) || 0) })}
+                    className="w-16 rounded-lg border border-border px-2 py-1 text-center"
+                  />
+                  <span className="italic">({formatTime(track.startSec)})</span>
+                  <span>to</span>
+                  <input
+                    type="number"
+                    min={track.startSec}
+                    step={1}
+                    value={Math.round(track.endSec)}
+                    onChange={(e) => updateAudioTrack(track.id, { endSec: Math.max(track.startSec, Number(e.target.value) || 0) })}
+                    className="w-16 rounded-lg border border-border px-2 py-1 text-center"
+                  />
+                  <span className="italic">({formatTime(track.endSec)})</span>
+                  <span>seconds into your final video.</span>
+                </div>
+                <p className="text-[11px] italic text-muted">
+                  {loops
+                    ? `Your file is ${formatTime(track.sourceDuration)} long, so it'll loop to fill this ${formatTime(track.endSec - track.startSec)} range.`
+                    : `Plays the first ${formatTime(track.endSec - track.startSec)} of your ${formatTime(track.sourceDuration)} file.`}
+                  {overshoots && " Note: this runs past the end of your video as currently ordered - the extra part just won't be heard."}
+                </p>
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted">
-                <span>Use from</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={musicEnd}
-                  step={1}
-                  value={Math.round(musicStart)}
-                  onChange={(e) => setMusicStart(Math.max(0, Math.min(Number(e.target.value) || 0, musicEnd)))}
-                  className="w-16 rounded-lg border border-border px-2 py-1 text-center"
-                />
-                <span>to</span>
-                <input
-                  type="number"
-                  min={musicStart}
-                  max={Math.round(musicDuration)}
-                  step={1}
-                  value={Math.round(musicEnd)}
-                  onChange={(e) => setMusicEnd(Math.max(musicStart, Math.min(Number(e.target.value) || 0, musicDuration)))}
-                  className="w-16 rounded-lg border border-border px-2 py-1 text-center"
-                />
-                <span>seconds (of {Math.round(musicDuration)}s total) - it&apos;ll loop that part to fill the ad if it&apos;s shorter.</span>
-              </div>
-            </div>
-          ) : (
+            );
+          })}
+
+          {audioTracks.length < MAX_AUDIO_TRACKS && (
             <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border p-3 text-center text-xs">
-              Choose a music file
-              <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && handleMusicFile(e.target.files[0])} />
+              {audioTracks.length === 0 ? "Choose an audio file" : "+ Add another audio track"}
+              <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
             </label>
           )}
-          {musicError && <p className="text-xs text-coral-dark">{musicError}</p>}
+          {audioTrackError && <p className="text-xs text-coral-dark">{audioTrackError}</p>}
         </div>
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
@@ -502,9 +596,9 @@ function StitchPageInner() {
         )}
 
         <p className="text-xs text-muted">
-          {musicFile
-            ? "Each clip's own dialogue/audio is kept and loudness-matched so scenes don't jump in volume, then your uploaded track plays underneath as one continuous bed across the whole thing - not cut or restarted per scene."
-            : "Each clip's own dialogue/audio is kept and loudness-matched, so scenes don't jump in volume or tone from one to the next. A clip with no audio at all gets real silence instead of being skipped, so timing stays in sync. Add your own music above if you want a bed underneath."}
+          {audioTracks.length > 0
+            ? "Each clip's own dialogue/audio is kept and loudness-matched so scenes don't jump in volume, then your own audio track(s) play underneath at exactly the position you set on the timeline - each one independent of the others."
+            : "Each clip's own dialogue/audio is kept and loudness-matched, so scenes don't jump in volume or tone from one to the next. A clip with no audio at all gets real silence instead of being skipped, so timing stays in sync. Add your own audio tracks above if you want music or sound effects layered in."}
         </p>
       </main>
     </div>
