@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { Footer } from "@/components/Footer";
 import { SiteHeader } from "@/components/SiteHeader";
 import { RecordOrUpload } from "@/components/RecordOrUpload";
@@ -1341,17 +1340,6 @@ function ProductAdSection() {
           shown here purely as a real example of a storyboard becoming a finished ad.
         </p>
       </div>
-
-      <Link
-        href="/#cinematic-storyboard"
-        className="flex items-center gap-3 rounded-2xl border border-purple/20 bg-purple-wash p-3 text-left transition hover:shadow-soft"
-      >
-        <span className="text-2xl">🎬</span>
-        <span>
-          <span className="block text-sm font-semibold text-foreground">Making a short film instead of an ad? See how to storyboard one.</span>
-          <span className="block text-xs text-muted">Same idea, applied to a cinematic scene - one shot list, broken into a real sequence.</span>
-        </span>
-      </Link>
 
       <div className="rounded-2xl border border-purple/20 bg-white/80 p-4 text-center">
         <p className="text-sm font-bold text-foreground">Want to build an ad like this yourself?</p>
