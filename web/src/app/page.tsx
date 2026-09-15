@@ -889,6 +889,53 @@ const MODEL_SHOWCASE_PROMPT =
 // specific to any one video model. Since every engine we use only accepts
 // one photo/prompt per generation, each shot below would be its own
 // generation in the storyboard builder, then combined in /stitch.
+// Real character-description formula + shot-list examples, written in our
+// own words and entirely original prompts - not reproduced from any
+// third-party tutorial (see STATUS.md 2026-09-15 for the two real YouTube
+// prompt-engineering videos this technique was generalized from: their
+// exact wording/videos are deliberately NOT reproduced here, same
+// copyright discipline as the JoJo storyboard - only the general
+// structural approach (reference block, character lock, timecoded shots)
+// is reused, which is technique, not their copyrightable expression).
+const PROMPT_STYLE_EXAMPLES: { category: string; title: string; prompt: string }[] = [
+  {
+    category: "Cinematic action",
+    title: "Pursuit through an abandoned parking garage",
+    prompt:
+      "[CHARACTER]\nA synthetic pursuer built for one purpose: relentless, unblinking pursuit. Broad-shouldered chrome endoskeleton visible through tears in scorched synthetic skin along one forearm, glowing red optical sensors, torn leather jacket, combat boots. Moves with mechanical, unnervingly steady precision - no hesitation, no fatigue.\n\n" +
+      "[SCENE]\nA derelict multi-story parking garage at night. Flickering fluorescent tubes, concrete pillars streaked with rust, oil pooling under abandoned cars, a single exit ramp spiraling down into darkness.\n\n" +
+      "[SHOT SEQUENCE]\nSHOT 1 (0:00-0:02): Low-angle tracking shot, camera mounted street-level beside the motorcycle. The pursuer guns the engine, front wheel lifting slightly, sparks skittering off a support pillar as the handlebar clips it.\n" +
+      "SHOT 2 (0:02-0:05): Handheld chase cam, whip-panning between the bike and a support column - a fuel-drum rupture kicks an orange fireball skyward, trailing black smoke, debris scattering across the oil-stained floor.\n" +
+      "SHOT 3 (0:05-0:07): Close-up, static camera. The pursuer's face lit red by the fireball's glow - no fear, no flinch, optical sensors narrowing with mechanical focus.\n" +
+      "SHOT 4 (0:07-0:08): Wide shot, camera holds as the bike bursts through the exit-ramp shutter in a shower of sparks and torn metal, disappearing into the night.\n\n" +
+      "[CONSTRAINTS]\nNo subtitles/logos/watermarks. Cinematic, high-contrast, 4K, desaturated blue-grey palette except the fire's orange glow.",
+  },
+  {
+    category: "UGC product ad",
+    title: "Bathroom mirror - lipstick",
+    prompt:
+      "[REFERENCE]\n@Image1 - your character reference (from Cast & Locations). Use for face, hair, skin tone, and build only - not background or lighting. @Image2 - the lipstick.\n\n" +
+      "[CHARACTER]\nMid-20s, warm brown skin, natural curls pulled into a loose bun, silky blush-pink slip dress, relaxed and confident.\n\n" +
+      "[SCENE]\nA bright, clean bathroom. Morning light through a frosted window, softly catching the fabric of her dress and the edge of the mirror.\n\n" +
+      "[SHOT SEQUENCE]\nSHOT 1 (0:00-0:02): Medium shot, static camera, mirror reflection. She twists open @Image2, inspecting the shade with a small approving nod.\n" +
+      "SHOT 2 (0:02-0:05): Close-up, slight handheld sway (selfie-style). She applies it in one smooth stroke, presses her lips together, breaks into a genuine, pleased smile. {\"Okay, this shade is unreal.\"}\n" +
+      "SHOT 3 (0:05-0:08): Medium close-up, camera holds. She turns toward the window light, holding the product beside her face so the label reads clearly, natural light catching both skin and packaging.\n\n" +
+      "[CONSTRAINTS]\nNo subtitles/logos beyond the product's own label. Warm, soft-focus, natural light, iPhone-shot UGC aesthetic - not overly polished.",
+  },
+  {
+    category: "UGC product ad",
+    title: "Desk setup - tech gadget",
+    prompt:
+      "[REFERENCE]\n@Image1 - your character reference. @Image2 - the product.\n\n" +
+      "[CHARACTER]\nLate 20s, short textured hair, glasses, oversized knit sweater, easygoing and a little wry.\n\n" +
+      "[SCENE]\nA cozy bedroom desk setup, string lights soft in the background, laptop open, afternoon light through a nearby window.\n\n" +
+      "[SHOT SEQUENCE]\nSHOT 1 (0:00-0:03): Medium shot, static camera, desk-level. He picks up @Image2, turning it over in his hands, one eyebrow raised, genuinely impressed. {\"Okay, I was not expecting this to actually be good.\"}\n" +
+      "SHOT 2 (0:03-0:06): Close-up, slow handheld push-in. He demonstrates the product's main feature to camera, focused and matter-of-fact.\n" +
+      "SHOT 3 (0:06-0:08): Medium shot, camera holds. He sets it down, leans back, shrugs with a small grin. {\"Yeah. It's going on the desk permanently.\"}\n\n" +
+      "[CONSTRAINTS]\nNo subtitles/logos beyond the product's own branding. Casual, natural light, handheld UGC energy - not a polished commercial.",
+  },
+];
+
 const CINEMATIC_STORYBOARD: { shot: string; camera: string; action: string }[] = [
   {
     shot: "1. Establishing",
@@ -1156,6 +1203,74 @@ function CinematicSceneSection({ onTryItYourself }: { onTryItYourself: (prompt: 
             The single prompt above compresses all of this into one shot. Written as 4 separate shots instead, each
             generated on its own and stitched together, it reads as a real short film with a beginning, a quiet
             middle beat, and an ending - not just one clip.
+          </p>
+        </details>
+
+        <details className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">The full template: how to describe a character, a shot, a scene</summary>
+          <div className="mt-3 space-y-3 text-xs leading-relaxed text-muted">
+            <div>
+              <p className="font-semibold text-foreground">Describing a character (the biggest driver of consistency)</p>
+              <p className="mt-1">
+                Formula: <strong>age + build + 2-3 distinguishing features + hair + wardrobe (2-3 specific items) + demeanor</strong>.
+                Vague descriptions drift between shots; specific ones don&apos;t.
+              </p>
+              <p className="mt-1 rounded-lg bg-cream p-2 italic">
+                &quot;Late 20s, lean athletic build, faint scar above the left eyebrow, cropped dark hair, wearing a
+                weathered leather jacket over a grease-stained white tank top, moves with coiled, watchful tension.&quot;
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">The full block structure</p>
+              <pre className="mt-1 overflow-x-auto rounded-lg bg-cream p-2 text-[11px] leading-relaxed text-foreground">
+{`[REFERENCE]
+@Image1 - who/what. Use for face/body/wardrobe/identity only, not background or lighting.
+
+[CHARACTER]
+age + build + distinguishing features + hair + wardrobe + demeanor
+
+[SCENE]
+where, when, atmosphere, lighting/color tone - 2-3 sentences
+
+[SHOT SEQUENCE]
+SHOT 1 (0:00-0:03): camera framing + ONE movement - subject action. {dialogue}
+SHOT 2 (0:03-0:06): camera framing + movement - subject action. (music note)
+SHOT 3 (0:06-0:08): camera framing + movement - subject action. <sfx note>
+
+[CONSTRAINTS]
+no subtitles/logos/watermarks unless wanted + a style anchor`}
+              </pre>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">What a director thinks about that most prompts skip</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">
+                <li><strong>Shot size, chosen on purpose</strong> - extreme close-up, close-up, medium, wide/establishing. Don&apos;t default to medium every time.</li>
+                <li><strong>Coverage</strong> - a wide shot that establishes the space, then close-ups on top of it, reads as directed. Randomly-sized shots read as amateur.</li>
+                <li><strong>The 180-degree rule</strong> - keep people on the same screen-left/right side across cuts in a conversation, or the geography breaks.</li>
+                <li><strong>Sound as 4 separate layers</strong> - dialogue, ambience, sound effects, score. Silence is also a deliberate choice, not an absence.</li>
+                <li><strong>Cut rhythm matches the emotional beat</strong> - fast cuts read as energy or panic, long unbroken shots read as intimacy or dread.</li>
+                <li><strong>Color and mood</strong> - warm vs. cool, high-key (bright, upbeat) vs. low-key (shadowy, tense).</li>
+                <li><strong>Name the physical detail, not the label</strong> - not &quot;an explosion&quot;, but &quot;a fuel-tank rupture kicks an orange fireball skyward, trailing black smoke&quot;. Not &quot;she&apos;s happy&quot;, but the specific look on her face.</li>
+              </ul>
+            </div>
+          </div>
+        </details>
+
+        <details className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">Full worked examples, by style</summary>
+          <div className="mt-3 space-y-4">
+            {PROMPT_STYLE_EXAMPLES.map((ex, i) => (
+              <div key={i} className="rounded-xl bg-cream p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-purple">{ex.category}</p>
+                <p className="text-sm font-semibold text-foreground">{ex.title}</p>
+                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted">{ex.prompt}</pre>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] italic text-muted">
+            The UGC examples show how to bring in your own <strong>Cast &amp; Locations</strong> references (your
+            character photo, your product photo) and change everything else - setting, wardrobe, dialogue - freely
+            around them.
           </p>
         </details>
       </div>
@@ -1552,33 +1667,46 @@ function PayAsYouGoVideoSection({
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {(Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][]).map(([id, e]) => (
-              <div key={id}>
-                <button
-                  onClick={() => setEngine(id)}
-                  className={`w-full rounded-2xl border p-2 text-center text-xs transition ${
-                    engine === id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
-                  }`}
-                >
-                  <div className="font-bold">{e.label}</div>
-                  <div className="mt-0.5">{e.versionLabel}</div>
-                </button>
-                <a
-                  href={e.exampleUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 block text-center text-[11px] text-purple underline"
-                >
-                  See examples ↗
-                </a>
+          {(["popular", "other"] as const).map((group) => {
+            const entries = (Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][]).filter(
+              ([, e]) => (group === "popular" ? e.popular : !e.popular),
+            );
+            if (entries.length === 0) return null;
+            return (
+              <div key={group}>
+                <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+                  {group === "popular" ? "Popular" : "More models"}
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {entries.map(([id, e]) => (
+                    <div key={id}>
+                      <button
+                        onClick={() => setEngine(id)}
+                        className={`w-full rounded-2xl border p-2 text-center text-xs transition ${
+                          engine === id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
+                        }`}
+                      >
+                        <div className="font-bold">{e.label}</div>
+                        <div className={`mt-0.5 text-[11px] ${engine === id ? "text-white/90" : "text-muted"}`}>{e.pickerNote}</div>
+                      </button>
+                      <a
+                        href={e.exampleUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block text-center text-[11px] text-purple underline"
+                      >
+                        See examples ↗
+                      </a>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
 
           <p className="text-xs text-muted">
-            Only Veo can speak on its own with no audio given - Kling, Seedance, Grok, and MiniMax always render
-            silent unless you add your own audio or pick a Lucy voice below.
+            Only Veo can speak on its own with no audio given - every other engine renders silent unless you add
+            your own audio or pick a Lucy voice below.
           </p>
 
           <ReferenceMediaField media={media} label="Add photo(s) or video(s) (optional)" />
