@@ -1425,6 +1425,11 @@ function PayAsYouGoVideoSection({
           here that can generate its own native voice with no audio input at all. Kling, Grok, MiniMax, and
           Seedance all need a Lucy voice or your own audio to say anything.
         </p>
+        <p className="mt-1.5 text-xs italic text-muted">
+          This video is AI-generated using Kirsty&apos;s likeness, with her consent, to demonstrate the feature.
+          Always disclose AI-generated content, and never clone someone&apos;s face or voice without their
+          permission.
+        </p>
       </div>
 
       {!authChecked ? (
