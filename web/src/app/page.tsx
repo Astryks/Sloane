@@ -1951,7 +1951,15 @@ export default function Home() {
       <main className="mx-auto flex max-w-2xl flex-col gap-10">
         <SiteHeader
           title="Lucy Labs"
-          subtitle="The AI Voice Clone, upload 10 seconds of audio and see if our model can replicate it!"
+          subtitle={
+            <>
+              <p className="font-semibold text-foreground">All things AI voice and video.</p>
+              <p className="mt-1">
+                Learn by watching your favourite movies or ads and try to create your own, one scene at a time using
+                Seedance, Veo, Kling and other leading AI models. Create something!
+              </p>
+            </>
+          }
           current="home"
           logoSize={64}
         />

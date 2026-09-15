@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { LogoMark } from "@/components/LogoMark";
 
 type NavKey = "home" | "account" | "billing";
@@ -21,7 +22,10 @@ export function SiteHeader({
   logoSize = 48,
 }: {
   title: string;
-  subtitle?: string;
+  // ReactNode (not just string) so a caller can pass a short tagline plus
+  // a longer line below it (see page.tsx's homepage usage) instead of one
+  // run-on sentence - every existing plain-string usage still works as-is.
+  subtitle?: ReactNode;
   current?: NavKey;
   logoSize?: number;
 }) {
@@ -31,7 +35,7 @@ export function SiteHeader({
         <LogoMark size={logoSize} />
       </Link>
       <h1 className="text-3xl font-extrabold tracking-tight text-foreground">{title}</h1>
-      {subtitle && <p className="max-w-sm text-sm text-muted">{subtitle}</p>}
+      {subtitle && <div className="max-w-sm text-sm text-muted">{subtitle}</div>}
       <nav className="mt-2 flex flex-wrap items-center justify-center gap-2">
         {NAV_LINKS.map((link) => (
           <Link
