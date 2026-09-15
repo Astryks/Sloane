@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState } from "react";
+import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudio";
 
@@ -726,6 +727,17 @@ export default function AdsGridPage() {
                 When you&apos;re done, click <strong>Create full ad</strong> below - it hands your finished scenes straight to the combine tool, already loaded in order.
               </li>
             </ul>
+
+            <Link
+              href="/#jojo-case-study"
+              className="mt-4 flex items-center gap-3 rounded-2xl border border-purple/20 bg-purple-wash p-3 text-left transition hover:shadow-soft"
+            >
+              <span className="text-2xl">🎬</span>
+              <span>
+                <span className="block text-xs font-bold text-foreground">See a real one: storyboard → 1.7M views on Facebook</span>
+                <span className="block text-xs text-muted">A director&apos;s real storyboard for JoJo, scene by scene, next to the finished ad it became.</span>
+              </span>
+            </Link>
           </div>
         )}
 

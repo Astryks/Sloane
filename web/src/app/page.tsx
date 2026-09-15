@@ -1077,6 +1077,18 @@ function CinematicSceneSection({ onTryItYourself }: { onTryItYourself: (prompt: 
 function ProductAdSection() {
   const [modelId, setModelId] = useState(PRODUCT_AD_MODELS[0].id);
   const model = PRODUCT_AD_MODELS.find((m) => m.id === modelId)!;
+  const storyboardDetailsRef = useRef<HTMLDetailsElement | null>(null);
+
+  // Auto-opens the storyboard disclosure when arriving via a direct link
+  // to it (e.g. the "See a real example" link on /ads) - a plain #anchor
+  // scrolls to the right place on its own, but a <details> element still
+  // needs to be told to open; without this, landing here would show a
+  // collapsed summary with nothing visible below the fold.
+  useEffect(() => {
+    if (window.location.hash === "#jojo-case-study" && storyboardDetailsRef.current) {
+      storyboardDetailsRef.current.open = true;
+    }
+  }, []);
 
   return (
     <Card
@@ -1168,7 +1180,7 @@ function ProductAdSection() {
         Honest caveat: a snapshot from 2026-09-12, not a permanent ranking - these models change constantly.
       </p>
 
-      <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+      <div id="jojo-case-study" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
         <p className="text-xs font-bold uppercase tracking-wide text-purple">Real case study</p>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           We spoke with a film director about how she actually plans an ad, using a real one she directed as the
@@ -1184,7 +1196,7 @@ function ProductAdSection() {
           to download. Every scene has its own shot description and its own line of narration - a storyboard, not
           just a script.
         </p>
-        <details className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
+        <details ref={storyboardDetailsRef} className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-purple">View the full storyboard (her actual document, scene by scene)</summary>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[480px] border-collapse text-xs">
