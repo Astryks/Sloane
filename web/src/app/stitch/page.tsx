@@ -268,6 +268,7 @@ function StitchPageInner() {
   // approximation (see the on-screen note below), not a guarantee of
   // frame-exact sync with the real exported file.
   const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewMuted, setPreviewMuted] = useState(false);
   const [previewTime, setPreviewTime] = useState(0); // position on the FINAL combined timeline, in seconds
   const stageVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
@@ -1112,12 +1113,47 @@ function StitchPageInner() {
                             onPointerDown={(e) => handleReorderPointerDown(e, itemIndex)}
                             className="absolute inset-x-2.5 top-0 h-3 cursor-grab touch-none rounded-b bg-black/0 transition hover:bg-white/20 active:cursor-grabbing"
                           />
+                          {/* Mask reposition (2026-09-16, per direct
+                              feedback - "right now it just resizes it,
+                              allow users to edit mask and use only part of
+                              each video clip"): the edge handles below
+                              already change WHICH PART of the source plays
+                              by moving one end of trim.start/trim.end at a
+                              time (shrinking/growing it - genuinely a
+                              resize). This is the missing piece - drag the
+                              BODY of the block to slide the same-size
+                              in/out window earlier or later within the
+                              source clip (e.g. "use seconds 4-6" instead of
+                              only ever "0-2"), exactly mirroring how an
+                              audio track's body-drag repositions it
+                              without changing its own duration. Sits below
+                              the play/delete row in paint order so those
+                              buttons stay clickable over it. */}
+                          {trim && fullDuration != null && (
+                            <div
+                              onPointerDown={makeAxisDragHandler(
+                                () => trim.start,
+                                (v) => {
+                                  const dur = trim.end - trim.start;
+                                  const newStart = Math.max(0, Math.min(v, fullDuration - dur));
+                                  updateItemTrim(item.id, { start: newStart, end: newStart + dur });
+                                },
+                              )}
+                              title="Drag to choose which part of this clip plays"
+                              className="absolute inset-x-2.5 top-3 bottom-4 cursor-grab touch-none active:cursor-grabbing"
+                            />
+                          )}
                           {/* Play + delete, centered so they never overlap
                               the left/right trim handles (2026-09-16, per
                               direct request - play each clip, and "give the
                               option to delete video or audio files as you
-                              go too if they upload the wrong file"). */}
-                          <div className="absolute inset-x-0 top-3.5 z-10 flex items-center justify-center gap-1 opacity-0 transition group-hover:opacity-100">
+                              go too if they upload the wrong file"). Always
+                              visible, not hover-only (2026-09-16, found
+                              while testing on mobile: a touchscreen has no
+                              hover state at all, so a group-hover reveal
+                              would leave these permanently unreachable
+                              there). */}
+                          <div className="absolute inset-x-0 top-3.5 z-10 flex items-center justify-center gap-1">
                             <button
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
@@ -1215,7 +1251,7 @@ function StitchPageInner() {
                             removeAudioTrack(track.id);
                           }}
                           title="Delete this audio track"
-                          className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white opacity-0 transition group-hover:opacity-100"
+                          className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white"
                         >
                           ×
                         </button>
@@ -1258,7 +1294,7 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim/mask, its grip strip (video) to reorder, or the middle of an audio block to move it. Hover a block for play/delete. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. Each block has its own ▶/× for play/delete. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
@@ -1275,6 +1311,7 @@ function StitchPageInner() {
             }}
             src={track.previewUrl}
             preload="auto"
+            muted={previewMuted}
             className="hidden"
           />
         ))}
@@ -1294,10 +1331,34 @@ function StitchPageInner() {
                 {formatTime(previewTime)} / {formatTime(totalVideoDuration)}
               </span>
             </div>
-            <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} playsInline className="w-full rounded-xl border border-border bg-black" />
+            {/* Fixed-size stage, regardless of the source clips' own
+                dimensions (2026-09-16, per direct feedback - "the preview
+                changes in size according to video files inputed we need to
+                keep it the same and keep the preview window smaller so you
+                can see it within the screen"). A portrait clip used to make
+                this box very tall since the <video> just sized itself to
+                its own intrinsic aspect ratio at full container width -
+                now the box height never changes, and object-contain
+                letterboxes whatever's playing (any mix of portrait/
+                landscape clips) inside it instead. */}
+            <div className="flex h-56 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black sm:h-64">
+              <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
+            </div>
             <div className="flex items-center gap-2">
               <button onClick={handlePreviewPlayToggle} className="shrink-0 rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
                 {previewPlaying ? "❚❚ Pause" : "▶ Preview"}
+              </button>
+              {/* Mute toggle (2026-09-16, per direct request - "preview
+                  should have the option to mute or play with sound") -
+                  covers both the stage video's own dialogue/audio AND every
+                  layered audio track at once, since both elements share
+                  this same `previewMuted` flag. */}
+              <button
+                onClick={() => setPreviewMuted((m) => !m)}
+                title={previewMuted ? "Unmute preview" : "Mute preview"}
+                className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted"
+              >
+                {previewMuted ? "🔇" : "🔊"}
               </button>
               <div onClick={handleScrubberClick} className="relative h-2 flex-1 cursor-pointer rounded-full bg-border">
                 <div
@@ -1329,7 +1390,7 @@ function StitchPageInner() {
           disabled={items.length < 2 || status === "loading-ffmpeg" || status === "processing"}
           className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50"
         >
-          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Combining… ${progress}%` : `Combine ${items.length} videos`}
+          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Combining… ${progress}%` : "Download my video"}
         </button>
 
         {status === "done" && resultUrl && (
