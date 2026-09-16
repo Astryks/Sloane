@@ -53,6 +53,8 @@ type AudioTrack = {
   sourceDuration: number; // the uploaded file's own real length
   startSec: number; // where this track starts playing, in the FINAL video's timeline
   endSec: number; // where it stops - (endSec - startSec) is how long it plays for
+  fadeIn: number; // seconds, ramps up from silence at the start of its own play window
+  fadeOut: number; // seconds, ramps down to silence at the end of its own play window
 };
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
@@ -63,6 +65,19 @@ const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpe
 // seconds) use this SAME px-per-second value, which is what keeps them
 // visually aligned to one shared time axis.
 const PIXELS_PER_SECOND = 30;
+
+// Builds a `fade=`/`afade=` filter fragment (comma-terminated, or "" if
+// neither fade is set) for one clip/track's own local 0-based timeline -
+// `duration` is that clip's own trimmed/used length, so `st=` for the
+// fade-out always lands correctly regardless of where this clip sits on
+// the final combined timeline. Shared between video (`fade`) and audio
+// (`afade`) since both take the same t/st/d arguments.
+function fadeFilterFragment(kind: "fade" | "afade", duration: number, fadeIn: number, fadeOut: number): string {
+  const parts: string[] = [];
+  if (fadeIn > 0) parts.push(`${kind}=t=in:st=0:d=${fadeIn}`);
+  if (fadeOut > 0) parts.push(`${kind}=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}`);
+  return parts.length > 0 ? `${parts.join(",")},` : "";
+}
 
 function formatTime(totalSeconds: number): string {
   const s = Math.max(0, Math.round(totalSeconds));
@@ -238,7 +253,7 @@ function StitchPageInner() {
   // these in shortly after, same real-world lag the existing preview
   // thumbnail already has.
   const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
-  const [itemTrims, setItemTrims] = useState<Record<string, { start: number; end: number }>>({});
+  const [itemTrims, setItemTrims] = useState<Record<string, { start: number; end: number; fadeIn: number; fadeOut: number }>>({});
   const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
   const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
   // Live floating readout shown next to the cursor while dragging any
@@ -414,9 +429,9 @@ function StitchPageInner() {
         });
         setItemDurations(durations);
         setItemTrims((prev) => {
-          const next: Record<string, { start: number; end: number }> = {};
+          const next: Record<string, { start: number; end: number; fadeIn: number; fadeOut: number }> = {};
           items.forEach((item, i) => {
-            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration };
+            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0 };
           });
           return next;
         });
@@ -500,7 +515,7 @@ function StitchPageInner() {
     }
   }
 
-  function updateItemTrim(id: string, patch: Partial<{ start: number; end: number }>) {
+  function updateItemTrim(id: string, patch: Partial<{ start: number; end: number; fadeIn: number; fadeOut: number }>) {
     setItemTrims((prev) => {
       const current = prev[id];
       if (!current) return prev;
@@ -523,7 +538,7 @@ function StitchPageInner() {
       setAudioTracks((prev) => {
         if (prev.length >= MAX_AUDIO_TRACKS) return prev;
         added = true;
-        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration) }];
+        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0 }];
       });
       if (added) {
         // Waveform decode is best-effort and purely visual - a track that
@@ -538,7 +553,7 @@ function StitchPageInner() {
     }
   }
 
-  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec">>) {
+  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut">>) {
     setAudioTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
@@ -840,6 +855,19 @@ function StitchPageInner() {
         return { start: Math.max(0, Math.min(t.start, dur)), end: Math.max(0, Math.min(t.end, dur)) };
       });
       const totalDuration = trims.reduce((sum, t) => sum + (t.end - t.start), 0);
+      // Each clip's own fade in/out (2026-09-16, per direct request - "give
+      // the ability to fade audio and video clips each"), clamped to at
+      // most half this clip's own trimmed length so a fade-in and fade-out
+      // on a short clip can never overlap/exceed its duration.
+      const fades = items.map((item, i) => {
+        const t = itemTrims[item.id];
+        const dur = trims[i].end - trims[i].start;
+        const half = dur / 2;
+        return {
+          fadeIn: Math.max(0, Math.min(t?.fadeIn ?? 0, half)),
+          fadeOut: Math.max(0, Math.min(t?.fadeOut ?? 0, half)),
+        };
+      });
 
       const { fetchFile } = await import("@ffmpeg/util");
       const ffmpeg = await getFFmpeg();
@@ -870,10 +898,10 @@ function StitchPageInner() {
       }
 
       const scaleChains = inputNames
-        .map(
-          (_, i) =>
-            `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=PTS-STARTPTS,scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`,
-        )
+        .map((_, i) => {
+          const fade = fadeFilterFragment("fade", trims[i].end - trims[i].start, fades[i].fadeIn, fades[i].fadeOut);
+          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=PTS-STARTPTS,${fade}scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
+        })
         .join(";");
       const concatVideoInputs = inputNames.map((_, i) => `[v${i}]`).join("");
 
@@ -884,11 +912,11 @@ function StitchPageInner() {
       // job Premiere's "match loudness" does, done here with ffmpeg's own
       // `loudnorm` filter.
       const audioChains = inputNames
-        .map((_, i) =>
-          hasAudio[i]
-            ? `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`
-            : `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${trims[i].end - trims[i].start}[a${i}]`,
-        )
+        .map((_, i) => {
+          if (!hasAudio[i]) return `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${trims[i].end - trims[i].start}[a${i}]`;
+          const fade = fadeFilterFragment("afade", trims[i].end - trims[i].start, fades[i].fadeIn, fades[i].fadeOut);
+          return `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,${fade}loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`;
+        })
         .join(";");
       const concatAudioInputs = inputNames.map((_, i) => `[a${i}]`).join("");
 
@@ -929,7 +957,15 @@ function StitchPageInner() {
           args.push("-stream_loop", "-1", "-i", name);
           const inputIndex = inputNames.length + trackLabels.length;
           const startMs = Math.round(start * 1000);
-          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},volume=0.25,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS[track${i}]`;
+          // Fade computed and applied in the track's own LOCAL time (right
+          // after atrim, before adelay shifts it out to its real position
+          // on the final timeline) so `st=` always lands correctly
+          // regardless of how far into the video this track starts.
+          const half = duration / 2;
+          const trackFadeIn = Math.max(0, Math.min(track.fadeIn, half));
+          const trackFadeOut = Math.max(0, Math.min(track.fadeOut, half));
+          const fade = fadeFilterFragment("afade", duration, trackFadeIn, trackFadeOut);
+          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},${fade}volume=0.25,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS[track${i}]`;
           trackLabels.push(`[track${i}]`);
         }
         if (trackLabels.length > 0) {
@@ -1196,6 +1232,49 @@ function StitchPageInner() {
                                 )}
                                 className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
                               />
+                              {/* Fade in/out (2026-09-16, per direct request
+                                  - "give the ability to fade audio and
+                                  video clips each"). The dark gradient is
+                                  purely visual feedback of the current fade
+                                  length; the small amber dot at each bottom
+                                  corner is the actual drag handle - drag it
+                                  inward to lengthen the fade, clamped to
+                                  half this clip's own trimmed duration so
+                                  in/out can never overlap. */}
+                              {trim.fadeIn > 0 && (
+                                <div
+                                  className="pointer-events-none absolute inset-y-0 left-0"
+                                  style={{ width: trim.fadeIn * PIXELS_PER_SECOND, background: "linear-gradient(to right, rgba(0,0,0,0.85), transparent)" }}
+                                />
+                              )}
+                              {trim.fadeOut > 0 && (
+                                <div
+                                  className="pointer-events-none absolute inset-y-0 right-0"
+                                  style={{ width: trim.fadeOut * PIXELS_PER_SECOND, background: "linear-gradient(to left, rgba(0,0,0,0.85), transparent)" }}
+                                />
+                              )}
+                              <div
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  makeAxisDragHandler(
+                                    () => trim.fadeIn,
+                                    (v) => updateItemTrim(item.id, { fadeIn: Math.max(0, Math.min(v, (trim.end - trim.start) / 2)) }),
+                                  )(e);
+                                }}
+                                title="Drag to fade in"
+                                className="absolute bottom-4 left-0.5 z-20 h-2 w-2 cursor-ew-resize rounded-full bg-amber-400"
+                              />
+                              <div
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  makeAxisDragHandler(
+                                    () => -trim.fadeOut,
+                                    (v) => updateItemTrim(item.id, { fadeOut: Math.max(0, Math.min(-v, (trim.end - trim.start) / 2)) }),
+                                  )(e);
+                                }}
+                                title="Drag to fade out"
+                                className="absolute bottom-4 right-0.5 z-20 h-2 w-2 cursor-ew-resize rounded-full bg-amber-400"
+                              />
                             </>
                           )}
                         </div>
@@ -1280,6 +1359,45 @@ function StitchPageInner() {
                           }}
                           className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
                         />
+                        {/* Fade in/out (2026-09-16, per direct request -
+                            "give the ability to fade audio and video clips
+                            each") - same amber-dot convention as the video
+                            blocks above, clamped to half this track's own
+                            played duration. */}
+                        {track.fadeIn > 0 && (
+                          <div
+                            className="pointer-events-none absolute inset-y-0 left-0"
+                            style={{ width: track.fadeIn * PIXELS_PER_SECOND, background: "linear-gradient(to right, rgba(0,0,0,0.6), transparent)" }}
+                          />
+                        )}
+                        {track.fadeOut > 0 && (
+                          <div
+                            className="pointer-events-none absolute inset-y-0 right-0"
+                            style={{ width: track.fadeOut * PIXELS_PER_SECOND, background: "linear-gradient(to left, rgba(0,0,0,0.6), transparent)" }}
+                          />
+                        )}
+                        <div
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            makeAxisDragHandler(
+                              () => track.fadeIn,
+                              (v) => updateAudioTrack(track.id, { fadeIn: Math.max(0, Math.min(v, (track.endSec - track.startSec) / 2)) }),
+                            )(e);
+                          }}
+                          title="Drag to fade in"
+                          className="absolute bottom-0.5 left-0.5 z-20 h-1.5 w-1.5 cursor-ew-resize rounded-full bg-amber-400"
+                        />
+                        <div
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            makeAxisDragHandler(
+                              () => -track.fadeOut,
+                              (v) => updateAudioTrack(track.id, { fadeOut: Math.max(0, Math.min(-v, (track.endSec - track.startSec) / 2)) }),
+                            )(e);
+                          }}
+                          title="Drag to fade out"
+                          className="absolute bottom-0.5 right-0.5 z-20 h-1.5 w-1.5 cursor-ew-resize rounded-full bg-amber-400"
+                        />
                       </div>
                     </div>
                   );
@@ -1294,7 +1412,7 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. Each block has its own ▶/× for play/delete. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each block has its own ▶/× for play/delete. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
