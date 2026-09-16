@@ -241,6 +241,15 @@ function StitchPageInner() {
   const [itemTrims, setItemTrims] = useState<Record<string, { start: number; end: number }>>({});
   const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
   const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
+  // Live floating readout shown next to the cursor while dragging any
+  // timeline handle - the numeric fields below already update live too,
+  // but they're not in the same eyeline as the block you're actually
+  // looking at while dragging.
+  const [dragTooltip, setDragTooltip] = useState<{ x: number; y: number; label: string } | null>(null);
+  // Which video clip is mid-reorder-drag, and how far (px) it's currently
+  // offset from its resting position - purely visual (a live translateX),
+  // the real reorder only happens once on release.
+  const [reorderDrag, setReorderDrag] = useState<{ id: string; offsetPx: number } | null>(null);
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const preloadedRef = useRef(false);
@@ -308,6 +317,19 @@ function StitchPageInner() {
       .forEach((f) => addAudioTrack(f));
   }
 
+  // Real magnetic snap (2026-09-16, per direct follow-up) - if the raw
+  // (already 0.1s-rounded) value lands within half a second of one of the
+  // given boundary times, snap exactly to that boundary instead. Used to
+  // pull an audio block's edge (or its start, when repositioning) onto a
+  // video-clip cut point, matching how real editors snap clips to cuts.
+  const SNAP_THRESHOLD_SECONDS = 0.5;
+  function applyBoundarySnap(value: number, boundaries: number[]): number {
+    for (const b of boundaries) {
+      if (Math.abs(value - b) <= SNAP_THRESHOLD_SECONDS) return b;
+    }
+    return value;
+  }
+
   // Drag-to-resize/reposition directly on the timeline blocks (2026-09-16,
   // per direct request). Plain Pointer Events (covers mouse/touch/pen
   // alike, no library needed) rather than React state for the drag itself
@@ -315,10 +337,14 @@ function StitchPageInner() {
   // move as an absolute new value (startValue + pixel delta converted to
   // seconds), never accumulating small deltas onto the latest state -
   // that would compound rounding error across many move events. Snaps to
-  // the nearest 0.1s, matching the precision the numeric fields below
-  // already allow. Not a React hook despite reading like one - deliberately
-  // NOT named useXxx to avoid implying hook rules apply to it.
-  function makeAxisDragHandler(getStartValue: () => number, onChange: (newValue: number) => void) {
+  // the nearest 0.1s (or to a passed-in boundary list, e.g. video-clip cut
+  // points - see applyBoundarySnap), matching the precision the numeric
+  // fields below already allow. Drives the floating live-value tooltip
+  // (dragTooltip) so the readout is in the same eyeline as the block being
+  // dragged, not just the numeric fields further down the page. Not a
+  // React hook despite reading like one - deliberately NOT named useXxx to
+  // avoid implying hook rules apply to it.
+  function makeAxisDragHandler(getStartValue: () => number, onChange: (newValue: number) => void, boundaries?: number[]) {
     return function onPointerDown(e: React.PointerEvent) {
       e.preventDefault();
       e.stopPropagation();
@@ -326,12 +352,15 @@ function StitchPageInner() {
       const startValue = getStartValue();
       function onMove(ev: PointerEvent) {
         const deltaSeconds = (ev.clientX - startX) / PIXELS_PER_SECOND;
-        const snapped = Math.round((startValue + deltaSeconds) * 10) / 10;
+        let snapped = Math.round((startValue + deltaSeconds) * 10) / 10;
+        if (boundaries && boundaries.length > 0) snapped = applyBoundarySnap(snapped, boundaries);
         onChange(snapped);
+        setDragTooltip({ x: ev.clientX, y: ev.clientY, label: formatTime(Math.max(0, snapped)) });
       }
       function onUp() {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        setDragTooltip(null);
       }
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
@@ -416,6 +445,23 @@ function StitchPageInner() {
     return sum + (itemDurations[item.id] ?? 0);
   }, 0);
 
+  // Every real cut point in the final video's timeline (2026-09-16, per
+  // direct follow-up) - 0, the boundary between each pair of clips, and
+  // the very end. Used to magnetically snap an audio block's edges/
+  // position onto a clip boundary when dragged close, the same way real
+  // editors snap clips to cuts - see makeAxisDragHandler's `boundaries`
+  // param and applyBoundarySnap.
+  const clipBoundaries: number[] = [0];
+  {
+    let cumulative = 0;
+    for (const item of items) {
+      const trim = itemTrims[item.id];
+      const duration = trim ? Math.max(0, trim.end - trim.start) : (itemDurations[item.id] ?? 0);
+      cumulative += duration;
+      clipBoundaries.push(cumulative);
+    }
+  }
+
   function updateItemTrim(id: string, patch: Partial<{ start: number; end: number }>) {
     setItemTrims((prev) => {
       const current = prev[id];
@@ -476,6 +522,63 @@ function StitchPageInner() {
       [next[index], next[target]] = [next[target], next[index]];
       return next;
     });
+  }
+
+  // Generalized version of moveItem for drag-to-reorder below - moves one
+  // item directly to an arbitrary target index instead of only swapping
+  // with an adjacent neighbor.
+  function moveItemToIndex(fromIndex: number, toIndex: number) {
+    setItems((prev) => {
+      if (fromIndex === toIndex || toIndex < 0 || toIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }
+
+  // Real drag-to-reorder on the timeline (2026-09-16, per direct follow-up
+  // - previously only the ↑/↓ buttons could reorder clips). Deliberately
+  // NOT the same drag mechanism as the trim handles: this only needs to
+  // know "how far did the pointer move," not react to it live pixel-by-
+  // pixel in the DATA (only the VISUAL offset updates live, via
+  // reorderDrag) - the real reorder is computed once on release, by
+  // finding where the dragged block's new center falls among every OTHER
+  // block's real center position (captured once at drag-start, so
+  // dropping mid-drag doesn't depend on a live-reflowing layout).
+  function handleReorderPointerDown(e: React.PointerEvent, index: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const item = items[index];
+    const widths = items.map((it) => {
+      const trim = itemTrims[it.id];
+      const duration = trim ? Math.max(0.2, trim.end - trim.start) : (itemDurations[it.id] ?? 1);
+      return Math.max(48, duration * PIXELS_PER_SECOND) + 4; // +4px for the row's gap-1
+    });
+    const centers: number[] = [];
+    let cumulative = 0;
+    for (const w of widths) {
+      centers.push(cumulative + w / 2);
+      cumulative += w;
+    }
+    setReorderDrag({ id: item.id, offsetPx: 0 });
+    function onMove(ev: PointerEvent) {
+      setReorderDrag({ id: item.id, offsetPx: ev.clientX - startX });
+    }
+    function onUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setReorderDrag(null);
+      const newCenter = centers[index] + (ev.clientX - startX);
+      let targetIndex = 0;
+      for (let i = 0; i < centers.length; i++) {
+        if (i !== index && centers[i] < newCenter) targetIndex++;
+      }
+      moveItemToIndex(index, targetIndex);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   }
 
   // Real object-URL leak fixed here (2026-09-15, found while checking a
@@ -733,6 +836,27 @@ function StitchPageInner() {
         <div className="space-y-3 rounded-2xl bg-[#1c1c24] p-3">
           <div className="overflow-x-auto">
             <div style={{ minWidth: Math.max(240, totalVideoDuration * PIXELS_PER_SECOND) }}>
+              {/* Time ruler (2026-09-16, per direct follow-up) - tick
+                  spacing adapts to the real total length so a short clip
+                  isn't crowded with 1s ticks and a long one isn't left with
+                  only 2-3 marks. Same PIXELS_PER_SECOND axis as everything
+                  below it, so a tick's position always lines up with the
+                  content under it. */}
+              {totalVideoDuration > 0 && (
+                <div className="relative mb-1 h-4" style={{ width: totalVideoDuration * PIXELS_PER_SECOND }}>
+                  {(() => {
+                    const tickInterval = totalVideoDuration > 90 ? 15 : totalVideoDuration > 40 ? 10 : totalVideoDuration > 15 ? 5 : 1;
+                    const ticks: number[] = [];
+                    for (let t = 0; t <= totalVideoDuration + 0.001; t += tickInterval) ticks.push(t);
+                    return ticks.map((t) => (
+                      <div key={t} className="absolute top-0 flex flex-col items-start" style={{ left: t * PIXELS_PER_SECOND }}>
+                        <div className="h-1.5 w-px bg-white/25" />
+                        <span className="text-[8px] text-white/35">{formatTime(t)}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white/40">Video</p>
               {/* Plain div (not a <label>) wraps the whole drop target -
                   the blocks themselves live OUTSIDE any <label>/<input>
@@ -749,19 +873,31 @@ function StitchPageInner() {
                   </label>
                 ) : (
                   <div className="flex gap-1">
-                    {items.map((item) => {
+                    {items.map((item, itemIndex) => {
                       const trim = itemTrims[item.id];
                       const duration = trim ? Math.max(0.2, trim.end - trim.start) : (itemDurations[item.id] ?? 1);
                       const thumb = itemThumbnails[item.id];
                       const fullDuration = itemDurations[item.id];
+                      const isDragging = reorderDrag?.id === item.id;
                       return (
                         <div
                           key={item.id}
-                          style={{ width: Math.max(48, duration * PIXELS_PER_SECOND) }}
-                          className="group relative h-16 shrink-0 overflow-hidden rounded-lg border border-white/25 bg-white/10 bg-cover bg-center"
+                          style={{
+                            width: Math.max(48, duration * PIXELS_PER_SECOND),
+                            transform: isDragging ? `translateX(${reorderDrag!.offsetPx}px)` : undefined,
+                            zIndex: isDragging ? 20 : undefined,
+                          }}
+                          className={`group relative h-16 shrink-0 overflow-hidden rounded-lg border border-white/25 bg-white/10 bg-cover bg-center ${isDragging ? "opacity-90 shadow-xl" : ""}`}
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element -- a runtime data: URL thumbnail, not a static/remote asset next/image is built for */}
                           {thumb && <img src={thumb} alt="" className="h-full w-full object-cover" />}
+                          {/* Reorder grip - a distinct top strip, separate
+                              from the left/right trim handles on the sides,
+                              so the two gestures never conflict. */}
+                          <div
+                            onPointerDown={(e) => handleReorderPointerDown(e, itemIndex)}
+                            className="absolute inset-x-2.5 top-0 h-3 cursor-grab touch-none rounded-b bg-black/0 transition hover:bg-white/20 active:cursor-grabbing"
+                          />
                           <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[9px] text-white">{item.file.name}</span>
                           {trim && fullDuration != null && (
                             <>
@@ -815,6 +951,7 @@ function StitchPageInner() {
                               const newStart = Math.max(0, v);
                               updateAudioTrack(track.id, { startSec: newStart, endSec: newStart + dur });
                             },
+                            clipBoundaries,
                           )}
                           className="absolute inset-0 cursor-grab active:cursor-grabbing"
                         />
@@ -830,6 +967,7 @@ function StitchPageInner() {
                             makeAxisDragHandler(
                               () => track.startSec,
                               (v) => updateAudioTrack(track.id, { startSec: Math.max(0, Math.min(v, track.endSec - 0.2)) }),
+                              clipBoundaries,
                             )(e);
                           }}
                           className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
@@ -840,6 +978,7 @@ function StitchPageInner() {
                             makeAxisDragHandler(
                               () => track.endSec,
                               (v) => updateAudioTrack(track.id, { endSec: Math.max(track.startSec + 0.2, v) }),
+                              clipBoundaries,
                             )(e);
                           }}
                           className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
@@ -1009,6 +1148,17 @@ function StitchPageInner() {
             : "Each clip's own dialogue/audio is kept and loudness-matched, so scenes don't jump in volume or tone from one to the next. A clip with no audio at all gets real silence instead of being skipped, so timing stays in sync. Add your own audio tracks above if you want music or sound effects layered in."}
         </p>
       </main>
+      {/* Fixed positioning escapes the timeline's own scroll container, so
+          this renders correctly regardless of where the dragged block
+          currently is within it. */}
+      {dragTooltip && (
+        <div
+          style={{ left: dragTooltip.x + 12, top: dragTooltip.y - 28 }}
+          className="pointer-events-none fixed z-50 rounded bg-black px-2 py-1 text-xs font-semibold text-white shadow-lg"
+        >
+          {dragTooltip.label}
+        </div>
+      )}
     </div>
   );
 }
