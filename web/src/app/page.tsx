@@ -1955,8 +1955,15 @@ export default function Home() {
             <>
               <p className="font-semibold text-foreground">All things AI voice and video.</p>
               <p className="mt-1">
-                Learn by watching your favourite movies or ads and try to create your own, one scene at a time using
-                Seedance, Veo, Kling and other leading AI models. Create something!
+                <strong className="text-foreground">Step 1</strong> - Watch a movie scene or ad that you love, really pay attention to each camera angle, movement, expressions and subtle details.
+                <br />
+                <strong className="text-foreground">Step 2</strong> - Try Seedance, Veo and leading models, give a detailed prompt and create a scene.
+                <br />
+                <strong className="text-foreground">Step 3</strong> - Create a few scenes and use our free editor to stitch it together.
+                <br />
+                <strong className="text-foreground">Result</strong> - you have a short movie or an incredible ad for your product!
+                <br />
+                Try it out and create something, one scene at a time!
               </p>
             </>
           }

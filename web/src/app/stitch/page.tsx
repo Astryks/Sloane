@@ -57,8 +57,39 @@ type AudioTrack = {
   fadeOut: number; // seconds, ramps down to silence at the end of its own play window
 };
 
+// A text title/caption burned onto the FINAL video's timeline (2026-09-16,
+// per direct request - "how can they add images and text/titles"). Position
+// is a simple 3-way vertical anchor (title-card-in-the-middle vs a
+// lower-third caption are both common; horizontal is always centered,
+// matching how virtually every title/caption template works).
+type TextOverlay = {
+  id: string;
+  text: string;
+  startSec: number; // where this appears, in the FINAL video's timeline
+  endSec: number;
+  position: "top" | "center" | "bottom";
+  size: "small" | "medium" | "large";
+  color: string; // hex, e.g. "#ffffff"
+};
+
+// An image (logo/watermark/photo) composited onto the FINAL video's
+// timeline. `scalePercent` is relative to the combined video's own real
+// width so it looks proportionally the same regardless of the source
+// clips' resolution.
+type ImageOverlay = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  startSec: number;
+  endSec: number;
+  position: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center";
+  scalePercent: number;
+};
+
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
 const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
+const MAX_TEXT_OVERLAYS = 8; // titles/captions are cheap (no ffmpeg input each), a generous cap just to keep the timeline usable
+const MAX_IMAGE_OVERLAYS = 4; // each is a real extra ffmpeg input held in browser memory, same reasoning as audio tracks
 // Shared time scale for the visual timeline below - both the video track
 // (a plain flex row, its blocks' widths summing to the real total) and
 // every audio lane (each block absolutely positioned by real start/end
@@ -77,6 +108,58 @@ function fadeFilterFragment(kind: "fade" | "afade", duration: number, fadeIn: nu
   if (fadeIn > 0) parts.push(`${kind}=t=in:st=0:d=${fadeIn}`);
   if (fadeOut > 0) parts.push(`${kind}=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}`);
   return parts.length > 0 ? `${parts.join(",")},` : "";
+}
+
+// Determines the extension ffmpeg's image2 demuxer needs to correctly
+// recognize an uploaded image overlay (mirroring the site's own convention
+// of preferring the real MIME type over a possibly-missing/wrong filename
+// extension), defaulting to png if neither is conclusive.
+function imageExtensionFor(file: File): string {
+  const type = file.type.toLowerCase();
+  if (type.includes("png")) return "png";
+  if (type.includes("webp")) return "webp";
+  if (type.includes("gif")) return "gif";
+  if (type.includes("jpeg") || type.includes("jpg")) return "jpg";
+  const match = /\.([a-z0-9]+)$/i.exec(file.name);
+  return match ? match[1].toLowerCase() : "png";
+}
+
+// Real ffmpeg `overlay` filter x/y expressions for each corner/center
+// preset - `main_w`/`main_h`/`overlay_w`/`overlay_h` are ffmpeg's own
+// expression variables, evaluated against the ACTUAL scaled overlay size,
+// so this stays correct regardless of the overlay's real dimensions.
+function imageOverlayPositionExpr(position: ImageOverlay["position"], pad = 20): { x: string; y: string } {
+  switch (position) {
+    case "top-left":
+      return { x: `${pad}`, y: `${pad}` };
+    case "top-right":
+      return { x: `main_w-overlay_w-${pad}`, y: `${pad}` };
+    case "bottom-left":
+      return { x: `${pad}`, y: `main_h-overlay_h-${pad}` };
+    case "bottom-right":
+      return { x: `main_w-overlay_w-${pad}`, y: `main_h-overlay_h-${pad}` };
+    case "center":
+      return { x: `(main_w-overlay_w)/2`, y: `(main_h-overlay_h)/2` };
+  }
+}
+
+// Fraction of the combined video's own height, used as drawtext's
+// `fontsize` expression - proportional to the real output, not a fixed
+// pixel count, so text reads the same size regardless of source resolution.
+const TEXT_SIZE_FRACTIONS: Record<TextOverlay["size"], number> = { small: 0.045, medium: 0.065, large: 0.09 };
+
+// drawtext's own `text_h` expression variable reflects the ACTUAL rendered
+// glyph box for whatever font/size/content is set, so vertical centering
+// and bottom-padding stay correct without ffmpeg guessing.
+function textOverlayYExpr(position: TextOverlay["position"], pad = "h*0.06"): string {
+  switch (position) {
+    case "top":
+      return pad;
+    case "center":
+      return "(h-text_h)/2";
+    case "bottom":
+      return `h-text_h-${pad}`;
+  }
 }
 
 function formatTime(totalSeconds: number): string {
@@ -382,6 +465,12 @@ function StitchPageInner() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [audioTrackError, setAudioTrackError] = useState("");
+  // Text/image overlays (2026-09-16, per direct request - "how can they add
+  // images and text/titles"). Same drag-to-reposition/resize pattern as
+  // audio tracks, laid out as their own lanes on the shared timeline.
+  const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
+  const [imageOverlays, setImageOverlays] = useState<ImageOverlay[]>([]);
+  const [overlayError, setOverlayError] = useState("");
   // Auto-sync (2026-09-16, per direct request - "if someone shoots with a
   // camera and a mic, is there a way to sync the 2... can you build that").
   // `syncingTrackId` drives a small per-track loading state; `syncMessage`
@@ -494,6 +583,12 @@ function StitchPageInner() {
     Array.from(e.dataTransfer.files)
       .filter((f) => f.type.startsWith("audio/"))
       .forEach((f) => addAudioTrack(f));
+  }
+  function handleImageDrop(e: React.DragEvent<HTMLElement>) {
+    e.preventDefault();
+    Array.from(e.dataTransfer.files)
+      .filter((f) => f.type.startsWith("image/"))
+      .forEach((f) => addImageOverlay(f));
   }
 
   // Real magnetic snap (2026-09-16, per direct follow-up) - if the raw
@@ -753,6 +848,68 @@ function StitchPageInner() {
     }
   }
 
+  // Adds a title/caption defaulted to the start of the video, 3 real
+  // seconds long (long enough to read, short enough to not be in the way) -
+  // adjustable afterward via its own drag handles, same as everything else
+  // on the timeline.
+  function addTextOverlay() {
+    const id = `text-${Math.random().toString(36).slice(2)}`;
+    setTextOverlays((prev) => [
+      ...prev,
+      { id, text: "Your text here", startSec: 0, endSec: Math.min(3, totalVideoDuration || 3), position: "bottom", size: "medium", color: "#ffffff" },
+    ]);
+  }
+
+  function updateTextOverlay(id: string, patch: Partial<Omit<TextOverlay, "id">>) {
+    setTextOverlays((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+  }
+
+  function removeTextOverlay(id: string) {
+    setTextOverlays((prev) => prev.filter((o) => o.id !== id));
+  }
+
+  const TEXT_POSITIONS: TextOverlay["position"][] = ["top", "center", "bottom"];
+  function cycleTextPosition(overlay: TextOverlay) {
+    const next = TEXT_POSITIONS[(TEXT_POSITIONS.indexOf(overlay.position) + 1) % TEXT_POSITIONS.length];
+    updateTextOverlay(overlay.id, { position: next });
+  }
+
+  const TEXT_SIZES: TextOverlay["size"][] = ["small", "medium", "large"];
+  function cycleTextSize(overlay: TextOverlay) {
+    const next = TEXT_SIZES[(TEXT_SIZES.indexOf(overlay.size) + 1) % TEXT_SIZES.length];
+    updateTextOverlay(overlay.id, { size: next });
+  }
+
+  // Adds an image (logo/watermark/photo) defaulted to the top-right corner
+  // for the first 5s of the video (or its whole length if shorter) - a
+  // common "brand bug" placement; fully adjustable afterward.
+  function addImageOverlay(file: File) {
+    setOverlayError("");
+    const id = `img-${Math.random().toString(36).slice(2)}`;
+    setImageOverlays((prev) => [
+      ...prev,
+      { id, file, previewUrl: URL.createObjectURL(file), startSec: 0, endSec: Math.min(5, totalVideoDuration || 5), position: "top-right", scalePercent: 20 },
+    ]);
+  }
+
+  function updateImageOverlay(id: string, patch: Partial<Omit<ImageOverlay, "id" | "file" | "previewUrl">>) {
+    setImageOverlays((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+  }
+
+  function removeImageOverlay(id: string) {
+    setImageOverlays((prev) => {
+      const target = prev.find((o) => o.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((o) => o.id !== id);
+    });
+  }
+
+  const IMAGE_POSITIONS: ImageOverlay["position"][] = ["top-left", "top-right", "bottom-right", "bottom-left", "center"];
+  function cycleImagePosition(overlay: ImageOverlay) {
+    const next = IMAGE_POSITIONS[(IMAGE_POSITIONS.indexOf(overlay.position) + 1) % IMAGE_POSITIONS.length];
+    updateImageOverlay(overlay.id, { position: next });
+  }
+
   // Moves one item directly to an arbitrary target index - used by
   // drag-to-reorder below, now the only way to reorder clips (per direct
   // feedback: "reorder will be drag... for video").
@@ -975,22 +1132,34 @@ function StitchPageInner() {
   // audio track's preview, plus the last combined result) - called on
   // unmount below, and reused by handleCombine just before it replaces
   // resultUrl with a fresh one.
-  function revokeAllPreviewUrls(currentItems: VideoItem[], currentAudioTracks: AudioTrack[], currentResultUrl: string | null) {
+  function revokeAllPreviewUrls(
+    currentItems: VideoItem[],
+    currentAudioTracks: AudioTrack[],
+    currentImageOverlays: ImageOverlay[],
+    currentResultUrl: string | null,
+  ) {
     for (const item of currentItems) URL.revokeObjectURL(item.previewUrl);
     for (const track of currentAudioTracks) URL.revokeObjectURL(track.previewUrl);
+    for (const overlay of currentImageOverlays) URL.revokeObjectURL(overlay.previewUrl);
     if (currentResultUrl) URL.revokeObjectURL(currentResultUrl);
   }
 
-  // Tracks the latest items/audioTracks/resultUrl in a ref purely so the
-  // unmount cleanup below reads their real, final values instead of a stale
-  // closure over whatever they were when this effect first ran.
-  const latestStateRef = useRef({ items, audioTracks, resultUrl });
+  // Tracks the latest items/audioTracks/imageOverlays/resultUrl in a ref
+  // purely so the unmount cleanup below reads their real, final values
+  // instead of a stale closure over whatever they were when this effect
+  // first ran.
+  const latestStateRef = useRef({ items, audioTracks, imageOverlays, resultUrl });
   useEffect(() => {
-    latestStateRef.current = { items, audioTracks, resultUrl };
-  }, [items, audioTracks, resultUrl]);
+    latestStateRef.current = { items, audioTracks, imageOverlays, resultUrl };
+  }, [items, audioTracks, imageOverlays, resultUrl]);
   useEffect(() => {
     return () => {
-      revokeAllPreviewUrls(latestStateRef.current.items, latestStateRef.current.audioTracks, latestStateRef.current.resultUrl);
+      revokeAllPreviewUrls(
+        latestStateRef.current.items,
+        latestStateRef.current.audioTracks,
+        latestStateRef.current.imageOverlays,
+        latestStateRef.current.resultUrl,
+      );
     };
   }, []);
 
@@ -1112,6 +1281,11 @@ function StitchPageInner() {
       const args = inputNames.flatMap((name) => ["-i", name]);
       let filterComplex = `${scaleChains};${audioChains};${concatVideoInputs}concat=n=${inputNames.length}:v=1:a=0[outv];${concatAudioInputs}concat=n=${inputNames.length}:v=0:a=1[dialogue]`;
       let finalAudioLabel = "[dialogue]";
+      // Tracks the next free ffmpeg input index as audio tracks, then image
+      // overlays, get appended after the video clips - shared across both
+      // sections below so neither has to know how many inputs the other
+      // one added.
+      let nextInputIndex = inputNames.length;
 
       if (audioTracks.length > 0) {
         // Each track is placed on the FINAL video's own timeline (e.g. "a
@@ -1144,7 +1318,7 @@ function StitchPageInner() {
           const name = `audiotrack${i}.raw`;
           await ffmpeg.writeFile(name, await fetchFile(track.file));
           args.push("-stream_loop", "-1", "-i", name);
-          const inputIndex = inputNames.length + trackLabels.length;
+          const inputIndex = nextInputIndex++;
           const startMs = Math.round(start * 1000);
           // Fade computed and applied in the track's own LOCAL time (right
           // after atrim, before adelay shifts it out to its real position
@@ -1192,10 +1366,97 @@ function StitchPageInner() {
         "-b:a",
         "192k",
         "-shortest",
-        "output.mp4",
+        "stage1.mp4",
       );
 
       await ffmpeg.exec(args);
+
+      // Image overlays (logos/watermarks/photos) and text titles/captions
+      // (2026-09-16, per direct request - "how can they add images and
+      // text/titles") are applied as a genuinely SEPARATE second pass, not
+      // folded into the filter_complex above. Real bug found while
+      // building this: combining `concat` and `overlay` in ONE
+      // filter_complex reliably deadlocked this ffmpeg.wasm build - it
+      // printed the stream mapping and then produced zero further output
+      // forever (confirmed via ffmpeg's own log across several fresh
+      // reloads, with both the input-level `-loop` flag and the in-graph
+      // `loop` filter, and with `enable=` present or removed - always the
+      // same stall). A second pass over the already-concatenated file has
+      // no `concat` filter in it at all, sidestepping whatever the real
+      // interaction bug is; it also re-encodes only the video (`-c:a copy`
+      // carries stage 1's already-final audio through untouched, so this
+      // costs no extra audio work).
+      const hasRealImageOverlay = imageOverlays.some((o) => Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
+      const hasRealTextOverlay = textOverlays.some((o) => o.text.trim() && Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
+      let finalOutputName = "stage1.mp4";
+
+      if (hasRealImageOverlay || hasRealTextOverlay) {
+        const pass2Args = ["-i", "stage1.mp4"];
+        let pass2NextInputIndex = 1;
+        let pass2FilterComplex = "";
+        let pass2VideoLabel = "[0:v]";
+
+        if (hasRealImageOverlay) {
+          for (let i = 0; i < imageOverlays.length; i++) {
+            const overlay = imageOverlays[i];
+            const start = Math.max(0, Math.min(overlay.startSec, totalDuration));
+            const end = Math.max(start, Math.min(overlay.endSec, totalDuration));
+            if (end - start <= 0) continue; // nothing real to show for this overlay
+            const ext = imageExtensionFor(overlay.file);
+            const name = `imageoverlay${i}.${ext}`;
+            await ffmpeg.writeFile(name, await fetchFile(overlay.file));
+            pass2Args.push("-i", name);
+            const inputIndex = pass2NextInputIndex++;
+            // Scaled relative to the COMBINED video's own real width so it
+            // looks proportionally the same regardless of source
+            // resolution; `-2` rounds height to the nearest even number
+            // (odd dimensions break yuv420p encoding). Looped via the
+            // `loop` FILTER (not the input-level `-loop` flag) - see the
+            // comment above on why.
+            const overlayWidth = Math.max(2, Math.round((targetW * overlay.scalePercent) / 100 / 2) * 2);
+            const { x, y } = imageOverlayPositionExpr(overlay.position);
+            const scaledLabel = `[imgscaled${i}]`;
+            const nextLabel = `[imgout${i}]`;
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]loop=loop=-1:size=1:start=0,setpts=N/(30*TB),scale=w=${overlayWidth}:h=-2${scaledLabel}`;
+            pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=${x}:y=${y}:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
+            pass2VideoLabel = nextLabel;
+          }
+        }
+
+        if (hasRealTextOverlay) {
+          // Written once regardless of how many text overlays reference it
+          // - ffmpeg.wasm has no system fonts/fontconfig, so drawtext
+          // needs a real font FILE. Geist Regular, MPL-licensed and
+          // already bundled inside Next.js itself (for @vercel/og) - self-
+          // hosted here at /fonts/Geist-Regular.ttf rather than assuming
+          // any system font.
+          await ffmpeg.writeFile("geistfont.ttf", await fetchFile("/fonts/Geist-Regular.ttf"));
+          for (let i = 0; i < textOverlays.length; i++) {
+            const overlay = textOverlays[i];
+            const start = Math.max(0, Math.min(overlay.startSec, totalDuration));
+            const end = Math.max(start, Math.min(overlay.endSec, totalDuration));
+            if (end - start <= 0 || !overlay.text.trim()) continue; // nothing real to show for this overlay
+            // Text goes through a real file (textfile=), not an inlined
+            // `text=` string, so nothing the user types (colons, quotes,
+            // backslashes, commas) needs manual ffmpeg filter-syntax
+            // escaping - a real, easy-to-get-wrong class of bug otherwise.
+            const textFileName = `textoverlay${i}.txt`;
+            await ffmpeg.writeFile(textFileName, new TextEncoder().encode(overlay.text));
+            const fontColor = /^#[0-9a-fA-F]{6}$/.test(overlay.color) ? `0x${overlay.color.slice(1)}` : "0xffffff";
+            const y = textOverlayYExpr(overlay.position);
+            const nextLabel = `[textout${i}]`;
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}${pass2VideoLabel}drawtext=fontfile=geistfont.ttf:textfile=${textFileName}:fontsize=h*${TEXT_SIZE_FRACTIONS[overlay.size]}:fontcolor=${fontColor}:x=(w-text_w)/2:y=${y}:box=1:boxcolor=black@0.45:boxborderw=12:enable='between(t,${start},${end})'${nextLabel}`;
+            pass2VideoLabel = nextLabel;
+          }
+        }
+
+        if (pass2FilterComplex) {
+          pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", "0:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "final.mp4");
+          await ffmpeg.exec(pass2Args);
+          finalOutputName = "final.mp4";
+        }
+      }
+
       // readFile's Uint8Array is typed against ArrayBufferLike (which
       // includes SharedArrayBuffer), not quite what Blob's constructor
       // wants - a real ffmpeg.wasm/DOM typing mismatch, not a runtime
@@ -1210,7 +1471,7 @@ function StitchPageInner() {
       // same TS typing mismatch the old comment described (Uint8Array's
       // buffer is typed as ArrayBufferLike, which includes SharedArrayBuffer
       // - not a runtime concern for this non-threaded core build).
-      const data = (await ffmpeg.readFile("output.mp4")) as Uint8Array;
+      const data = (await ffmpeg.readFile(finalOutputName)) as Uint8Array;
       const bytes = data.slice();
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "video/mp4" });
       setResultUrl(URL.createObjectURL(blob));
@@ -1616,10 +1877,203 @@ function StitchPageInner() {
                   </label>
                 )}
               </div>
+
+              {/* Text titles/captions (2026-09-16, per direct request -
+                  "how can they add images and text/titles"). Same drag-to-
+                  reposition/resize as audio tracks, but with an actual
+                  editable text input in the block itself since content
+                  can't be set by dragging. */}
+              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-white/40">Text</p>
+              <div className="space-y-1">
+                {textOverlays.map((overlay) => (
+                  <div key={overlay.id} className="relative h-12 rounded-lg bg-white/5">
+                    <div
+                      style={{ marginLeft: overlay.startSec * PIXELS_PER_SECOND, width: Math.max(70, (overlay.endSec - overlay.startSec) * PIXELS_PER_SECOND) }}
+                      className="group absolute inset-y-0 overflow-hidden rounded-lg border border-sky-300/40 bg-sky-700/70"
+                    >
+                      <div
+                        onPointerDown={makeAxisDragHandler(
+                          () => overlay.startSec,
+                          (v) => {
+                            const dur = overlay.endSec - overlay.startSec;
+                            const newStart = Math.max(0, v);
+                            updateTextOverlay(overlay.id, { startSec: newStart, endSec: newStart + dur });
+                          },
+                          clipBoundaries,
+                        )}
+                        className="absolute inset-0 cursor-grab active:cursor-grabbing"
+                      />
+                      <div className="pointer-events-none absolute inset-x-0 top-0.5 flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cycleTextPosition(overlay);
+                          }}
+                          title={`Position: ${overlay.position} (click to change)`}
+                          className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
+                        >
+                          {overlay.position === "top" ? "▲" : overlay.position === "center" ? "●" : "▼"}
+                        </button>
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cycleTextSize(overlay);
+                          }}
+                          title={`Size: ${overlay.size} (click to change)`}
+                          className="pointer-events-auto flex h-3.5 items-center justify-center rounded-full bg-black/60 px-1 text-[7px] font-bold text-white"
+                        >
+                          {overlay.size === "small" ? "S" : overlay.size === "medium" ? "M" : "L"}
+                        </button>
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeTextOverlay(overlay.id);
+                          }}
+                          title="Delete this text"
+                          className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={overlay.text}
+                        onChange={(e) => updateTextOverlay(overlay.id, { text: e.target.value })}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        placeholder="Your text…"
+                        className="absolute inset-x-1 bottom-1 top-5 z-10 truncate rounded bg-black/20 px-1 text-center text-[10px] text-white outline-none placeholder:text-white/50"
+                      />
+                      <div
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          makeAxisDragHandler(
+                            () => overlay.startSec,
+                            (v) => updateTextOverlay(overlay.id, { startSec: Math.max(0, Math.min(v, overlay.endSec - 0.2)) }),
+                            clipBoundaries,
+                          )(e);
+                        }}
+                        className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                      />
+                      <div
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          makeAxisDragHandler(
+                            () => overlay.endSec,
+                            (v) => updateTextOverlay(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, v) }),
+                            clipBoundaries,
+                          )(e);
+                        }}
+                        className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                      />
+                    </div>
+                  </div>
+                ))}
+                {textOverlays.length < MAX_TEXT_OVERLAYS && (
+                  <button
+                    type="button"
+                    onClick={addTextOverlay}
+                    className="flex h-8 w-full items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50"
+                  >
+                    + Add text
+                  </button>
+                )}
+              </div>
+
+              {/* Image overlays - logos/watermarks/photos (2026-09-16, same
+                  direct request). */}
+              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-white/40">Images</p>
+              <div onDragOver={(e) => e.preventDefault()} onDrop={handleImageDrop} className="space-y-1">
+                {imageOverlays.map((overlay) => (
+                  <div key={overlay.id} className="relative h-12 rounded-lg bg-white/5">
+                    <div
+                      style={{ marginLeft: overlay.startSec * PIXELS_PER_SECOND, width: Math.max(70, (overlay.endSec - overlay.startSec) * PIXELS_PER_SECOND) }}
+                      className="group absolute inset-y-0 overflow-hidden rounded-lg border border-fuchsia-300/40 bg-fuchsia-700/70"
+                    >
+                      <div
+                        onPointerDown={makeAxisDragHandler(
+                          () => overlay.startSec,
+                          (v) => {
+                            const dur = overlay.endSec - overlay.startSec;
+                            const newStart = Math.max(0, v);
+                            updateImageOverlay(overlay.id, { startSec: newStart, endSec: newStart + dur });
+                          },
+                          clipBoundaries,
+                        )}
+                        className="absolute inset-0 cursor-grab active:cursor-grabbing"
+                      />
+                      <div className="pointer-events-none flex h-full items-center gap-1 px-1 pt-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- a runtime blob: URL preview, not a static/remote asset next/image is built for */}
+                        <img src={overlay.previewUrl} alt="" className="h-6 w-6 shrink-0 rounded object-cover" />
+                        <span className="truncate text-[9px] text-white/80">{overlay.file.name}</span>
+                      </div>
+                      <div className="pointer-events-none absolute inset-x-0 top-0.5 flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cycleImagePosition(overlay);
+                          }}
+                          title={`Position: ${overlay.position} (click to change)`}
+                          className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
+                        >
+                          {{ "top-left": "↖", "top-right": "↗", "bottom-right": "↘", "bottom-left": "↙", center: "●" }[overlay.position]}
+                        </button>
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeImageOverlay(overlay.id);
+                          }}
+                          title="Delete this image"
+                          className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          makeAxisDragHandler(
+                            () => overlay.startSec,
+                            (v) => updateImageOverlay(overlay.id, { startSec: Math.max(0, Math.min(v, overlay.endSec - 0.2)) }),
+                            clipBoundaries,
+                          )(e);
+                        }}
+                        className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                      />
+                      <div
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          makeAxisDragHandler(
+                            () => overlay.endSec,
+                            (v) => updateImageOverlay(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, v) }),
+                            clipBoundaries,
+                          )(e);
+                        }}
+                        className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                      />
+                    </div>
+                  </div>
+                ))}
+                {imageOverlays.length < MAX_IMAGE_OVERLAYS && (
+                  <label className="mt-1 flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
+                    <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && addImageOverlay(e.target.files[0])} />
+                    {imageOverlays.length === 0 ? "Drag an image here, or click to add" : "+ Add another image"}
+                  </label>
+                )}
+              </div>
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
@@ -1666,8 +2120,44 @@ function StitchPageInner() {
                 now the box height never changes, and object-contain
                 letterboxes whatever's playing (any mix of portrait/
                 landscape clips) inside it instead. */}
-            <div className="flex h-56 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black sm:h-64">
+            <div className="relative flex h-56 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black sm:h-64">
               <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
+              {/* Text/image overlays are shown live here too (2026-09-16) -
+                  unlike fades, these are purely positional/content-based,
+                  so a plain absolutely-positioned DOM layer synced to
+                  `previewTime` can approximate them without needing any
+                  real compositing. Positioned against the fixed preview
+                  box itself (not the letterboxed video content inside it),
+                  so it's a close approximation, not pixel-identical to the
+                  real export. */}
+              {imageOverlays.map((overlay) => {
+                if (previewTime < overlay.startSec || previewTime >= overlay.endSec) return null;
+                const posClass = {
+                  "top-left": "left-2 top-2",
+                  "top-right": "right-2 top-2",
+                  "bottom-left": "bottom-2 left-2",
+                  "bottom-right": "bottom-2 right-2",
+                  center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+                }[overlay.position];
+                return (
+                  // eslint-disable-next-line @next/next/no-img-element -- a runtime blob: URL preview, not a static/remote asset next/image is built for
+                  <img key={overlay.id} src={overlay.previewUrl} alt="" className={`pointer-events-none absolute ${posClass}`} style={{ width: `${overlay.scalePercent}%` }} />
+                );
+              })}
+              {textOverlays.map((overlay) => {
+                if (previewTime < overlay.startSec || previewTime >= overlay.endSec || !overlay.text.trim()) return null;
+                const posClass = overlay.position === "top" ? "top-3" : overlay.position === "center" ? "top-1/2 -translate-y-1/2" : "bottom-3";
+                const sizeClass = overlay.size === "small" ? "text-sm" : overlay.size === "medium" ? "text-lg" : "text-2xl";
+                return (
+                  <div
+                    key={overlay.id}
+                    className={`pointer-events-none absolute inset-x-2 ${posClass} truncate rounded bg-black/45 px-3 py-1 text-center font-bold ${sizeClass}`}
+                    style={{ color: overlay.color }}
+                  >
+                    {overlay.text}
+                  </div>
+                );
+              })}
             </div>
             <div className="flex items-center gap-2">
               <button onClick={handlePreviewPlayToggle} className="shrink-0 rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
@@ -1708,6 +2198,7 @@ function StitchPageInner() {
             used to need are gone - the timeline is now the one editor. */}
         {audioTrackError && <p className="text-xs text-coral-dark">{audioTrackError}</p>}
         {syncMessage && <p className="text-xs text-muted">{syncMessage}</p>}
+        {overlayError && <p className="text-xs text-coral-dark">{overlayError}</p>}
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
 
