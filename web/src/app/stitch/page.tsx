@@ -235,6 +235,144 @@ async function hasAudioStream(ffmpeg: FFmpeg, filename: string): Promise<boolean
   return found;
 }
 
+// --- Audio auto-sync (2026-09-16, per direct request: "if someone shoots
+// with a camera and a mic, is there a way to sync the 2... can you build
+// that") ---
+// The real technique real NLEs (Premiere's "Synchronize", DaVinci's Sync
+// Bin, PluralEyes) use for this: no timecode or clapperboard needed - the
+// camera's own audio and a separate mic recording of the SAME real-world
+// moment contain the same sound, just starting at different offsets, so
+// cross-correlating the two waveforms finds the shift that lines them up.
+// This is a real, if simpler, implementation of that same idea, done
+// entirely client-side (ffmpeg.wasm extracts each side's raw audio, plain
+// JS does the correlation) - no server involved, consistent with the rest
+// of this page.
+
+// Parses a WAV file's bytes (as produced by ffmpeg with `-f wav`) into mono
+// 16-bit PCM samples in [-1, 1] plus the real sample rate. Walks the RIFF
+// chunk structure properly (rather than assuming a fixed 44-byte header) so
+// it doesn't break if ffmpeg ever adds an extra chunk.
+function parseWavPcm16Mono(bytes: Uint8Array): { sampleRate: number; samples: Float32Array } {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 12; // skip "RIFF"(4) + size(4) + "WAVE"(4)
+  let sampleRate = 0;
+  let dataStart = -1;
+  let dataLength = 0;
+  while (offset + 8 <= bytes.length) {
+    const id = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+    const size = view.getUint32(offset + 4, true);
+    if (id === "fmt ") sampleRate = view.getUint32(offset + 12, true);
+    else if (id === "data") {
+      dataStart = offset + 8;
+      dataLength = size;
+    }
+    offset += 8 + size + (size % 2); // RIFF chunks are word-aligned
+  }
+  if (dataStart < 0 || sampleRate === 0) throw new Error("Could not read this audio's raw samples");
+  const numSamples = Math.floor(dataLength / 2);
+  const samples = new Float32Array(numSamples);
+  for (let i = 0; i < numSamples; i++) samples[i] = view.getInt16(dataStart + i * 2, true) / 32768;
+  return { sampleRate, samples };
+}
+
+// Reduces raw PCM to a coarse "loudness over time" fingerprint (RMS per
+// ~50ms window) - what auto-sync actually cross-correlates. Nobody needs
+// sample-accurate alignment for this, and shrinking a multi-minute
+// recording down to a few thousand points is what keeps a brute-force
+// search fast enough to not need an FFT.
+function computeLoudnessEnvelope(samples: Float32Array, sampleRate: number, windowSeconds: number): Float32Array {
+  const windowSize = Math.max(1, Math.round(sampleRate * windowSeconds));
+  const numWindows = Math.floor(samples.length / windowSize);
+  const envelope = new Float32Array(numWindows);
+  for (let w = 0; w < numWindows; w++) {
+    let sumSquares = 0;
+    const start = w * windowSize;
+    for (let i = 0; i < windowSize; i++) {
+      const v = samples[start + i];
+      sumSquares += v * v;
+    }
+    envelope[w] = Math.sqrt(sumSquares / windowSize);
+  }
+  return envelope;
+}
+
+// Finds the lag (in envelope windows) that best aligns cand's loudness
+// pattern onto ref's, by normalized cross-correlation at every candidate
+// lag in [-maxLagWindows, maxLagWindows]. Positive lag means ref[i] best
+// matches cand[i+lag] - the same real-world sound appears `lag` windows
+// LATER in cand's own local time than in ref's, i.e. cand's recording
+// started rolling earlier (more "pre-roll" before the shared moment).
+// Returns a confidence score (-1..1, plain Pearson correlation) alongside
+// the lag so a poor/ambiguous match can be flagged honestly rather than
+// silently applying a bad guess.
+function findBestAudioLag(ref: Float32Array, cand: Float32Array, maxLagWindows: number): { lagWindows: number; score: number } {
+  const meanRef = ref.reduce((a, b) => a + b, 0) / ref.length;
+  const meanCand = cand.reduce((a, b) => a + b, 0) / cand.length;
+  const a = ref.map((v) => v - meanRef);
+  const b = cand.map((v) => v - meanCand);
+  let bestLag = 0;
+  let bestScore = -Infinity;
+  const cappedMaxLag = Math.min(maxLagWindows, a.length - 1, b.length - 1);
+  // A small overlap window has too few degrees of freedom to trust - with
+  // only a handful of samples, two otherwise-unrelated snippets can produce
+  // a spuriously near-perfect correlation coefficient just by chance (found
+  // this for real while testing: a 10-window minimum let a tiny edge
+  // overlap of pure background noise "beat" the real matching alignment).
+  // Requiring a healthy fraction of the shorter clip's own length rules
+  // those out.
+  const minOverlapWindows = Math.max(20, Math.round(Math.min(a.length, b.length) * 0.5));
+  for (let lag = -cappedMaxLag; lag <= cappedMaxLag; lag++) {
+    const iStart = Math.max(0, -lag);
+    const iEnd = Math.min(a.length, b.length - lag);
+    if (iEnd - iStart < minOverlapWindows) continue;
+    let sumProduct = 0;
+    let sumA2 = 0;
+    let sumB2 = 0;
+    for (let i = iStart; i < iEnd; i++) {
+      const av = a[i];
+      const bv = b[i + lag];
+      sumProduct += av * bv;
+      sumA2 += av * av;
+      sumB2 += bv * bv;
+    }
+    const denom = Math.sqrt(sumA2 * sumB2);
+    const score = denom > 0 ? sumProduct / denom : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+    }
+  }
+  return { lagWindows: bestLag, score: bestScore };
+}
+
+const SYNC_WINDOW_SECONDS = 0.05; // ~20 samples/sec envelope resolution - plenty for aligning two recordings of the same real moment
+const SYNC_MAX_LAG_SECONDS = 90; // generous default search range for how far apart two devices' start times can realistically be
+
+// Extracts each side's audio via ffmpeg (mono, 8kHz WAV - identical settings
+// so the two envelopes are directly comparable) and finds the offset. Pure
+// orchestration; the actual math lives in the two functions above so it can
+// be reasoned about (and tested) independently of ffmpeg/file I/O.
+async function computeAudioSyncOffsetSeconds(
+  ffmpeg: FFmpeg,
+  refFile: File,
+  candFile: File,
+): Promise<{ offsetSeconds: number; score: number }> {
+  const { fetchFile } = await import("@ffmpeg/util");
+  await ffmpeg.writeFile("sync_ref_in.mp4", await fetchFile(refFile));
+  await ffmpeg.writeFile("sync_cand_in.raw", await fetchFile(candFile));
+  await ffmpeg.exec(["-i", "sync_ref_in.mp4", "-vn", "-ac", "1", "-ar", "8000", "-f", "wav", "sync_ref.wav"]);
+  await ffmpeg.exec(["-i", "sync_cand_in.raw", "-vn", "-ac", "1", "-ar", "8000", "-f", "wav", "sync_cand.wav"]);
+  const refBytes = (await ffmpeg.readFile("sync_ref.wav")) as Uint8Array;
+  const candBytes = (await ffmpeg.readFile("sync_cand.wav")) as Uint8Array;
+  const ref = parseWavPcm16Mono(refBytes.slice());
+  const cand = parseWavPcm16Mono(candBytes.slice());
+  const refEnv = computeLoudnessEnvelope(ref.samples, ref.sampleRate, SYNC_WINDOW_SECONDS);
+  const candEnv = computeLoudnessEnvelope(cand.samples, cand.sampleRate, SYNC_WINDOW_SECONDS);
+  const maxLagWindows = Math.round(SYNC_MAX_LAG_SECONDS / SYNC_WINDOW_SECONDS);
+  const { lagWindows, score } = findBestAudioLag(refEnv, candEnv, maxLagWindows);
+  return { offsetSeconds: lagWindows * SYNC_WINDOW_SECONDS, score };
+}
+
 function StitchPageInner() {
   const searchParams = useSearchParams();
   const [items, setItems] = useState<VideoItem[]>([]);
@@ -244,6 +382,12 @@ function StitchPageInner() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [audioTrackError, setAudioTrackError] = useState("");
+  // Auto-sync (2026-09-16, per direct request - "if someone shoots with a
+  // camera and a mic, is there a way to sync the 2... can you build that").
+  // `syncingTrackId` drives a small per-track loading state; `syncMessage`
+  // reports the detected offset/confidence (or a real failure) after.
+  const [syncingTrackId, setSyncingTrackId] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState("");
   // Each clip's own real duration, and the in/out range the user actually
   // wants used from it (2026-09-16, per direct request: "can it also mask
   // parts of the video clips... users want only a part of the clip and
@@ -573,6 +717,42 @@ function StitchPageInner() {
     });
   }
 
+  // Auto-sync a track to whichever video clip currently sits under its
+  // CURRENT position on the timeline (a zero-UI default - drag the track
+  // roughly near the intended clip first if it's not already there, same
+  // as you'd roughly place it before fine-tuning by hand anyway). Extracts
+  // both sides' real audio via ffmpeg and finds the offset via
+  // computeAudioSyncOffsetSeconds, then repositions the track so the same
+  // real-world sound lines up - see that function's own comment for the
+  // actual technique.
+  async function handleSyncAudioTrack(track: AudioTrack) {
+    if (videoTimelineEntries.length === 0) return;
+    setSyncMessage("");
+    setSyncingTrackId(track.id);
+    try {
+      const entry = videoTimelineEntries.find((e) => track.startSec < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
+      const trim = itemTrims[entry.item.id];
+      const trimStart = trim ? trim.start : 0;
+      // Where this clip's OWN raw file t=0 sits on the final combined
+      // timeline, undoing however much was trimmed off its front.
+      const rawT0Position = entry.timelineStart - trimStart;
+      const ffmpeg = await getFFmpeg();
+      const { offsetSeconds, score } = await computeAudioSyncOffsetSeconds(ffmpeg, entry.item.file, track.file);
+      const newStart = Math.max(0, rawT0Position - offsetSeconds);
+      const dur = track.endSec - track.startSec;
+      updateAudioTrack(track.id, { startSec: newStart, endSec: newStart + dur });
+      setSyncMessage(
+        score > 0.3
+          ? `Synced "${track.file.name}" to "${entry.item.file.name}" - detected offset ${offsetSeconds.toFixed(2)}s (confidence ${Math.round(score * 100)}%).`
+          : `Best guess for "${track.file.name}" wasn't very confident (${Math.round(score * 100)}%) - moved it, but double-check it sounds right, or these two clips may not share the same real-world sound.`,
+      );
+    } catch (err) {
+      setSyncMessage(err instanceof Error ? `Couldn't sync "${track.file.name}": ${err.message}` : `Couldn't sync "${track.file.name}" - try again.`);
+    } finally {
+      setSyncingTrackId(null);
+    }
+  }
+
   // Moves one item directly to an arbitrary target index - used by
   // drag-to-reorder below, now the only way to reorder clips (per direct
   // feedback: "reorder will be drag... for video").
@@ -822,6 +1002,15 @@ function StitchPageInner() {
     ffmpeg.on("progress", ({ progress: p }) => setProgress(Math.min(100, Math.round(p * 100))));
     await ffmpeg.load({ coreURL: "/ffmpeg/ffmpeg-core.js", wasmURL: "/ffmpeg/ffmpeg-core.wasm" });
     ffmpegRef.current = ffmpeg;
+    // Real bug found while testing auto-sync (2026-09-16): this is now also
+    // called from handleSyncAudioTrack, not just handleCombine - without
+    // resetting `status` back here, a sync that happens to be the first
+    // thing to lazy-load ffmpeg left it stuck on "loading-ffmpeg" forever
+    // afterward, which also disables the main Download button (see its
+    // `disabled` check below) since nothing else ever moved status off of
+    // it. handleCombine still immediately sets "processing" right after
+    // this resolves, so this doesn't affect its own loading indicator.
+    setStatus("idle");
     return ffmpeg;
   }
 
@@ -1334,6 +1523,24 @@ function StitchPageInner() {
                         >
                           ×
                         </button>
+                        {/* Auto-sync to whichever video clip currently
+                            sits under this track (2026-09-16, per direct
+                            request - real camera-audio-to-mic sync via
+                            waveform cross-correlation, see
+                            handleSyncAudioTrack's comment). */}
+                        <button
+                          type="button"
+                          disabled={syncingTrackId === track.id}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSyncAudioTrack(track);
+                          }}
+                          title="Auto-sync to the video clip at this position"
+                          className="absolute left-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white disabled:opacity-60"
+                        >
+                          {syncingTrackId === track.id ? "…" : "🔗"}
+                        </button>
                         {/* Edge handles resize (change duration), keeping the
                             OTHER edge fixed - stopPropagation so a resize drag
                             never also triggers the body's reposition drag. */}
@@ -1412,7 +1619,7 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each block has its own ▶/× for play/delete. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
@@ -1500,6 +1707,7 @@ function StitchPageInner() {
             The separate numeric "Order" list and "Audio tracks" list this
             used to need are gone - the timeline is now the one editor. */}
         {audioTrackError && <p className="text-xs text-coral-dark">{audioTrackError}</p>}
+        {syncMessage && <p className="text-xs text-muted">{syncMessage}</p>}
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
 
