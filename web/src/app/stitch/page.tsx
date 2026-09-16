@@ -57,6 +57,12 @@ type AudioTrack = {
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
 const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
+// Shared time scale for the visual timeline below - both the video track
+// (a plain flex row, its blocks' widths summing to the real total) and
+// every audio lane (each block absolutely positioned by real start/end
+// seconds) use this SAME px-per-second value, which is what keeps them
+// visually aligned to one shared time axis.
+const PIXELS_PER_SECOND = 30;
 
 function formatTime(totalSeconds: number): string {
   const s = Math.max(0, Math.round(totalSeconds));
@@ -111,6 +117,90 @@ function getAudioDuration(file: File): Promise<number> {
   });
 }
 
+// Real visual timeline (2026-09-16, per direct request - "make the video
+// and audio edit look cool... see where video and audio should be
+// masked", referencing a real DAW-style waveform timeline screenshot) -
+// a single representative frame per clip, purely for visual identification
+// in the timeline block. Not tied to the clip's current trim range - only
+// grabbed once per clip, near its start, so trimming later doesn't need to
+// keep re-generating it.
+function getVideoThumbnail(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.muted = true;
+    video.onloadedmetadata = () => {
+      video.currentTime = Math.min(0.15, video.duration / 2);
+    };
+    video.onseeked = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 96;
+      canvas.height = 54;
+      const ctx = canvas.getContext("2d");
+      URL.revokeObjectURL(video.src);
+      if (!ctx) {
+        reject(new Error("Could not draw this video's thumbnail"));
+        return;
+      }
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.7));
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(video.src);
+      reject(new Error("Could not read this video for a thumbnail"));
+    };
+    video.src = URL.createObjectURL(file);
+  });
+}
+
+// Real per-bucket peak waveform (max absolute sample per bucket, the
+// standard downsampling approach every waveform view uses) - computed once
+// per track from its own full file, then only a PREFIX of the peaks array
+// is ever shown (see the timeline JSX below), matching the real audio
+// content: a track always plays from its own file's start, so only the
+// first (endSec-startSec) seconds of it are ever actually used - the rest
+// of the waveform would be visually misleading to show. Purely a visual
+// nicety - if decoding fails for an unusual format, the caller just skips
+// showing a waveform for that track; the track itself still works.
+async function getAudioPeaks(file: File, buckets = 120): Promise<number[]> {
+  const arrayBuffer = await file.arrayBuffer();
+  const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const ctx = new AudioCtx();
+  try {
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const data = audioBuffer.getChannelData(0);
+    const samplesPerBucket = Math.max(1, Math.floor(data.length / buckets));
+    const peaks: number[] = [];
+    for (let i = 0; i < buckets; i++) {
+      const start = i * samplesPerBucket;
+      const end = Math.min(data.length, start + samplesPerBucket);
+      let max = 0;
+      for (let j = start; j < end; j++) {
+        const v = Math.abs(data[j]);
+        if (v > max) max = v;
+      }
+      peaks.push(max);
+    }
+    return peaks;
+  } finally {
+    ctx.close();
+  }
+}
+
+// A row of simple proportional bars - deliberately plain divs, not canvas:
+// there are only ~120 of them, so declarative React is simpler here than
+// managing a canvas ref/repaint cycle, with no visual downside at this bar
+// count.
+function WaveformBars({ peaks }: { peaks: number[] }) {
+  return (
+    <div className="flex h-full w-full items-center gap-px overflow-hidden">
+      {peaks.map((p, i) => (
+        <div key={i} className="min-w-[1px] flex-1 rounded-sm bg-white/80" style={{ height: `${Math.max(8, p * 100)}%` }} />
+      ))}
+    </div>
+  );
+}
+
 // ffmpeg.wasm has no ffprobe-style structured metadata call - `-i <file>`
 // with no output "fails" (there's nothing to write), but its stderr log
 // still lists every real stream it found first, the same info ffprobe
@@ -149,6 +239,8 @@ function StitchPageInner() {
   // thumbnail already has.
   const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
   const [itemTrims, setItemTrims] = useState<Record<string, { start: number; end: number }>>({});
+  const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
+  const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const preloadedRef = useRef(false);
@@ -201,6 +293,21 @@ function StitchPageInner() {
     setItems((prev) => (prev.length + added.length > MAX_FILES ? prev : [...prev, ...added]));
   }
 
+  // Real OS drag-and-drop onto the timeline (2026-09-16, per direct
+  // request) - on top of the `<input type="file">` these dropzones also
+  // wrap, so clicking still works exactly as before. `preventDefault` on
+  // dragOver is required or the browser refuses the drop entirely.
+  function handleVideoDrop(e: React.DragEvent<HTMLElement>) {
+    e.preventDefault();
+    handleFiles(e.dataTransfer.files);
+  }
+  function handleAudioDrop(e: React.DragEvent<HTMLElement>) {
+    e.preventDefault();
+    Array.from(e.dataTransfer.files)
+      .filter((f) => f.type.startsWith("audio/"))
+      .forEach((f) => addAudioTrack(f));
+  }
+
   // Reads each clip's real duration (cheap - metadata only, never decodes
   // or re-encodes anything) so the trim controls below can show/clamp
   // against a real per-clip length, and defaults each new clip's trim
@@ -244,6 +351,30 @@ function StitchPageInner() {
     };
   }, [items]);
 
+  // One thumbnail per clip, generated once (not tied to the current trim -
+  // see getVideoThumbnail's comment) and never regenerated for a clip
+  // already in itemThumbnails, even across re-runs from reordering/adding
+  // more clips.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const item of items) {
+        if (itemThumbnails[item.id]) continue;
+        try {
+          const url = await getVideoThumbnail(item.file);
+          if (!cancelled) setItemThumbnails((prev) => (prev[item.id] ? prev : { ...prev, [item.id]: url }));
+        } catch {
+          // No thumbnail for this one - its timeline block just shows the
+          // filename instead, not a fatal problem.
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
   // Live estimate of the combined video's real total length, honoring
   // every clip's own trim range - drives the "your video is currently
   // ~1:47 long" line in the audio-tracks section below. A plain derived
@@ -273,20 +404,21 @@ function StitchPageInner() {
     setAudioTrackError("");
     try {
       const duration = await getAudioDuration(file);
+      const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
+      let added = false;
       setAudioTracks((prev) => {
         if (prev.length >= MAX_AUDIO_TRACKS) return prev;
-        return [
-          ...prev,
-          {
-            id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
-            file,
-            label: "",
-            sourceDuration: duration,
-            startSec: 0,
-            endSec: Math.round(duration),
-          },
-        ];
+        added = true;
+        return [...prev, { id, file, label: "", sourceDuration: duration, startSec: 0, endSec: Math.round(duration) }];
       });
+      if (added) {
+        // Waveform decode is best-effort and purely visual - a track that
+        // fails to decode (unusual format) still works, its timeline block
+        // just shows a plain block with no waveform instead.
+        getAudioPeaks(file)
+          .then((peaks) => setTrackWaveforms((prev) => ({ ...prev, [id]: peaks })))
+          .catch(() => {});
+      }
     } catch (err) {
       setAudioTrackError(err instanceof Error ? err.message : "Could not read this audio file");
     }
@@ -298,6 +430,12 @@ function StitchPageInner() {
 
   function removeAudioTrack(id: string) {
     setAudioTracks((prev) => prev.filter((t) => t.id !== id));
+    setTrackWaveforms((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }
 
   function moveItem(index: number, direction: -1 | 1) {
@@ -551,10 +689,82 @@ function StitchPageInner() {
           <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">Loading your scenes from Ads…</p>
         )}
 
-        <label className="block cursor-pointer rounded-2xl border-2 border-dashed border-border bg-white p-6 text-center">
-          <span className="text-sm font-semibold">Choose video files to combine (up to {MAX_FILES})</span>
-          <input className="sr-only" type="file" accept="video/*" multiple onChange={(e) => handleFiles(e.target.files)} />
-        </label>
+        {/* The visual timeline (2026-09-16) - video track on top, audio
+            tracks below, both drop zones directly built into their own
+            area rather than a separate generic upload box, per direct
+            request ("on top will be video files drag and drop, bottom
+            audio files drag and drop"). One shared horizontal scroll
+            wraps both halves so they always stay aligned to the same time
+            axis (PIXELS_PER_SECOND) even when the arrangement is wider
+            than the panel. The detailed lists below (exact start/end
+            numbers) are still the real editing controls - this is the
+            "see it" layer on top of them, always reflecting the same
+            state. */}
+        <div className="space-y-3 rounded-2xl bg-[#1c1c24] p-3">
+          <div className="overflow-x-auto">
+            <div style={{ minWidth: Math.max(240, totalVideoDuration * PIXELS_PER_SECOND) }}>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white/40">Video</p>
+              <label onDragOver={(e) => e.preventDefault()} onDrop={handleVideoDrop} className="block cursor-pointer">
+                <input className="sr-only" type="file" accept="video/*" multiple onChange={(e) => handleFiles(e.target.files)} />
+                {items.length === 0 ? (
+                  <div className="flex h-16 items-center justify-center rounded-xl border-2 border-dashed border-white/25 text-xs text-white/50">
+                    Drag video clips here, or click to choose (up to {MAX_FILES})
+                  </div>
+                ) : (
+                  <div className="flex gap-1">
+                    {items.map((item) => {
+                      const trim = itemTrims[item.id];
+                      const duration = trim ? Math.max(0.2, trim.end - trim.start) : (itemDurations[item.id] ?? 1);
+                      const thumb = itemThumbnails[item.id];
+                      return (
+                        <div
+                          key={item.id}
+                          style={{ width: Math.max(48, duration * PIXELS_PER_SECOND) }}
+                          className="relative h-16 shrink-0 overflow-hidden rounded-lg border border-white/25 bg-white/10 bg-cover bg-center"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element -- a runtime data: URL thumbnail, not a static/remote asset next/image is built for */}
+                          {thumb && <img src={thumb} alt="" className="h-full w-full object-cover" />}
+                          <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[9px] text-white">{item.file.name}</span>
+                        </div>
+                      );
+                    })}
+                    <div className="flex h-16 w-10 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-lg text-white/40">+</div>
+                  </div>
+                )}
+              </label>
+
+              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
+              <div className="space-y-1">
+                {audioTracks.map((track) => {
+                  const peaks = trackWaveforms[track.id];
+                  const usedFraction = Math.min(1, (track.endSec - track.startSec) / track.sourceDuration);
+                  const shownPeaks = peaks ? peaks.slice(0, Math.max(1, Math.round(peaks.length * usedFraction))) : null;
+                  return (
+                    <div key={track.id} className="relative h-9 rounded-lg bg-white/5">
+                      <div
+                        style={{ marginLeft: track.startSec * PIXELS_PER_SECOND, width: Math.max(24, (track.endSec - track.startSec) * PIXELS_PER_SECOND) }}
+                        className="h-full overflow-hidden rounded-lg border border-emerald-300/40 bg-emerald-700/70 px-1"
+                      >
+                        {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.label || track.file.name}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <label onDragOver={(e) => e.preventDefault()} onDrop={handleAudioDrop} className="mt-1 block cursor-pointer">
+                <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
+                {audioTracks.length < MAX_AUDIO_TRACKS && (
+                  <div className="flex h-9 items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
+                    {audioTracks.length === 0 ? "Drag audio files here, or click to add a track" : "+ Add another audio track"}
+                  </div>
+                )}
+              </label>
+            </div>
+          </div>
+          <p className="text-[11px] text-white/40">
+            Each block&apos;s width is proportional to real time - drag files onto either track above, then use the exact-numbers controls below to fine-tune trim and placement.
+          </p>
+        </div>
 
         {items.length > 0 && (
           <div className="space-y-2 rounded-2xl border border-border bg-white p-4">
@@ -674,12 +884,6 @@ function StitchPageInner() {
             );
           })}
 
-          {audioTracks.length < MAX_AUDIO_TRACKS && (
-            <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border p-3 text-center text-xs">
-              {audioTracks.length === 0 ? "Choose an audio file" : "+ Add another audio track"}
-              <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
-            </label>
-          )}
           {audioTrackError && <p className="text-xs text-coral-dark">{audioTrackError}</p>}
         </div>
 
