@@ -308,6 +308,36 @@ function StitchPageInner() {
       .forEach((f) => addAudioTrack(f));
   }
 
+  // Drag-to-resize/reposition directly on the timeline blocks (2026-09-16,
+  // per direct request). Plain Pointer Events (covers mouse/touch/pen
+  // alike, no library needed) rather than React state for the drag itself
+  // - captures the value a drag STARTED from once, then computes each
+  // move as an absolute new value (startValue + pixel delta converted to
+  // seconds), never accumulating small deltas onto the latest state -
+  // that would compound rounding error across many move events. Snaps to
+  // the nearest 0.1s, matching the precision the numeric fields below
+  // already allow. Not a React hook despite reading like one - deliberately
+  // NOT named useXxx to avoid implying hook rules apply to it.
+  function makeAxisDragHandler(getStartValue: () => number, onChange: (newValue: number) => void) {
+    return function onPointerDown(e: React.PointerEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startValue = getStartValue();
+      function onMove(ev: PointerEvent) {
+        const deltaSeconds = (ev.clientX - startX) / PIXELS_PER_SECOND;
+        const snapped = Math.round((startValue + deltaSeconds) * 10) / 10;
+        onChange(snapped);
+      }
+      function onUp() {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    };
+  }
+
   // Reads each clip's real duration (cheap - metadata only, never decodes
   // or re-encodes anything) so the trim controls below can show/clamp
   // against a real per-clip length, and defaults each new clip's trim
@@ -704,37 +734,65 @@ function StitchPageInner() {
           <div className="overflow-x-auto">
             <div style={{ minWidth: Math.max(240, totalVideoDuration * PIXELS_PER_SECOND) }}>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white/40">Video</p>
-              <label onDragOver={(e) => e.preventDefault()} onDrop={handleVideoDrop} className="block cursor-pointer">
-                <input className="sr-only" type="file" accept="video/*" multiple onChange={(e) => handleFiles(e.target.files)} />
+              {/* Plain div (not a <label>) wraps the whole drop target -
+                  the blocks themselves live OUTSIDE any <label>/<input>
+                  pairing on purpose: a <label> treats ANY click inside it,
+                  drag-release included, as "activate the file picker" -
+                  that would pop a file browser every time someone finished
+                  dragging a resize handle. Only the empty-state text and
+                  the small "+" tile are real <label>s. */}
+              <div onDragOver={(e) => e.preventDefault()} onDrop={handleVideoDrop}>
                 {items.length === 0 ? (
-                  <div className="flex h-16 items-center justify-center rounded-xl border-2 border-dashed border-white/25 text-xs text-white/50">
+                  <label className="flex h-16 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-white/25 text-xs text-white/50">
+                    <input className="sr-only" type="file" accept="video/*" multiple onChange={(e) => handleFiles(e.target.files)} />
                     Drag video clips here, or click to choose (up to {MAX_FILES})
-                  </div>
+                  </label>
                 ) : (
                   <div className="flex gap-1">
                     {items.map((item) => {
                       const trim = itemTrims[item.id];
                       const duration = trim ? Math.max(0.2, trim.end - trim.start) : (itemDurations[item.id] ?? 1);
                       const thumb = itemThumbnails[item.id];
+                      const fullDuration = itemDurations[item.id];
                       return (
                         <div
                           key={item.id}
                           style={{ width: Math.max(48, duration * PIXELS_PER_SECOND) }}
-                          className="relative h-16 shrink-0 overflow-hidden rounded-lg border border-white/25 bg-white/10 bg-cover bg-center"
+                          className="group relative h-16 shrink-0 overflow-hidden rounded-lg border border-white/25 bg-white/10 bg-cover bg-center"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element -- a runtime data: URL thumbnail, not a static/remote asset next/image is built for */}
                           {thumb && <img src={thumb} alt="" className="h-full w-full object-cover" />}
                           <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[9px] text-white">{item.file.name}</span>
+                          {trim && fullDuration != null && (
+                            <>
+                              <div
+                                onPointerDown={makeAxisDragHandler(
+                                  () => trim.start,
+                                  (v) => updateItemTrim(item.id, { start: Math.max(0, Math.min(v, trim.end - 0.2)) }),
+                                )}
+                                className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                              />
+                              <div
+                                onPointerDown={makeAxisDragHandler(
+                                  () => trim.end,
+                                  (v) => updateItemTrim(item.id, { end: Math.max(trim.start + 0.2, Math.min(v, fullDuration)) }),
+                                )}
+                                className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                              />
+                            </>
+                          )}
                         </div>
                       );
                     })}
-                    <div className="flex h-16 w-10 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-lg text-white/40">+</div>
+                    <label className="flex h-16 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-lg text-white/40">
+                      <input className="sr-only" type="file" accept="video/*" multiple onChange={(e) => handleFiles(e.target.files)} />+
+                    </label>
                   </div>
                 )}
-              </label>
+              </div>
 
               <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
-              <div className="space-y-1">
+              <div onDragOver={(e) => e.preventDefault()} onDrop={handleAudioDrop} className="space-y-1">
                 {audioTracks.map((track) => {
                   const peaks = trackWaveforms[track.id];
                   const usedFraction = Math.min(1, (track.endSec - track.startSec) / track.sourceDuration);
@@ -743,26 +801,64 @@ function StitchPageInner() {
                     <div key={track.id} className="relative h-9 rounded-lg bg-white/5">
                       <div
                         style={{ marginLeft: track.startSec * PIXELS_PER_SECOND, width: Math.max(24, (track.endSec - track.startSec) * PIXELS_PER_SECOND) }}
-                        className="h-full overflow-hidden rounded-lg border border-emerald-300/40 bg-emerald-700/70 px-1"
+                        className="group absolute inset-y-0 overflow-hidden rounded-lg border border-emerald-300/40 bg-emerald-700/70 px-1"
                       >
-                        {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.label || track.file.name}</span>}
+                        {/* Body drag = reposition (both start/end shift together,
+                            duration unchanged) - the direct "drag a clip along
+                            the timeline" interaction, e.g. moving where a song
+                            kicks in. */}
+                        <div
+                          onPointerDown={makeAxisDragHandler(
+                            () => track.startSec,
+                            (v) => {
+                              const dur = track.endSec - track.startSec;
+                              const newStart = Math.max(0, v);
+                              updateAudioTrack(track.id, { startSec: newStart, endSec: newStart + dur });
+                            },
+                          )}
+                          className="absolute inset-0 cursor-grab active:cursor-grabbing"
+                        />
+                        <div className="pointer-events-none h-full">
+                          {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.label || track.file.name}</span>}
+                        </div>
+                        {/* Edge handles resize (change duration), keeping the
+                            OTHER edge fixed - stopPropagation so a resize drag
+                            never also triggers the body's reposition drag. */}
+                        <div
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            makeAxisDragHandler(
+                              () => track.startSec,
+                              (v) => updateAudioTrack(track.id, { startSec: Math.max(0, Math.min(v, track.endSec - 0.2)) }),
+                            )(e);
+                          }}
+                          className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                        />
+                        <div
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            makeAxisDragHandler(
+                              () => track.endSec,
+                              (v) => updateAudioTrack(track.id, { endSec: Math.max(track.startSec + 0.2, v) }),
+                            )(e);
+                          }}
+                          className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
+                        />
                       </div>
                     </div>
                   );
                 })}
-              </div>
-              <label onDragOver={(e) => e.preventDefault()} onDrop={handleAudioDrop} className="mt-1 block cursor-pointer">
-                <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
                 {audioTracks.length < MAX_AUDIO_TRACKS && (
-                  <div className="flex h-9 items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
+                  <label className="mt-1 flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
+                    <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
                     {audioTracks.length === 0 ? "Drag audio files here, or click to add a track" : "+ Add another audio track"}
-                  </div>
+                  </label>
                 )}
-              </label>
+              </div>
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Each block&apos;s width is proportional to real time - drag files onto either track above, then use the exact-numbers controls below to fine-tune trim and placement.
+            Drag files onto either track above. Drag a block&apos;s edges to trim/resize, or drag the middle of an audio block to move it - the exact-numbers controls below always show the same values live.
           </p>
         </div>
 
