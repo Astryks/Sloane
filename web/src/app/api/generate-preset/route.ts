@@ -28,9 +28,16 @@ export async function POST(req: NextRequest) {
   try {
     await initSchema();
     const form = await req.formData();
-    const text = String(form.get("text") ?? "");
+    const text = String(form.get("text") ?? "").trim();
     const accessToken = String(form.get("access_token") ?? "");
     const freeTierId = String(form.get("free_tier_id") ?? "");
+    // Real fix (security audit, 2026-09-16): empty/whitespace-only text has
+    // length 0, which trivially passes every quota check below (0 never
+    // exceeds any limit) - without this, the request would still reach the
+    // TTS backend and spend real GPU compute generating audio for nothing.
+    if (!text) {
+      return NextResponse.json({ error: "Enter some text to generate." }, { status: 400 });
+    }
 
     if (accessToken) {
       const sub = await getSubscriberByToken(accessToken);

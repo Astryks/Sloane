@@ -102,17 +102,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
-    const jobId = await createSubscriptionVideoJob({
-      accessToken,
-      mode: "custom",
-      referenceImageUrl,
-      prompt: script,
-      audioSource: voiceMode === "own" ? "lucy_cloned" : "lucy_preset",
-      presetVoiceId: voiceMode === "preset" ? presetVoiceId : null,
-      creditsCost: LUCY_VOICE_CREDIT_COST,
-      falEndpoint: KLING_AVATAR_ENDPOINT,
-      needsMerge: false,
-    });
+    // Real fix (security audit, 2026-09-16): this used to sit outside the
+    // try/catch below - if it threw, the outer catch's plain 500 never
+    // released the credits already reserved above. See video-paygo/
+    // generate/route.ts's identical fix for the full reasoning.
+    let jobId: string;
+    try {
+      jobId = await createSubscriptionVideoJob({
+        accessToken,
+        mode: "custom",
+        referenceImageUrl,
+        prompt: script,
+        audioSource: voiceMode === "own" ? "lucy_cloned" : "lucy_preset",
+        presetVoiceId: voiceMode === "preset" ? presetVoiceId : null,
+        creditsCost: LUCY_VOICE_CREDIT_COST,
+        falEndpoint: KLING_AVATAR_ENDPOINT,
+        needsMerge: false,
+      });
+    } catch (err) {
+      await releaseVideoCredits(accessToken, LUCY_VOICE_CREDIT_COST);
+      const message = err instanceof Error ? err.message : "Could not start this job";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
 
     try {
       const { jobId: modalJobId } =

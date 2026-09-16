@@ -218,19 +218,31 @@ export async function POST(req: NextRequest) {
         ? VIDEO_PAYGO_ENGINES[engine].falImageToVideoEndpoint
         : VIDEO_PAYGO_ENGINES[engine].falEndpoint;
 
-    const jobId = await createVideoPaygoJob({
-      userId: user.id,
-      engine,
-      prompt,
-      falEndpoint,
-      inputImageUrl,
-      inputAudioUrl,
-      needsMerge,
-      presetVoiceId: wantsLucyVoice ? presetVoiceId : null,
-      lipSyncMode,
-      durationSeconds: requestedDurationSeconds,
-      aspectRatio: requestedAspectRatio,
-    });
+    // Real fix (security audit, 2026-09-16): this used to sit OUTSIDE the
+    // try/catch below - if it threw (a transient DB error), execution fell
+    // through to the outer catch's plain 500, which never refunds. The
+    // credit was already spent above, so any failure past that point
+    // (including job-row creation itself, not just submission) must refund.
+    let jobId: string;
+    try {
+      jobId = await createVideoPaygoJob({
+        userId: user.id,
+        engine,
+        prompt,
+        falEndpoint,
+        inputImageUrl,
+        inputAudioUrl,
+        needsMerge,
+        presetVoiceId: wantsLucyVoice ? presetVoiceId : null,
+        lipSyncMode,
+        durationSeconds: requestedDurationSeconds,
+        aspectRatio: requestedAspectRatio,
+      });
+    } catch (err) {
+      await refundVideoCredit(user.id);
+      const message = err instanceof Error ? err.message : "Could not start this job";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
 
     try {
       if (wantsLucyVoice) {

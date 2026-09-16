@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getJobStatus, type RunpodStatusResponse } from "@/lib/runpod";
 import { getModalJobStatus, type ModalStatusResponse } from "@/lib/modal";
-import { consumePendingGeneration } from "@/lib/db";
+import { claimJobAudioDelivery, consumePendingGeneration, initSchema } from "@/lib/db";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 
 // Polled by the client after generate-preset/clone-voice hand back a jobId
@@ -16,6 +16,7 @@ import { saveGenerationAudio } from "@/lib/generationHistory";
 // @/lib/modal.ts's submitModalJob - RunPod's own ids never contain a colon,
 // so this can't misroute an existing RunPod job.
 export async function GET(req: NextRequest) {
+  await initSchema();
   const jobId = req.nextUrl.searchParams.get("jobId");
   if (!jobId) {
     return NextResponse.json({ error: "Missing jobId" }, { status: 400 });
@@ -50,6 +51,16 @@ export async function GET(req: NextRequest) {
   const output = result.output as { audio_base64?: string; sample_rate?: number; voice_id?: string; error?: string } | undefined;
   if (!output?.audio_base64) {
     return NextResponse.json({ status: "FAILED", error: output?.error ?? "No audio in job output" });
+  }
+
+  // Real cross-tenant leak partially fixed here (security audit,
+  // 2026-09-16): this route has no ownership check at all (see
+  // delivered_job_audio's comment in db.ts for why, and what a full fix
+  // would need) - a leaked jobId used to be able to fetch this audio
+  // indefinitely. Delivery is now single-use-with-a-grace-window instead;
+  // only the caller(s) within that window get the real audio.
+  if (!(await claimJobAudioDelivery(jobId))) {
+    return NextResponse.json({ status: "FAILED", error: "This generation has already been retrieved." });
   }
 
   // If generate-preset/clone-voice recorded a pending entry for this job

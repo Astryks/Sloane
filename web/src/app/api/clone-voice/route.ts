@@ -29,10 +29,16 @@ export async function POST(req: NextRequest) {
   try {
     await initSchema();
     const form = await req.formData();
-    const text = String(form.get("text") ?? "");
+    const text = String(form.get("text") ?? "").trim();
     const accessToken = String(form.get("access_token") ?? "");
     const freeTierId = String(form.get("free_tier_id") ?? "");
     const referenceAudio = form.get("reference_audio");
+    // Real fix (security audit, 2026-09-16): see generate-preset/route.ts's
+    // identical check - empty text otherwise sails through every quota
+    // check and still spends real GPU compute on the clone backend.
+    if (!text) {
+      return NextResponse.json({ error: "Enter some text to generate." }, { status: 400 });
+    }
 
     if (accessToken) {
       const sub = await getSubscriberByToken(accessToken);

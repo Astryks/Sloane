@@ -19,10 +19,21 @@ generation call sets `generate_audio: false` (see adStudio.ts) - dialogue/
 music is a separate, later layer (lipsync dub), not something this step
 needs to carry.
 
-FAL_KEY is passed in the request body rather than baked in as a Modal
-secret - keeps this a stateless "compute for hire" function with no extra
-one-time Modal-console setup step, since the caller (the Next.js API route)
-already holds that key server-side anyway.
+Two real bugs fixed here (security audit, 2026-09-16), both closed the same
+way as scripts/modal_app.py's own auth fix:
+1. This endpoint had no auth at all - anyone with the URL could trigger
+   free CPU compute (arbitrary video downloads + ffmpeg concat) at this
+   app's expense.
+2. FAL_KEY used to be passed in the request body on every call - sent
+   across the wire to a third-party infra provider on every single stitch,
+   multiplying the key's exposure surface for no real benefit now that the
+   one-time Modal-secret setup this used to avoid is already required for
+   modal_app.py anyway. It's now a Modal Secret this function reads
+   directly, never transmitted by the caller.
+One-time setup (see STATUS.md): both secrets already exist if
+modal_app.py's own auth was already set up -
+    modal secret create lucy-inference-auth MODAL_SHARED_SECRET=<same value as modal_app.py's>
+    modal secret create fal-api-key FAL_KEY=<the real fal.ai key>
 
 Deploy: modal deploy scripts/ad_studio_stitch.py
 """
@@ -32,11 +43,23 @@ import subprocess
 import tempfile
 import urllib.request
 
+import fastapi
 import modal
 
 app = modal.App("ad-studio-stitch")
 
 image = modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg").pip_install("fastapi[standard]")
+
+auth_secret = modal.Secret.from_name("lucy-inference-auth")
+fal_key_secret = modal.Secret.from_name("fal-api-key")
+
+
+def _require_shared_secret(request: fastapi.Request):
+    expected = os.environ.get("MODAL_SHARED_SECRET")
+    if not expected:
+        raise fastapi.HTTPException(status_code=500, detail="Server misconfigured: MODAL_SHARED_SECRET not set")
+    if request.headers.get("authorization", "") != f"Bearer {expected}":
+        raise fastapi.HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _upload_to_fal(path: str, fal_key: str, content_type: str, file_name: str) -> str:
@@ -57,11 +80,12 @@ def _upload_to_fal(path: str, fal_key: str, content_type: str, file_name: str) -
     return file_url
 
 
-@app.function(image=image, timeout=600)
+@app.function(image=image, timeout=600, secrets=[auth_secret, fal_key_secret])
 @modal.fastapi_endpoint(method="POST")
-def stitch(item: dict):
+def stitch(item: dict, request: fastapi.Request):
+    _require_shared_secret(request)
     video_urls = item["video_urls"]
-    fal_key = item["fal_key"]
+    fal_key = os.environ["FAL_KEY"]
     if not video_urls:
         return {"error": "No video URLs provided"}
 

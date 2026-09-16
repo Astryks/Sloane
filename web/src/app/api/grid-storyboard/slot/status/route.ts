@@ -26,8 +26,14 @@ export async function GET(req: NextRequest) {
     const endpoint = adStudioFalEndpoint(slot.video_model);
     const status = await getFalJobStatus(endpoint, slot.video_fal_request_id);
     if (status === "FAILED") {
-      await failGridStoryboardSlot(slotId, "Video generation failed");
-      await refundVideoCredit(user.id);
+      // Real double-refund bug fixed here (security audit, 2026-09-16):
+      // failGridStoryboardSlot is now an atomic claim (like every sibling
+      // "fail" function) - only refund when THIS call actually won the
+      // transition, so two overlapping polls of the same failed slot can't
+      // both refund the one credit that was spent.
+      if (await failGridStoryboardSlot(slotId, "Video generation failed")) {
+        await refundVideoCredit(user.id);
+      }
       return NextResponse.json({ status: "FAILED" });
     }
     if (status !== "COMPLETED") return NextResponse.json({ status });
@@ -35,8 +41,9 @@ export async function GET(req: NextRequest) {
     const result = await getFalJobResult(endpoint, slot.video_fal_request_id);
     const videoUrl = getFalVideoUrl(result);
     if (!videoUrl) {
-      await failGridStoryboardSlot(slotId, "Video provider returned no usable video URL");
-      await refundVideoCredit(user.id);
+      if (await failGridStoryboardSlot(slotId, "Video provider returned no usable video URL")) {
+        await refundVideoCredit(user.id);
+      }
       return NextResponse.json({ status: "FAILED" });
     }
     await setGridStoryboardSlotVideo(slotId, videoUrl);

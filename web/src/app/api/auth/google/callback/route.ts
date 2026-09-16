@@ -44,6 +44,14 @@ export async function GET(req: NextRequest) {
     if (!userInfoRes.ok) throw new Error(`Userinfo fetch failed (${userInfoRes.status})`);
     const info = (await userInfoRes.json()) as { sub: string; email: string; email_verified?: boolean };
     if (!info.email) throw new Error("Google account has no email");
+    // Real account-takeover fix (security audit, 2026-09-16): an unverified
+    // email is not proof of ownership - without this check, someone could
+    // sign in claiming an email they don't actually control. Google returns
+    // this as a real boolean (not a string) for the userinfo endpoint used
+    // here.
+    if (info.email_verified !== true) {
+      return NextResponse.redirect(new URL("/account?error=google_email_unverified", origin));
+    }
 
     await completeGoogleLogin(info.email.toLowerCase(), info.sub);
     return NextResponse.redirect(new URL("/account", origin));

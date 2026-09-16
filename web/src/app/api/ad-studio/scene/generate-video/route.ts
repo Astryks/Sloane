@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, setAdStudioSceneVideoRequestId } from "@/lib/db";
+import { getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, refundVideoCredit, setAdStudioSceneVideoRequestId, spendVideoCredit } from "@/lib/db";
 import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from "@/lib/adStudio";
 import { hasEnoughFalBalanceToGenerate, submitFalJob } from "@/lib/fal";
 
@@ -34,11 +34,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This scene's video model is no longer supported" }, { status: 500 });
     }
 
+    // Real cost-exposure fix (security audit, 2026-09-16): this route spent
+    // no credit at all - a scene's video generation is a real, billed fal.ai
+    // call (the expensive one, unlike the image calls above), charged here
+    // against the same shared video-credit balance paygo videos use,
+    // refunded if the submission itself fails (same reasoning as
+    // video-paygo/generate's own spend/refund).
+    const spent = await spendVideoCredit(user.id);
+    if (!spent) {
+      return NextResponse.json({ error: "No video credits left - buy more to generate this scene's video." }, { status: 402 });
+    }
+
     const prompt = [scene.camera, scene.action].filter(Boolean).join(". ");
     const falInput = buildAdStudioSceneFalInput(scene.video_model, prompt, scene.image_url);
-    const requestId = await submitFalJob(adStudioFalEndpoint(scene.video_model), falInput);
-    await setAdStudioSceneVideoRequestId(sceneId, requestId);
-    return NextResponse.json({ requestId });
+    try {
+      const requestId = await submitFalJob(adStudioFalEndpoint(scene.video_model), falInput);
+      await setAdStudioSceneVideoRequestId(sceneId, requestId);
+      return NextResponse.json({ requestId });
+    } catch (err) {
+      await refundVideoCredit(user.id);
+      throw err;
+    }
   } catch (err) {
     console.error("ad-studio scene video generation failed", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "Could not start video generation" }, { status: 502 });

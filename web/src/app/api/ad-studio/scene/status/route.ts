@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { failAdStudioScene, getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, setAdStudioSceneVideo } from "@/lib/db";
+import { failAdStudioScene, getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, refundVideoCredit, setAdStudioSceneVideo } from "@/lib/db";
 import { adStudioFalEndpoint, isAdStudioModel } from "@/lib/adStudio";
 import { getFalJobResult, getFalJobStatus, getFalVideoUrl } from "@/lib/fal";
 
@@ -34,7 +34,14 @@ export async function GET(req: NextRequest) {
 
     const status = await getFalJobStatus(endpoint, scene.video_fal_request_id);
     if (status === "FAILED") {
-      await failAdStudioScene(sceneId, "Video generation failed");
+      // Real cost-exposure fix (security audit, 2026-09-16): the scene's
+      // video generation now spends a real video credit (see
+      // generate-video/route.ts) - refund it here on vendor-side failure,
+      // same as video-paygo/status does, and only when this specific call
+      // wins the atomic claim (see failAdStudioScene's own comment on why).
+      if (await failAdStudioScene(sceneId, "Video generation failed")) {
+        await refundVideoCredit(user.id);
+      }
       return NextResponse.json({ status: "FAILED" });
     }
     if (status !== "COMPLETED") return NextResponse.json({ status });
@@ -42,7 +49,9 @@ export async function GET(req: NextRequest) {
     const result = await getFalJobResult(endpoint, scene.video_fal_request_id);
     const videoUrl = getFalVideoUrl(result);
     if (!videoUrl) {
-      await failAdStudioScene(sceneId, "Video provider returned no usable video URL");
+      if (await failAdStudioScene(sceneId, "Video provider returned no usable video URL")) {
+        await refundVideoCredit(user.id);
+      }
       return NextResponse.json({ status: "FAILED" });
     }
     await setAdStudioSceneVideo(sceneId, videoUrl);

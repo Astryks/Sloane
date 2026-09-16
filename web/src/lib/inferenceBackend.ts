@@ -66,7 +66,17 @@ export async function generateViaPod(
   path: "/api/generate-preset" | "/api/clone-voice",
   upstreamForm: FormData,
 ): Promise<{ audioBase64: string }> {
-  const upstream = await fetch(`${INFERENCE_SERVER_URL}${path}`, { method: "POST", body: upstreamForm });
+  // Real fix (security audit, 2026-09-16): the dev inference server
+  // (06_inference_server.py) had no auth at all - opt-in token support
+  // added there, sent here when configured. Must match that server's own
+  // LUCY_DEV_SERVER_TOKEN exactly. Omitted entirely (not an empty header)
+  // when unset, matching that server's own opt-in behavior.
+  const token = process.env.INFERENCE_SERVER_TOKEN;
+  const upstream = await fetch(`${INFERENCE_SERVER_URL}${path}`, {
+    method: "POST",
+    body: upstreamForm,
+    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+  });
   const data = await upstream.json();
   if (!upstream.ok) {
     throw new Error(data.error ?? `Pod request failed (${upstream.status})`);

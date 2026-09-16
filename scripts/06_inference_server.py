@@ -12,11 +12,12 @@ Usage (on a manually-started pod):
     /workspace/sloane/.venv/bin/python scripts/06_inference_server.py
 Then reachable at the pod's RunPod HTTP-proxy URL for port 8000.
 """
+import os
 import uuid
 from pathlib import Path
 
 import soundfile as sf
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,8 +40,29 @@ AUDIO_DIR = Path("/workspace/sloane/api_generated_audio")
 AUDIO_DIR.mkdir(exist_ok=True)
 app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
 
+# Real fix (security audit, 2026-09-16): this had no auth of any kind - if
+# this pod's RunPod HTTP-proxy URL is ever reachable (e.g. while "Pod mode"
+# is the active backend, see @/lib/inferenceBackend's admin toggle), anyone
+# with the URL could generate unlimited free audio, including voice-cloning
+# from arbitrary uploaded reference audio, with no quota. Opt-in rather than
+# mandatory (set LUCY_DEV_SERVER_TOKEN to enable) so this doesn't silently
+# break the existing Pod-mode production path until INFERENCE_SERVER_TOKEN
+# is also set to match on the Next.js side (see generateViaPod in
+# @/lib/inferenceBackend.ts) - but it should be set before ever relying on
+# Pod mode for real traffic.
+_DEV_SERVER_TOKEN = os.environ.get("LUCY_DEV_SERVER_TOKEN")
+if not _DEV_SERVER_TOKEN:
+    print("[06_inference_server] WARNING: LUCY_DEV_SERVER_TOKEN not set - this server is reachable with NO auth by anyone who has its URL.")
 
-@app.post("/api/generate-preset")
+
+def require_token(authorization: str | None = Header(default=None)):
+    if not _DEV_SERVER_TOKEN:
+        return  # opt-in - see comment above
+    if authorization != f"Bearer {_DEV_SERVER_TOKEN}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.post("/api/generate-preset", dependencies=[Depends(require_token)])
 async def generate_preset_route(
     text: str = Form(...),
     voice_id: str = Form(...),
@@ -68,7 +90,7 @@ async def generate_preset_route(
     return {"audio_url": f"/audio/{filename}", "mock": False, "voice_id": voice_id}
 
 
-@app.post("/api/clone-voice")
+@app.post("/api/clone-voice", dependencies=[Depends(require_token)])
 async def clone_voice_route(
     text: str = Form(...),
     reference_audio: UploadFile = File(...),

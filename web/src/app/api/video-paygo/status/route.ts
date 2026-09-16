@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import {
   getVideoPaygoJob,
+  claimVideoPaygoJobForFalSubmit,
+  claimVideoPaygoJobForMergeSubmit,
   completeVideoPaygoJob,
   failVideoPaygoJob,
   refundVideoCredit,
@@ -67,6 +69,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
+      return NextResponse.json({ status: "IN_PROGRESS" });
+    }
+    // Real double-submit race fixed here (security audit, 2026-09-16): two
+    // overlapping polls could both observe modalStatus COMPLETED and
+    // job.fal_request_id still null, and both submit a paid fal video job
+    // for the one credit already spent. Claim atomically before submitting;
+    // a losing request just reports IN_PROGRESS (see claimVideoPaygoJobForFalSubmit's comment).
+    if (!(await claimVideoPaygoJobForFalSubmit(job.id))) {
       return NextResponse.json({ status: "IN_PROGRESS" });
     }
     try {
@@ -168,6 +178,11 @@ export async function GET(req: NextRequest) {
         // download both this and the final result once the job finishes -
         // see the silent_video_url column comment in db.ts.
         await setVideoPaygoJobSilentVideo(job.id, videoUrl);
+        // Same double-submit race as the phase-0 fix above, for this
+        // second fal job (lipsync/merge) - claim before submitting.
+        if (!(await claimVideoPaygoJobForMergeSubmit(job.id))) {
+          return NextResponse.json({ status: "IN_PROGRESS" });
+        }
         const mergeRequestId =
           job.lip_sync_mode === "voiceover"
             ? await submitMergeAudioVideo(videoUrl, job.input_audio_url)

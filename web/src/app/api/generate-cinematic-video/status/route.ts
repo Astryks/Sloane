@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getSubscriptionVideoJob,
+  claimSubscriptionVideoJobForFalSubmit,
+  claimSubscriptionVideoJobForMergeSubmit,
   completeSubscriptionVideoJob,
   failSubscriptionVideoJob,
   setSubscriptionVideoJobRequestId,
@@ -61,6 +63,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
+      return NextResponse.json({ status: "IN_PROGRESS" });
+    }
+    // Real double-submit race fixed here (security audit, 2026-09-16): two
+    // overlapping polls could both observe modalStatus COMPLETED and
+    // fal_request_id still null, both submitting a paid Veo job for the one
+    // credit already spent. Claim atomically before submitting.
+    if (!(await claimSubscriptionVideoJobForFalSubmit(job.id))) {
       return NextResponse.json({ status: "IN_PROGRESS" });
     }
     try {
@@ -157,6 +166,11 @@ export async function GET(req: NextRequest) {
     // right after. Saved so a customer can download both this and the
     // audio-merged result once the job finishes.
     await setSubscriptionVideoJobSilentVideo(job.id, veoVideoUrl);
+    // Same double-submit race as the phase-0 fix above, for this second fal
+    // job (audio merge) - claim before submitting.
+    if (!(await claimSubscriptionVideoJobForMergeSubmit(job.id))) {
+      return NextResponse.json({ status: "IN_PROGRESS" });
+    }
     const mergeRequestId = await submitMergeAudioVideo(veoVideoUrl, job.resolved_audio_url);
     await setSubscriptionVideoJobMergeRequestId(job.id, mergeRequestId);
     return NextResponse.json({ status: "IN_PROGRESS" });

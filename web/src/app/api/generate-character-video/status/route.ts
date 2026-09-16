@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCharacterVideoJob, completeCharacterVideoJob, failCharacterVideoJob, setCharacterVideoJobRequestId, releaseVideoCredits } from "@/lib/db";
+import { getCharacterVideoJob, claimCharacterVideoJobForFalSubmit, completeCharacterVideoJob, failCharacterVideoJob, setCharacterVideoJobRequestId, releaseVideoCredits } from "@/lib/db";
 import { getCharacter } from "@/lib/characters";
 import { submitFalJob, getFalJobStatus, getFalJobResult, uploadBufferToFal } from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
@@ -48,6 +48,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
+      return NextResponse.json({ status: "IN_PROGRESS" });
+    }
+
+    // Real double-submit race fixed here (security audit, 2026-09-16): two
+    // overlapping polls could both observe modalStatus COMPLETED and
+    // fal_request_id still null, both submitting a paid Kling Avatar job for
+    // the one credit already spent. Claim atomically before submitting.
+    if (!(await claimCharacterVideoJobForFalSubmit(job.id))) {
       return NextResponse.json({ status: "IN_PROGRESS" });
     }
 

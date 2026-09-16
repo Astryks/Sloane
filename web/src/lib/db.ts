@@ -85,6 +85,25 @@ export async function initSchema() {
       processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Real cross-tenant leak partially fixed here (security audit,
+  // 2026-09-16): /api/job-status has no auth/ownership check at all (by
+  // design - it serves both anonymous free-tier and logged-in requests with
+  // only the jobId as a credential), so anyone who obtained a jobId - via a
+  // log, a proxy, a referrer header, shoulder-surfing a shared screen -
+  // could fetch that generation's full audio anytime afterward, indefinitely.
+  // A full fix needs a coordinated API-contract change across both the web
+  // and mobile clients; this is the real, additive mitigation that needs
+  // none: audio delivery becomes single-use at OUR OWN layer regardless of
+  // how long the underlying provider (RunPod/Modal) keeps the result
+  // fetchable, shrinking "leaked jobId works forever" down to "only
+  // exploitable in the narrow race against the legitimate client's own
+  // first poll" - see claimJobAudioDelivery below.
+  await sql`
+    CREATE TABLE IF NOT EXISTS delivered_job_audio (
+      job_id TEXT PRIMARY KEY,
+      delivered_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
   await sql`
     CREATE TABLE IF NOT EXISTS free_tier_usage (
       id TEXT PRIMARY KEY,
@@ -327,6 +346,12 @@ export async function initSchema() {
   // side), and Neon's driver passes JS string arrays through to a text[]
   // column natively.
   await sql`ALTER TABLE grid_storyboard_slots ADD COLUMN IF NOT EXISTS reference_ids TEXT[] NOT NULL DEFAULT '{}'`;
+  // Real cost-exposure fix (security audit, 2026-09-16): the scene's own
+  // INITIAL image generation had no cap at all (unlike its edit flow, which
+  // was already capped by image_edit_count) - a signed-in user could call
+  // generate-image for the same scene indefinitely, each call a real billed
+  // fal.ai request. See MAX_SCENE_IMAGE_GENERATIONS/recordAdStudioSceneImageGeneration below.
+  await sql`ALTER TABLE ad_studio_scenes ADD COLUMN IF NOT EXISTS image_generate_count INT NOT NULL DEFAULT 0`;
   // Character-video generation (2026-09-11) - pick one of the pre-made
   // AI actors, choose a voice (a Lucy preset -> Kling Avatar lip-sync, or
   // "veo" -> Veo generates its own dialogue+voice), type text. Billed
@@ -553,6 +578,28 @@ export async function claimStripeEvent(eventId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+// Atomic claim with a short grace window, not strict one-shot - see
+// delivered_job_audio's own comment for why this exists. A legitimate
+// client can retry a few times right after completion (a dropped
+// connection, a re-render, the normal poll loop's last couple of ticks
+// overlapping delivery) without getting locked out; call this on EVERY
+// COMPLETED response, and only actually return the audio when it's true.
+// The `ON CONFLICT ... WHERE` clause is what makes this conditional: a
+// retry inside the window re-satisfies the WHERE and returns a row (still
+// "delivered"), a call after the window doesn't match it and returns no
+// row (blocked) - the same "no row back = not allowed" shape as every
+// other atomic claim in this file, just with a time bound instead of a
+// status check.
+export async function claimJobAudioDelivery(jobId: string): Promise<boolean> {
+  const rows = await sql`
+    INSERT INTO delivered_job_audio (job_id) VALUES (${jobId})
+    ON CONFLICT (job_id) DO UPDATE SET job_id = delivered_job_audio.job_id
+    WHERE delivered_job_audio.delivered_at > now() - interval '2 minutes'
+    RETURNING job_id
+  `;
+  return rows.length > 0;
+}
+
 export async function upsertSubscriberForCheckout(params: {
   email: string;
   stripeCustomerId: string;
@@ -697,6 +744,23 @@ export async function releaseVideoCredits(token: string, credits: number) {
 // metering.
 export type FreeTierUsage = { charactersUsed: number; charactersLimit: number; periodEnd: string };
 
+// Real bug fixed here (security audit, 2026-09-16): `checkFreeQuota` used to
+// call straight through to `getFreeTierUsage`, which treats ANY id it's
+// never seen - including a missing/empty one - as a brand-new, always-
+// under-quota bucket. That meant a caller could get unlimited free
+// generations for free by simply omitting `free_tier_id` (or sending a
+// fresh empty string) on every request - no browser, no localStorage-
+// clearing effort required, unlike the accepted "clear site data to reset"
+// tradeoff this feature is actually designed around (see the comment
+// above). Requiring the id to actually be the well-formed UUID the client
+// is supposed to generate (useFreeTierId.ts) closes the trivial bypass
+// while leaving the documented, accepted limitation exactly as it was -
+// this is deliberately NOT a move to IP-based tracking (see above).
+const FREE_TIER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidFreeTierId(id: string): boolean {
+  return FREE_TIER_ID_PATTERN.test(id);
+}
+
 export async function getFreeTierUsage(id: string): Promise<FreeTierUsage> {
   const limit = PLANS.free.charactersPerMonth;
   if (!id) return { charactersUsed: 0, charactersLimit: limit, periodEnd: new Date().toISOString() };
@@ -713,6 +777,11 @@ export async function getFreeTierUsage(id: string): Promise<FreeTierUsage> {
 }
 
 export async function checkFreeQuota(id: string, additionalCharacters: number): Promise<string | null> {
+  // Gate BEFORE reading usage, not after - see the comment above. A missing/
+  // malformed id can never pass, regardless of how little it asks for.
+  if (!isValidFreeTierId(id)) {
+    return "Could not verify your free usage - please refresh the page and try again.";
+  }
   const usage = await getFreeTierUsage(id);
   if (usage.charactersUsed + additionalCharacters > usage.charactersLimit) {
     const resetDate = new Date(usage.periodEnd).toLocaleDateString("en-US", { month: "long", day: "numeric" });
@@ -722,7 +791,7 @@ export async function checkFreeQuota(id: string, additionalCharacters: number): 
 }
 
 export async function recordFreeUsage(id: string, characters: number) {
-  if (!id) return;
+  if (!isValidFreeTierId(id)) return;
   await sql`
     INSERT INTO free_tier_usage (id, characters_used, period_start, period_end)
     VALUES (${id}, ${characters}, now(), now() + interval '30 days')
@@ -770,7 +839,27 @@ function generateOpaqueToken(bytes = 32): string {
   return randomBytes(bytes).toString("hex");
 }
 
+// Real fix (security audit, 2026-09-16): no rate limit existed anywhere in
+// the magic-link chain - anyone could POST request-link in a tight loop,
+// email-bombing an arbitrary inbox and creating unbounded token rows. A
+// simple per-email cap over a real window closes it without needing a
+// separate rate-limiting service; the check lives here (not just at the
+// route) so it applies regardless of caller.
+const LOGIN_TOKEN_RATE_LIMIT = 3;
+
 export async function createLoginToken(email: string): Promise<string> {
+  // The window is a static literal, not interpolated - a `${...}` placed
+  // inside the quotes of `interval '...'` would be bound as a query
+  // parameter at that exact (quoted) position, not spliced into the SQL
+  // text, producing `interval '$1'` (a literal string Postgres can't parse
+  // as an interval) rather than the intended 15-minute window.
+  const recent = await sql`
+    SELECT count(*)::int AS count FROM login_tokens
+    WHERE email = ${email} AND created_at > now() - interval '15 minutes'
+  `;
+  if ((recent[0]?.count as number) >= LOGIN_TOKEN_RATE_LIMIT) {
+    throw new Error("Too many sign-in links requested for this email - please wait a few minutes and try again.");
+  }
   const token = generateOpaqueToken();
   await sql`
     INSERT INTO login_tokens (token, email, expires_at)
@@ -798,15 +887,30 @@ export async function upsertUserByEmail(email: string): Promise<User> {
   return rows[0] as User;
 }
 
+// Real account-takeover fix (security audit, 2026-09-16): this used to
+// unconditionally overwrite an existing email row's google_id on every
+// call (`SET google_id = EXCLUDED.google_id`), regardless of whether that
+// row already had a DIFFERENT google_id linked. Combined with the callback
+// route not checking `email_verified`, that meant a second Google account
+// claiming the same email (e.g. an unverified/edge-case Google identity)
+// could silently rebind - and log in as - an existing user's account,
+// inheriting whatever subscriber/history was already attached to it.
+// `COALESCE` now only fills in google_id when the row doesn't have one yet
+// (first-time linking, still fully supported); an already-linked row that
+// doesn't match the incoming googleId is left untouched and rejected below.
 export async function upsertUserByGoogle(email: string, googleId: string): Promise<User> {
   const existingByGoogle = await sql`SELECT * FROM users WHERE google_id = ${googleId}`;
   if (existingByGoogle[0]) return existingByGoogle[0] as User;
   const rows = await sql`
     INSERT INTO users (email, google_id) VALUES (${email}, ${googleId})
-    ON CONFLICT (email) DO UPDATE SET google_id = EXCLUDED.google_id
+    ON CONFLICT (email) DO UPDATE SET google_id = COALESCE(users.google_id, EXCLUDED.google_id)
     RETURNING *
   `;
-  return rows[0] as User;
+  const user = rows[0] as User;
+  if (user.google_id !== googleId) {
+    throw new Error("This email is already linked to a different Google account. Try signing in with email instead.");
+  }
+  return user;
 }
 
 export async function getUserById(id: string): Promise<User | null> {
@@ -1006,6 +1110,25 @@ export async function setVideoPaygoJobRequestId(jobId: string, falRequestId: str
   await sql`UPDATE video_paygo_jobs SET fal_request_id = ${falRequestId}, status = 'in_progress' WHERE id = ${jobId}`;
 }
 
+// Atomic claim (security audit, 2026-09-16): the phase-0 transition in
+// status/route.ts used to be a plain "read fal_request_id, see it's null,
+// submit a fal job" - a real double-submit race, since two overlapping
+// polls for the same job (two tabs, a client retry) could both read null
+// and both call submitFalJob, paying twice for the one credit already
+// spent. Callers must call this FIRST and only proceed to submitFalJob if
+// it returns true; the sentinel value is immediately overwritten by the
+// real id via setVideoPaygoJobRequestId once submission succeeds, and if
+// submission fails the whole job is failed (see failVideoPaygoJob) rather
+// than left reclaimable, so there's no need to reset this back to null.
+export async function claimVideoPaygoJobForFalSubmit(jobId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE video_paygo_jobs SET fal_request_id = 'CLAIMING'
+    WHERE id = ${jobId} AND fal_request_id IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
 export async function setVideoPaygoJobModalId(jobId: string, modalJobId: string) {
   await sql`UPDATE video_paygo_jobs SET modal_job_id = ${modalJobId} WHERE id = ${jobId}`;
 }
@@ -1203,6 +1326,7 @@ export type AdStudioScene = {
   image_prompt: string;
   video_model: string;
   image_edit_count: number;
+  image_generate_count: number;
   image_url: string | null;
   image_fal_request_id: string | null;
   video_url: string | null;
@@ -1299,8 +1423,25 @@ export async function setAdStudioSceneImageRequestId(sceneId: string, requestId:
   await sql`UPDATE ad_studio_scenes SET image_fal_request_id = ${requestId}, status = 'pending_image' WHERE id = ${sceneId}`;
 }
 
-export async function setAdStudioSceneImage(sceneId: string, imageUrl: string) {
-  await sql`UPDATE ad_studio_scenes SET image_url = ${imageUrl}, status = 'image_ready' WHERE id = ${sceneId}`;
+// Real cost-exposure fix (security audit, 2026-09-16): unlike edits (capped
+// by MAX_SCENE_IMAGE_EDITS below), a scene's initial image generation had no
+// cap at all - callable indefinitely, each call a real billed fal.ai
+// request. 5 gives real room to regenerate before editing/approving,
+// without being unbounded.
+export const MAX_SCENE_IMAGE_GENERATIONS = 5;
+
+// Same atomic increment-and-check shape as recordAdStudioSceneEdit below -
+// the caller does a cheap pre-check before paying for the fal call, but
+// THIS is what actually enforces the cap, closing the same
+// read-then-check-then-write race that pattern exists to prevent elsewhere.
+export async function recordAdStudioSceneImageGeneration(sceneId: string, imageUrl: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE ad_studio_scenes
+    SET image_url = ${imageUrl}, image_generate_count = image_generate_count + 1, status = 'image_ready'
+    WHERE id = ${sceneId} AND image_generate_count < ${MAX_SCENE_IMAGE_GENERATIONS}
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 // Real cost-exposure fix (2026-09-14): a flat-priced project had no cap on
@@ -1337,8 +1478,19 @@ export async function approveAdStudioScene(sceneId: string) {
   await sql`UPDATE ad_studio_scenes SET status = 'approved' WHERE id = ${sceneId}`;
 }
 
-export async function failAdStudioScene(sceneId: string, error: string) {
-  await sql`UPDATE ad_studio_scenes SET status = 'failed', error = ${error} WHERE id = ${sceneId}`;
+// Atomic claim, same shape and reasoning as failVideoPaygoJob above (real
+// bug fixed here, security audit 2026-09-16: this used to be a plain
+// unconditional UPDATE with no RETURNING - now that scene video generation
+// spends a real video credit, two overlapping status-poll requests for the
+// same failed scene could otherwise both pass and both refund, crediting
+// back 2 for the 1 spent). Callers must only refund when this returns true.
+export async function failAdStudioScene(sceneId: string, error: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE ad_studio_scenes SET status = 'failed', error = ${error}
+    WHERE id = ${sceneId} AND status NOT IN ('failed', 'video_ready', 'approved')
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 // --- Grid storyboard (manual, pay-per-slot, no auto-generated brief) ---
@@ -1484,8 +1636,20 @@ export async function setGridStoryboardSlotVideo(slotId: string, videoUrl: strin
   await sql`UPDATE grid_storyboard_slots SET video_url = ${videoUrl}, status = 'video_ready' WHERE id = ${slotId}`;
 }
 
-export async function failGridStoryboardSlot(slotId: string, error: string) {
-  await sql`UPDATE grid_storyboard_slots SET status = 'failed', error = ${error} WHERE id = ${slotId}`;
+// Atomic claim, same shape and reasoning as failVideoPaygoJob/
+// failAdStudioScene above (real bug fixed here, security audit 2026-09-16:
+// this was the one "fail" function in this file still a plain unconditional
+// UPDATE with no RETURNING - two overlapping status-poll requests for the
+// same failed slot could both pass and both call refundVideoCredit,
+// crediting back 2 credits for the 1 originally spent). Callers must only
+// refund when this returns true.
+export async function failGridStoryboardSlot(slotId: string, error: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE grid_storyboard_slots SET status = 'failed', error = ${error}
+    WHERE id = ${slotId} AND status NOT IN ('failed', 'video_ready')
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function deleteGridStoryboardSlot(slotId: string) {
@@ -1532,6 +1696,19 @@ export async function setCharacterVideoJobModalId(jobId: string, modalJobId: str
 
 export async function setCharacterVideoJobRequestId(jobId: string, falRequestId: string) {
   await sql`UPDATE character_video_jobs SET fal_request_id = ${falRequestId}, status = 'in_progress' WHERE id = ${jobId}`;
+}
+
+// Same double-submit race and atomic-claim fix as
+// claimVideoPaygoJobForFalSubmit above (security audit, 2026-09-16) -
+// generate-character-video/status/route.ts has the identical phase-1
+// check-then-submit shape.
+export async function claimCharacterVideoJobForFalSubmit(jobId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE character_video_jobs SET fal_request_id = 'CLAIMING'
+    WHERE id = ${jobId} AND fal_request_id IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function completeCharacterVideoJob(jobId: string, videoUrl: string) {
@@ -1620,6 +1797,28 @@ export async function setSubscriptionVideoJobMergeRequestId(jobId: string, merge
   await sql`UPDATE subscription_video_jobs SET merge_request_id = ${mergeRequestId} WHERE id = ${jobId}`;
 }
 
+// Same double-submit race and atomic-claim fix as
+// claimVideoPaygoJobForFalSubmit/claimVideoPaygoJobForMergeSubmit above
+// (security audit, 2026-09-16) - generate-cinematic-video/status/route.ts
+// has both the identical phase-0 (Veo submit) and merge-submit shapes.
+export async function claimSubscriptionVideoJobForFalSubmit(jobId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE subscription_video_jobs SET fal_request_id = 'CLAIMING'
+    WHERE id = ${jobId} AND fal_request_id IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function claimSubscriptionVideoJobForMergeSubmit(jobId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE subscription_video_jobs SET merge_request_id = 'CLAIMING'
+    WHERE id = ${jobId} AND merge_request_id IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
 // Saves cinematic mode's raw silent Veo clip right before it's muxed with
 // the resolved audio - see the silent_video_url column comment above.
 export async function setSubscriptionVideoJobSilentVideo(jobId: string, silentVideoUrl: string) {
@@ -1649,4 +1848,16 @@ export async function getSubscriptionVideoJob(jobId: string): Promise<Subscripti
 
 export async function setVideoPaygoJobMergeRequestId(jobId: string, mergeRequestId: string) {
   await sql`UPDATE video_paygo_jobs SET merge_request_id = ${mergeRequestId} WHERE id = ${jobId}`;
+}
+
+// Same atomic-claim shape and reasoning as claimVideoPaygoJobForFalSubmit
+// above, for the second fal job (lipsync/merge) this job submits once its
+// silent render completes - the same double-submit race applies here too.
+export async function claimVideoPaygoJobForMergeSubmit(jobId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE video_paygo_jobs SET merge_request_id = 'CLAIMING'
+    WHERE id = ${jobId} AND merge_request_id IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
 }

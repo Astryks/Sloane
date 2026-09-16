@@ -29,6 +29,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   google_state_mismatch: "That Google sign-in link expired — please try again.",
   google_not_configured: "Google sign-in isn't set up yet — use email instead.",
   google_failed: "Google sign-in didn't work — please try again or use email.",
+  google_email_unverified: "That Google account's email isn't verified — please verify it with Google first, or sign in with email instead.",
 };
 
 function daysLeft(expiresAt: string): number {

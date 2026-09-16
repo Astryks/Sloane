@@ -33,11 +33,18 @@ export async function POST(req: NextRequest) {
     const stitchUrl = process.env.MODAL_STITCH_URL;
     if (!stitchUrl) return NextResponse.json({ error: "Stitching is not configured (missing MODAL_STITCH_URL)" }, { status: 503 });
 
+    // Real fixes here (security audit, 2026-09-16): this endpoint used to
+    // have no auth (anyone with the URL could trigger free compute) and
+    // sent FAL_KEY in the request body on every call. The Modal side now
+    // reads FAL_KEY from its own Modal Secret instead - see
+    // scripts/ad_studio_stitch.py's comment - so it's never sent here, and
+    // the shared secret gates who can call this at all, same pattern as
+    // @/lib/modal.ts.
     const videoUrls = scenes.map((s) => s.video_url).filter((url): url is string => Boolean(url));
     const res = await fetch(stitchUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ video_urls: videoUrls, fal_key: process.env.FAL_KEY }),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.MODAL_SHARED_SECRET}` },
+      body: JSON.stringify({ video_urls: videoUrls }),
     });
     const data = await res.json();
     if (!res.ok || data.error || !data.video_url) {

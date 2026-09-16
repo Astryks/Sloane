@@ -11,6 +11,13 @@ import { findNestedMediaUrl, findNestedString, findNestedStatus } from "./provid
 
 const MODAL_SUBMIT_URL = process.env.MODAL_SUBMIT_URL!;
 const MODAL_STATUS_URL = process.env.MODAL_STATUS_URL!;
+// Real bug fixed here (security audit, 2026-09-16): these Modal endpoints
+// used to accept any request with no auth at all - anyone with the URL
+// could submit unlimited billed GPU jobs, bypassing every quota check in
+// this app. Must match the MODAL_SHARED_SECRET Modal Secret configured on
+// scripts/modal_app.py's submit/status endpoints (see that file's comment).
+const MODAL_SHARED_SECRET = process.env.MODAL_SHARED_SECRET!;
+const AUTH_HEADERS = { Authorization: `Bearer ${MODAL_SHARED_SECRET}` };
 
 export type ModalStatusResponse = {
   status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
@@ -24,7 +31,7 @@ export type ModalStatusResponse = {
 export async function submitModalJob(input: Record<string, unknown>): Promise<{ jobId: string }> {
   const res = await fetch(MODAL_SUBMIT_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...AUTH_HEADERS },
     body: JSON.stringify(input),
   });
   const data = await res.json();
@@ -39,7 +46,7 @@ export async function submitModalJob(input: Record<string, unknown>): Promise<{ 
 }
 
 export async function getModalJobStatus(callId: string): Promise<ModalStatusResponse> {
-  const res = await fetch(`${MODAL_STATUS_URL}?call_id=${encodeURIComponent(callId)}`);
+  const res = await fetch(`${MODAL_STATUS_URL}?call_id=${encodeURIComponent(callId)}`, { headers: AUTH_HEADERS });
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.error ?? `Modal status check failed (${res.status})`);
@@ -70,7 +77,7 @@ export async function warmModal(): Promise<void> {
   try {
     await fetch(MODAL_SUBMIT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...AUTH_HEADERS },
       body: JSON.stringify({ action: "warmup" }),
     });
   } catch {

@@ -262,9 +262,35 @@ class LucyTTS:
 #
 # These run on cheap CPU containers, not the GPU - they only submit/check
 # function calls, they never load the model themselves.
-@app.function(image=image)
+#
+# Real bug fixed here (security audit, 2026-09-16): these were public HTTP
+# endpoints with NO auth of any kind - anyone who obtained (or brute-forced/
+# leaked-via-proxy-log) these Modal URLs could submit unlimited billed GPU
+# jobs directly, completely bypassing every quota/credit check in the
+# Next.js layer (generate-preset/clone-voice/video-paygo all call through
+# here). A shared secret, stored as a Modal Secret and never in this source
+# file, closes that - the Next.js side sends it as a bearer token (see
+# web/src/lib/modal.ts). One-time setup (see STATUS.md):
+#   modal secret create lucy-inference-auth MODAL_SHARED_SECRET=<a long random value>
+# and set the SAME value as MODAL_SHARED_SECRET in Vercel's env vars.
+inference_auth_secret = modal.Secret.from_name("lucy-inference-auth")
+
+
+def _require_shared_secret(request: fastapi.Request):
+    expected = os.environ.get("MODAL_SHARED_SECRET")
+    if not expected:
+        # Fail closed, not open - a missing secret must never be treated as
+        # "no auth required".
+        raise fastapi.HTTPException(status_code=500, detail="Server misconfigured: MODAL_SHARED_SECRET not set")
+    provided = request.headers.get("authorization", "")
+    if provided != f"Bearer {expected}":
+        raise fastapi.HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.function(image=image, secrets=[inference_auth_secret])
 @modal.fastapi_endpoint(method="POST")
 async def submit(request: fastapi.Request):
+    _require_shared_secret(request)
     body = await request.json()
     action = body.get("action", "generate-preset")
     lucy = LucyTTS()
@@ -292,9 +318,10 @@ async def submit(request: fastapi.Request):
     return {"call_id": call.object_id}
 
 
-@app.function(image=image)
+@app.function(image=image, secrets=[inference_auth_secret])
 @modal.fastapi_endpoint(method="GET")
-def status(call_id: str):
+def status(call_id: str, request: fastapi.Request):
+    _require_shared_secret(request)
     function_call = modal.FunctionCall.from_id(call_id)
     try:
         result = function_call.get(timeout=0)
