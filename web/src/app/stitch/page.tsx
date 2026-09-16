@@ -49,7 +49,7 @@ type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
 type AudioTrack = {
   id: string;
   file: File;
-  label: string; // free text, e.g. "Music" / "SFX" - purely for the user's own organization, never sent to ffmpeg
+  previewUrl: string; // for in-browser playback only (the live preview player below) - never sent to ffmpeg
   sourceDuration: number; // the uploaded file's own real length
   startSec: number; // where this track starts playing, in the FINAL video's timeline
   endSec: number; // where it stops - (endSec - startSec) is how long it plays for
@@ -253,6 +253,25 @@ function StitchPageInner() {
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const preloadedRef = useRef(false);
+  // Which timeline video block is currently showing its own small inline
+  // playback (2026-09-16, per direct request - "give the ability to play
+  // each video at the top") instead of its static thumbnail - independent
+  // of the full-timeline preview below, so glancing at one clip doesn't
+  // disturb the other.
+  const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  // The full-edit "as you go" preview (2026-09-16, per direct request -
+  // "give the ability to play the full audio and video as we go... make
+  // sure this doesn't cost anything in server etc. and is fast"). Genuinely
+  // free and fast: it's just native <video>/<audio> elements playing the
+  // user's own already-in-memory files back to back, seeking per real trim/
+  // position - no ffmpeg, no encoding, nothing server-side. It's an
+  // approximation (see the on-screen note below), not a guarantee of
+  // frame-exact sync with the real exported file.
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewTime, setPreviewTime] = useState(0); // position on the FINAL combined timeline, in seconds
+  const stageVideoRef = useRef<HTMLVideoElement | null>(null);
+  const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
+  const currentStageItemIdRef = useRef<string | null>(null); // which item's file is currently loaded into the stage <video>, so we only reassign .src on an actual clip change
 
   // Picks up scenes handed off from /ads (2026-09-14, per direct request -
   // "at the end they have an option to click create full ad where we
@@ -462,6 +481,24 @@ function StitchPageInner() {
     }
   }
 
+  // Same per-clip trims, but as {timelineStart, timelineEnd, trimStart,
+  // trimEnd} entries - what the "as you go" preview player below actually
+  // walks through to know which clip should be showing at a given moment
+  // on the FINAL timeline, and which part of that clip's own file to play.
+  type TimelineVideoEntry = { item: VideoItem; timelineStart: number; timelineEnd: number; trimStart: number; trimEnd: number };
+  const videoTimelineEntries: TimelineVideoEntry[] = [];
+  {
+    let cursor = 0;
+    for (const item of items) {
+      const trim = itemTrims[item.id];
+      const trimStart = trim ? trim.start : 0;
+      const trimEnd = trim ? trim.end : (itemDurations[item.id] ?? 0);
+      const duration = Math.max(0, trimEnd - trimStart);
+      videoTimelineEntries.push({ item, timelineStart: cursor, timelineEnd: cursor + duration, trimStart, trimEnd });
+      cursor += duration;
+    }
+  }
+
   function updateItemTrim(id: string, patch: Partial<{ start: number; end: number }>) {
     setItemTrims((prev) => {
       const current = prev[id];
@@ -485,7 +522,7 @@ function StitchPageInner() {
       setAudioTracks((prev) => {
         if (prev.length >= MAX_AUDIO_TRACKS) return prev;
         added = true;
-        return [...prev, { id, file, label: "", sourceDuration: duration, startSec: 0, endSec: Math.round(duration) }];
+        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration) }];
       });
       if (added) {
         // Waveform decode is best-effort and purely visual - a track that
@@ -500,12 +537,18 @@ function StitchPageInner() {
     }
   }
 
-  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "label" | "startSec" | "endSec">>) {
+  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec">>) {
     setAudioTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
   function removeAudioTrack(id: string) {
-    setAudioTracks((prev) => prev.filter((t) => t.id !== id));
+    audioElRefs.current[id]?.pause();
+    delete audioElRefs.current[id];
+    setAudioTracks((prev) => {
+      const target = prev.find((t) => t.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((t) => t.id !== id);
+    });
     setTrackWaveforms((prev) => {
       if (!(id in prev)) return prev;
       const next = { ...prev };
@@ -514,19 +557,9 @@ function StitchPageInner() {
     });
   }
 
-  function moveItem(index: number, direction: -1 | 1) {
-    setItems((prev) => {
-      const target = index + direction;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  }
-
-  // Generalized version of moveItem for drag-to-reorder below - moves one
-  // item directly to an arbitrary target index instead of only swapping
-  // with an adjacent neighbor.
+  // Moves one item directly to an arbitrary target index - used by
+  // drag-to-reorder below, now the only way to reorder clips (per direct
+  // feedback: "reorder will be drag... for video").
   function moveItemToIndex(fromIndex: number, toIndex: number) {
     setItems((prev) => {
       if (fromIndex === toIndex || toIndex < 0 || toIndex >= prev.length) return prev;
@@ -581,6 +614,142 @@ function StitchPageInner() {
     window.addEventListener("pointerup", onUp);
   }
 
+  // Loads a different clip's file into the stage <video> and plays it from
+  // a given local (that clip's own file) position - only called when the
+  // preview is actually crossing into a new clip, never for scrubbing
+  // within the same one (see the `currentStageItemIdRef` check at each call
+  // site), since reassigning `.src` always forces a real reload.
+  // `currentTime` can only be set once the browser has metadata for the
+  // new src, hence the one-shot `loadedmetadata` listener.
+  function loadAndPlayEntry(entry: TimelineVideoEntry, localStart: number) {
+    const v = stageVideoRef.current;
+    if (!v) return;
+    const onLoaded = () => {
+      v.currentTime = localStart;
+      v.play().catch(() => {});
+      v.removeEventListener("loadedmetadata", onLoaded);
+    };
+    v.addEventListener("loadedmetadata", onLoaded);
+    v.src = entry.item.previewUrl;
+    v.load();
+  }
+
+  // Keeps every audio track's own <audio> element in sync with the
+  // preview's current position on the FINAL timeline: playing (and looped/
+  // truncated the same way the real export's `-stream_loop`+`atrim` would
+  // be) while `t` falls inside that track's start/end window, paused
+  // outside it. Only corrects drift past a small threshold rather than
+  // reseeking every tick - reseeking on every call would itself cause
+  // audible stutter. This is a best-effort approximation for a free,
+  // instant, un-encoded preview, not a frame-accurate guarantee of what the
+  // real exported file will sound like.
+  function syncAudioTracksTo(t: number, shouldPlay: boolean) {
+    for (const track of audioTracks) {
+      const el = audioElRefs.current[track.id];
+      if (!el) continue;
+      const inWindow = shouldPlay && t >= track.startSec && t < track.endSec;
+      if (!inWindow) {
+        if (!el.paused) el.pause();
+        continue;
+      }
+      const rawLocal = t - track.startSec;
+      const local = track.sourceDuration > 0 ? rawLocal % track.sourceDuration : rawLocal;
+      if (Math.abs(el.currentTime - local) > 0.35) el.currentTime = local;
+      if (el.paused) el.play().catch(() => {});
+    }
+  }
+
+  // Moves the preview's playhead to an arbitrary point - used both by the
+  // scrubber bar and (indirectly) by the play button when resuming from
+  // wherever the last pause/scrub left off.
+  function seekPreviewTo(t: number) {
+    const clamped = Math.max(0, Math.min(t, totalVideoDuration));
+    setPreviewTime(clamped);
+    if (!previewPlaying) return;
+    const entry = videoTimelineEntries.find((e) => clamped < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
+    if (!entry) return;
+    const localStart = entry.trimStart + (clamped - entry.timelineStart);
+    if (currentStageItemIdRef.current !== entry.item.id) {
+      currentStageItemIdRef.current = entry.item.id;
+      loadAndPlayEntry(entry, localStart);
+    } else if (stageVideoRef.current) {
+      stageVideoRef.current.currentTime = localStart;
+    }
+    syncAudioTracksTo(clamped, true);
+  }
+
+  function handleScrubberClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (totalVideoDuration <= 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seekPreviewTo(fraction * totalVideoDuration);
+  }
+
+  // The free "as you go" preview's play/pause button (2026-09-16, per
+  // direct request). Deliberately zero server cost and fast: this only
+  // ever plays the visitor's own already-downloaded files through native
+  // <video>/<audio> elements and seeks between them - no ffmpeg, no
+  // encoding, nothing sent anywhere.
+  function handlePreviewPlayToggle() {
+    const v = stageVideoRef.current;
+    if (!v) return;
+    if (previewPlaying) {
+      v.pause();
+      for (const el of Object.values(audioElRefs.current)) el?.pause();
+      setPreviewPlaying(false);
+      return;
+    }
+    if (videoTimelineEntries.length === 0) return;
+    // Restart from the top once we've reached (or were already at) the end.
+    const startAt = previewTime >= totalVideoDuration - 0.05 ? 0 : previewTime;
+    const entry = videoTimelineEntries.find((e) => startAt < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
+    const localStart = entry.trimStart + (startAt - entry.timelineStart);
+    if (currentStageItemIdRef.current !== entry.item.id) {
+      currentStageItemIdRef.current = entry.item.id;
+      loadAndPlayEntry(entry, localStart);
+    } else {
+      v.currentTime = localStart;
+      v.play().catch(() => {});
+    }
+    syncAudioTracksTo(startAt, true);
+    setPreviewTime(startAt);
+    setPreviewPlaying(true);
+  }
+
+  // Drives the preview forward every real timeupdate tick from the stage
+  // <video> itself (a few times a second) - converts its own local
+  // currentTime back into a position on the FINAL combined timeline, keeps
+  // every audio track in sync with that position, and crosses over to the
+  // next clip (or stops, at the very end) once the current clip's trimmed
+  // range is exhausted.
+  function handleStageTimeUpdate() {
+    const v = stageVideoRef.current;
+    if (!v || !previewPlaying) return;
+    const entry = videoTimelineEntries.find((e) => e.item.id === currentStageItemIdRef.current);
+    if (!entry) {
+      v.pause();
+      setPreviewPlaying(false);
+      return;
+    }
+    const t = entry.timelineStart + (v.currentTime - entry.trimStart);
+    setPreviewTime(t);
+    syncAudioTracksTo(t, true);
+    if (v.currentTime >= entry.trimEnd - 0.05) {
+      const idx = videoTimelineEntries.indexOf(entry);
+      const next = videoTimelineEntries[idx + 1];
+      if (next) {
+        currentStageItemIdRef.current = next.item.id;
+        loadAndPlayEntry(next, next.trimStart);
+      } else {
+        v.pause();
+        for (const el of Object.values(audioElRefs.current)) el?.pause();
+        currentStageItemIdRef.current = null;
+        setPreviewPlaying(false);
+        setPreviewTime(0);
+      }
+    }
+  }
+
   // Real object-URL leak fixed here (2026-09-15, found while checking a
   // read-only audit's finding against a different component and looking
   // for the same pattern elsewhere): removing a clip never revoked its
@@ -591,29 +760,41 @@ function StitchPageInner() {
   function removeItem(index: number) {
     setItems((prev) => {
       const target = prev[index];
-      if (target) URL.revokeObjectURL(target.previewUrl);
+      if (!target) return prev;
+      URL.revokeObjectURL(target.previewUrl);
+      // A removed clip can't stay "the one currently showing" in either
+      // preview surface - clear both rather than let them keep pointing at
+      // a revoked object URL.
+      setPreviewItemId((cur) => (cur === target.id ? null : cur));
+      if (currentStageItemIdRef.current === target.id) {
+        stageVideoRef.current?.pause();
+        currentStageItemIdRef.current = null;
+        setPreviewPlaying(false);
+      }
       return prev.filter((_, i) => i !== index);
     });
   }
 
-  // Revokes every still-outstanding object URL (every item's preview, plus
-  // the last combined result) - called on unmount below, and reused by
-  // handleCombine just before it replaces resultUrl with a fresh one.
-  function revokeAllPreviewUrls(currentItems: VideoItem[], currentResultUrl: string | null) {
+  // Revokes every still-outstanding object URL (every item's preview, every
+  // audio track's preview, plus the last combined result) - called on
+  // unmount below, and reused by handleCombine just before it replaces
+  // resultUrl with a fresh one.
+  function revokeAllPreviewUrls(currentItems: VideoItem[], currentAudioTracks: AudioTrack[], currentResultUrl: string | null) {
     for (const item of currentItems) URL.revokeObjectURL(item.previewUrl);
+    for (const track of currentAudioTracks) URL.revokeObjectURL(track.previewUrl);
     if (currentResultUrl) URL.revokeObjectURL(currentResultUrl);
   }
 
-  // Tracks the latest items/resultUrl in a ref purely so the unmount
-  // cleanup below reads their real, final values instead of a stale
+  // Tracks the latest items/audioTracks/resultUrl in a ref purely so the
+  // unmount cleanup below reads their real, final values instead of a stale
   // closure over whatever they were when this effect first ran.
-  const latestStateRef = useRef({ items, resultUrl });
+  const latestStateRef = useRef({ items, audioTracks, resultUrl });
   useEffect(() => {
-    latestStateRef.current = { items, resultUrl };
-  }, [items, resultUrl]);
+    latestStateRef.current = { items, audioTracks, resultUrl };
+  }, [items, audioTracks, resultUrl]);
   useEffect(() => {
     return () => {
-      revokeAllPreviewUrls(latestStateRef.current.items, latestStateRef.current.resultUrl);
+      revokeAllPreviewUrls(latestStateRef.current.items, latestStateRef.current.audioTracks, latestStateRef.current.resultUrl);
     };
   }, []);
 
@@ -835,7 +1016,16 @@ function StitchPageInner() {
             state. */}
         <div className="space-y-3 rounded-2xl bg-[#1c1c24] p-3">
           <div className="overflow-x-auto">
-            <div style={{ minWidth: Math.max(240, totalVideoDuration * PIXELS_PER_SECOND) }}>
+            <div className="relative" style={{ minWidth: Math.max(240, totalVideoDuration * PIXELS_PER_SECOND) }}>
+              {/* Live playhead (2026-09-16) - tracks the "as you go" preview
+                  player below across the ruler, video track, and audio
+                  lanes, all sharing this same PIXELS_PER_SECOND axis. */}
+              {totalVideoDuration > 0 && (previewPlaying || previewTime > 0) && (
+                <div
+                  className="pointer-events-none absolute top-0 z-30 h-full w-px bg-emerald-400"
+                  style={{ left: Math.min(previewTime, totalVideoDuration) * PIXELS_PER_SECOND }}
+                />
+              )}
               {/* Time ruler (2026-09-16, per direct follow-up) - tick
                   spacing adapts to the real total length so a short clip
                   isn't crowded with 1s ticks and a long one isn't left with
@@ -889,8 +1079,32 @@ function StitchPageInner() {
                           }}
                           className={`group relative h-16 shrink-0 overflow-hidden rounded-lg border border-white/25 bg-white/10 bg-cover bg-center ${isDragging ? "opacity-90 shadow-xl" : ""}`}
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element -- a runtime data: URL thumbnail, not a static/remote asset next/image is built for */}
-                          {thumb && <img src={thumb} alt="" className="h-full w-full object-cover" />}
+                          {/* Clicking the play button below swaps this
+                              static thumbnail for a real, briefly-playing
+                              <video> of just this clip's own trimmed range
+                              (2026-09-16, per direct request - "give the
+                              ability to play each video at the top"). */}
+                          {previewItemId === item.id ? (
+                            <video
+                              src={item.previewUrl}
+                              autoPlay
+                              controls
+                              className="h-full w-full object-cover"
+                              onLoadedMetadata={(e) => {
+                                e.currentTarget.currentTime = trim?.start ?? 0;
+                              }}
+                              onTimeUpdate={(e) => {
+                                if (trim && e.currentTarget.currentTime >= trim.end - 0.05) {
+                                  e.currentTarget.pause();
+                                  setPreviewItemId(null);
+                                }
+                              }}
+                              onEnded={() => setPreviewItemId(null)}
+                            />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element -- a runtime data: URL thumbnail, not a static/remote asset next/image is built for
+                            thumb && <img src={thumb} alt="" className="h-full w-full object-cover" />
+                          )}
                           {/* Reorder grip - a distinct top strip, separate
                               from the left/right trim handles on the sides,
                               so the two gestures never conflict. */}
@@ -898,6 +1112,37 @@ function StitchPageInner() {
                             onPointerDown={(e) => handleReorderPointerDown(e, itemIndex)}
                             className="absolute inset-x-2.5 top-0 h-3 cursor-grab touch-none rounded-b bg-black/0 transition hover:bg-white/20 active:cursor-grabbing"
                           />
+                          {/* Play + delete, centered so they never overlap
+                              the left/right trim handles (2026-09-16, per
+                              direct request - play each clip, and "give the
+                              option to delete video or audio files as you
+                              go too if they upload the wrong file"). */}
+                          <div className="absolute inset-x-0 top-3.5 z-10 flex items-center justify-center gap-1 opacity-0 transition group-hover:opacity-100">
+                            <button
+                              type="button"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPreviewItemId((cur) => (cur === item.id ? null : item.id));
+                              }}
+                              title={previewItemId === item.id ? "Stop preview" : "Preview this clip"}
+                              className="flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white"
+                            >
+                              {previewItemId === item.id ? "■" : "▶"}
+                            </button>
+                            <button
+                              type="button"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeItem(itemIndex);
+                              }}
+                              title="Delete this clip"
+                              className="flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white"
+                            >
+                              ×
+                            </button>
+                          </div>
                           <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[9px] text-white">{item.file.name}</span>
                           {trim && fullDuration != null && (
                             <>
@@ -956,8 +1201,24 @@ function StitchPageInner() {
                           className="absolute inset-0 cursor-grab active:cursor-grabbing"
                         />
                         <div className="pointer-events-none h-full">
-                          {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.label || track.file.name}</span>}
+                          {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.file.name}</span>}
                         </div>
+                        {/* Delete, directly on the block (2026-09-16, per
+                            direct request - "give the option to delete...
+                            if they upload the wrong file"), on top of the
+                            body-drag layer so its own click always wins. */}
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeAudioTrack(track.id);
+                          }}
+                          title="Delete this audio track"
+                          className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white opacity-0 transition group-hover:opacity-100"
+                        >
+                          ×
+                        </button>
                         {/* Edge handles resize (change duration), keeping the
                             OTHER edge fixed - stopPropagation so a resize drag
                             never also triggers the body's reposition drag. */}
@@ -997,130 +1258,69 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above. Drag a block&apos;s edges to trim/resize, or drag the middle of an audio block to move it - the exact-numbers controls below always show the same values live.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim/mask, its grip strip (video) to reorder, or the middle of an audio block to move it. Hover a block for play/delete. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely.
+            {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
 
+        {/* Hidden audio elements powering the preview below - one per
+            track, kept in sync via syncAudioTracksTo. Not visible; the
+            waveform block above and the stage <video> below are what the
+            user actually looks at. */}
+        {audioTracks.map((track) => (
+          <audio
+            key={track.id}
+            ref={(el) => {
+              audioElRefs.current[track.id] = el;
+            }}
+            src={track.previewUrl}
+            preload="auto"
+            className="hidden"
+          />
+        ))}
+
+        {/* The free "as you go" preview (2026-09-16, per direct request -
+            "give the ability to play the full audio and video as we go as
+            it is edited... make sure this doesn't cost anything in server
+            etc. and is fast"). Genuinely free and instant: just the
+            visitor's own already-downloaded files played through native
+            <video>/<audio> elements with real seeks - no ffmpeg, no
+            encoding, nothing leaves the browser. */}
         {items.length > 0 && (
           <div className="space-y-2 rounded-2xl border border-border bg-white p-4">
-            <p className="text-xs font-semibold text-muted">Order (top to bottom):</p>
-            {items.map((item, i) => {
-              const duration = itemDurations[item.id];
-              const trim = itemTrims[item.id];
-              const trimmed = trim && duration != null && (trim.start > 0 || trim.end < duration);
-              return (
-                <div key={item.id} className="space-y-1.5 rounded-xl border border-border p-2">
-                  <div className="flex items-center gap-2">
-                    <video src={item.previewUrl} className="h-12 w-20 rounded-lg object-cover" muted />
-                    <span className="flex-1 truncate text-xs">{item.file.name}</span>
-                    <button onClick={() => moveItem(i, -1)} disabled={i === 0} className="rounded-full border border-border px-2 py-1 text-xs disabled:opacity-30">
-                      ↑
-                    </button>
-                    <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1} className="rounded-full border border-border px-2 py-1 text-xs disabled:opacity-30">
-                      ↓
-                    </button>
-                    <button onClick={() => removeItem(i)} className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark">
-                      Remove
-                    </button>
-                  </div>
-                  {trim && duration != null && (
-                    <div className="flex flex-wrap items-center gap-2 pl-1 text-xs text-muted">
-                      <span>Use from</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={Math.max(0, trim.end - 0.1)}
-                        step={1}
-                        value={Math.round(trim.start)}
-                        onChange={(e) => updateItemTrim(item.id, { start: Math.max(0, Math.min(Number(e.target.value) || 0, trim.end - 0.1)) })}
-                        className="w-14 rounded-lg border border-border px-2 py-1 text-center"
-                      />
-                      <span className="italic">({formatTime(trim.start)})</span>
-                      <span>to</span>
-                      <input
-                        type="number"
-                        min={trim.start + 0.1}
-                        max={Math.round(duration)}
-                        step={1}
-                        value={Math.round(trim.end)}
-                        onChange={(e) => updateItemTrim(item.id, { end: Math.max(trim.start + 0.1, Math.min(Number(e.target.value) || 0, duration)) })}
-                        className="w-14 rounded-lg border border-border px-2 py-1 text-center"
-                      />
-                      <span className="italic">({formatTime(trim.end)})</span>
-                      <span>of {formatTime(duration)} - the rest of the clip is hidden, not deleted.</span>
-                    </div>
-                  )}
-                  {trimmed && (
-                    <p className="pl-1 text-[11px] italic text-muted">Only {formatTime(trim!.end - trim!.start)} of this clip will be used.</p>
-                  )}
-                </div>
-              );
-            })}
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted">Preview (before exporting)</p>
+              <span className="text-xs text-muted">
+                {formatTime(previewTime)} / {formatTime(totalVideoDuration)}
+              </span>
+            </div>
+            <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} playsInline className="w-full rounded-xl border border-border bg-black" />
+            <div className="flex items-center gap-2">
+              <button onClick={handlePreviewPlayToggle} className="shrink-0 rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
+                {previewPlaying ? "❚❚ Pause" : "▶ Preview"}
+              </button>
+              <div onClick={handleScrubberClick} className="relative h-2 flex-1 cursor-pointer rounded-full bg-border">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-purple"
+                  style={{ width: `${totalVideoDuration > 0 ? Math.min(100, (previewTime / totalVideoDuration) * 100) : 0}%` }}
+                />
+              </div>
+            </div>
+            <p className="text-[11px] italic text-muted">
+              An approximate preview of your edit as it stands - clips in order with trims applied, your audio track(s) layered in at the position you set. Runs entirely on your device, nothing is uploaded or encoded yet, so it may not be perfectly frame-accurate - export below for the real file.
+            </p>
           </div>
         )}
 
-        <div className="space-y-3 rounded-2xl border border-border bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Audio tracks (optional)</p>
-          <p className="text-xs text-muted">
-            We never pick or generate music for you - add your own track(s) if you have the rights to use them.
-            Add more than one if you want, say, music under the whole thing and a separate sound effect that only
-            plays for a few seconds partway through.
-            {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
-          </p>
-
-          {audioTracks.map((track) => {
-            const overshoots = track.endSec > totalVideoDuration && totalVideoDuration > 0;
-            const loops = track.endSec - track.startSec > track.sourceDuration;
-            return (
-              <div key={track.id} className="space-y-2 rounded-xl border border-border p-3">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder={`Label (e.g. "Music" or "SFX")`}
-                    value={track.label}
-                    onChange={(e) => updateAudioTrack(track.id, { label: e.target.value })}
-                    className="w-40 rounded-lg border border-border px-2 py-1 text-xs"
-                  />
-                  <span className="flex-1 truncate text-xs text-muted">{track.file.name}</span>
-                  <button onClick={() => removeAudioTrack(track.id)} className="rounded-full border border-border px-2 py-1 text-xs text-coral-dark">
-                    Remove
-                  </button>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                  <span>Plays from</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={Math.round(track.startSec)}
-                    onChange={(e) => updateAudioTrack(track.id, { startSec: Math.max(0, Number(e.target.value) || 0) })}
-                    className="w-16 rounded-lg border border-border px-2 py-1 text-center"
-                  />
-                  <span className="italic">({formatTime(track.startSec)})</span>
-                  <span>to</span>
-                  <input
-                    type="number"
-                    min={track.startSec}
-                    step={1}
-                    value={Math.round(track.endSec)}
-                    onChange={(e) => updateAudioTrack(track.id, { endSec: Math.max(track.startSec, Number(e.target.value) || 0) })}
-                    className="w-16 rounded-lg border border-border px-2 py-1 text-center"
-                  />
-                  <span className="italic">({formatTime(track.endSec)})</span>
-                  <span>seconds into your final video.</span>
-                </div>
-                <p className="text-[11px] italic text-muted">
-                  {loops
-                    ? `Your file is ${formatTime(track.sourceDuration)} long, so it'll loop to fill this ${formatTime(track.endSec - track.startSec)} range.`
-                    : `Plays the first ${formatTime(track.endSec - track.startSec)} of your ${formatTime(track.sourceDuration)} file.`}
-                  {overshoots && " Note: this runs past the end of your video as currently ordered - the extra part just won't be heard."}
-                </p>
-              </div>
-            );
-          })}
-
-          {audioTrackError && <p className="text-xs text-coral-dark">{audioTrackError}</p>}
-        </div>
+        {/* Per direct feedback (2026-09-16): reordering and masking/trimming
+            now live entirely as drag interactions directly on the timeline
+            above (grip strip = reorder, edge handles = trim/resize for
+            both video and audio, body drag = reposition an audio track),
+            and adding/removing clips or tracks is done right there too (the
+            "+" tile, "+ Add another audio track", and each block's own ×).
+            The separate numeric "Order" list and "Audio tracks" list this
+            used to need are gone - the timeline is now the one editor. */}
+        {audioTrackError && <p className="text-xs text-coral-dark">{audioTrackError}</p>}
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
 
