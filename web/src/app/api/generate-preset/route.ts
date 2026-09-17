@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSubscriberByToken, checkQuota, reserveCharacterUsage, checkFreeQuota, recordFreeUsage, createPendingGeneration, initSchema } from "@/lib/db";
-import { isPodMode, generateViaPod, submitGenerationJob } from "@/lib/inferenceBackend";
+import { getInferenceBackend, generateViaPod, generateViaCascade, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 import { PLANS } from "@/lib/plans";
+
+// Cascade mode's Mac attempt (health check + a real generation) can run up
+// close to a minute before falling back to Modal - Vercel Hobby's default
+// (10s) would kill that long before Modal even got a chance. Harmless for
+// every other backend, which all return well under this anyway.
+export const maxDuration = 60;
 
 // Checks the caller's plan/usage first, then generates via whichever
 // backend INFERENCE_BACKEND selects - the browser never talks to RunPod or
@@ -71,29 +77,46 @@ export async function POST(req: NextRequest) {
     const speed = form.get("speed");
     const sessionUser = await getSessionUser();
 
-    let result: { status: "COMPLETED"; audioBase64: string; voiceId: string } | { jobId: string };
-    if (await isPodMode()) {
+    const backend = await getInferenceBackend();
+    const jobInput = {
+      action: "generate-preset",
+      text,
+      voice_id: voiceId,
+      ...(exaggeration ? { exaggeration: Number(exaggeration) } : {}),
+      ...(speed ? { speed: Number(speed) } : {}),
+    };
+
+    // Normalizes all four backends into one shape before any post-processing
+    // runs, rather than repeating saveGenerationAudio/createPendingGeneration
+    // once per backend (2026-09-17, added for Cascade mode - see
+    // @/lib/inferenceBackend's generateViaCascade for what it tries, in order).
+    let generationResult: { mode: "sync"; audioBase64: string } | { mode: "async"; jobId: string };
+    if (backend === "pod" || backend === "cascade") {
       const upstreamForm = new FormData();
       upstreamForm.append("text", text);
       upstreamForm.append("voice_id", voiceId);
       if (exaggeration) upstreamForm.append("exaggeration", String(exaggeration));
       if (speed) upstreamForm.append("speed", String(speed));
-      const { audioBase64 } = await generateViaPod("/api/generate-preset", upstreamForm);
+      generationResult =
+        backend === "pod"
+          ? { mode: "sync", ...(await generateViaPod("/api/generate-preset", upstreamForm)) }
+          : await generateViaCascade("/api/generate-preset", upstreamForm, jobInput);
+    } else {
+      generationResult = { mode: "async", ...(await submitGenerationJob(jobInput)) };
+    }
+
+    let result: { status: "COMPLETED"; audioBase64: string; voiceId: string } | { jobId: string };
+    if (generationResult.mode === "sync") {
+      const { audioBase64 } = generationResult;
       result = { status: "COMPLETED", audioBase64, voiceId };
       if (sessionUser) {
         await saveGenerationAudio({ userId: sessionUser.id, kind: "preset", voiceLabel: voiceId, text, audioBase64 });
       }
     } else {
-      const { jobId } = await submitGenerationJob({
-        action: "generate-preset",
-        text,
-        voice_id: voiceId,
-        ...(exaggeration ? { exaggeration: Number(exaggeration) } : {}),
-        ...(speed ? { speed: Number(speed) } : {}),
-      });
+      const { jobId } = generationResult;
       result = { jobId };
       if (sessionUser) {
-        // Best-effort like saveGenerationAudio below - a DB hiccup here
+        // Best-effort like saveGenerationAudio above - a DB hiccup here
         // should cost the user their history entry, not their generation.
         await createPendingGeneration({ jobId, userId: sessionUser.id, kind: "preset", voiceLabel: voiceId, text }).catch(
           (err) => console.error("[generate-preset] failed to record pending generation", err),
