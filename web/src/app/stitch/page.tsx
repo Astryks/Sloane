@@ -129,6 +129,16 @@ const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpe
 const MAX_TEXT_OVERLAYS = 8; // MANUALLY added titles/captions - a generous cap for a few titles/watermarks, kept small deliberately since each is its own row in the editable list below
 const MAX_CAPTION_OVERLAYS_TOTAL = 150; // auto-CAPTIONS (2026-09-17) reuse the same TextOverlay model but realistically produce many short segments (one per spoken phrase) - a separate, much higher cap so a real multi-minute video isn't truncated to a handful of captions, while still bounding the ffmpeg drawtext filter graph for an extreme edge case
 const MAX_IMAGE_OVERLAYS = 4; // each is a real extra ffmpeg input held in browser memory, same reasoning as audio tracks
+// A soft (dismissible, non-blocking) warning threshold, not a hard cap - per
+// direct discussion (2026-09-17, "why have the cap at all"): this tool costs
+// nothing server-side regardless of file size, and a fixed byte limit would
+// be somewhat arbitrary anyway (a real ceiling only exists per-device, based
+// on how much memory that visitor's own browser/machine can give ffmpeg.wasm
+// before it crashes, not a number this app can know in advance). The actual
+// problem worth solving is the silent-crash surprise, not the size itself -
+// so this just turns that into an informed choice rather than blocking
+// anyone whose device could actually handle a large project fine.
+const LARGE_PROJECT_WARNING_BYTES = 1024 * 1024 * 1024; // 1GB total across all added clips
 // Shared time scale for the visual timeline below - both the video track
 // (a plain flex row, its blocks' widths summing to the real total) and
 // every audio lane (each block absolutely positioned by real start/end
@@ -206,6 +216,12 @@ function formatTime(totalSeconds: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+function formatBytes(bytes: number): string {
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)}GB`;
+  return `${Math.round(bytes / (1024 * 1024))}MB`;
 }
 
 // Real bug found and fixed 2026-09-14 ("combined video file doesn't
@@ -530,6 +546,12 @@ function StitchPageInner() {
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [imageOverlays, setImageOverlays] = useState<ImageOverlay[]>([]);
   const [overlayError, setOverlayError] = useState("");
+  // Soft large-project warning (2026-09-17, see LARGE_PROJECT_WARNING_BYTES'
+  // own comment for why this is a dismissible warning, not a hard cap).
+  // Dismissing clears it for the rest of this session, even if more clips
+  // push the total higher still - a nag the user already dismissed once
+  // shouldn't keep reappearing every time they add one more file.
+  const [sizeWarningDismissed, setSizeWarningDismissed] = useState(false);
   // Auto-captions (2026-09-17, per direct request - "auto captions would be
   // good too"). `captionsBusy` covers both the one-time Whisper model
   // download and the actual per-clip transcription so the button can't be
@@ -832,6 +854,12 @@ function StitchPageInner() {
   // "your video is currently ~1:47 long" line in the audio-tracks section
   // below. A plain derived value, not its own effect/state.
   const totalVideoDuration = videoTimelineEntries.length > 0 ? videoTimelineEntries[videoTimelineEntries.length - 1].timelineEnd : 0;
+
+  // Sum of every added clip's own real file size - just the video clips
+  // (by far the dominant contributor; audio tracks/images are typically
+  // much smaller) - drives the soft large-project warning below.
+  const totalFileBytes = items.reduce((sum, item) => sum + item.file.size, 0);
+  const showSizeWarning = totalFileBytes > LARGE_PROJECT_WARNING_BYTES && !sizeWarningDismissed;
 
   // Every real cut point in the final video's timeline (2026-09-16, per
   // direct follow-up) - 0, the boundary between each pair of clips, and
@@ -1908,6 +1936,23 @@ function StitchPageInner() {
                 </div>
               )}
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white/40">Video</p>
+              {showSizeWarning && (
+                <div className="mb-2 flex items-start justify-between gap-2 rounded-xl border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                  <span>
+                    You&apos;ve added {formatBytes(totalFileBytes)} of footage - combining this may be slow, or your browser could run
+                    low on memory since everything processes on your own device. You can still continue; just don&apos;t be surprised if
+                    it takes a while, or if it&apos;s smoother with fewer/shorter clips.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSizeWarningDismissed(true)}
+                    className="shrink-0 text-amber-100/70 hover:text-amber-100"
+                    aria-label="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               {/* Plain div (not a <label>) wraps the whole drop target -
                   the blocks themselves live OUTSIDE any <label>/<input>
                   pairing on purpose: a <label> treats ANY click inside it,
