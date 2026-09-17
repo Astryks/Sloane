@@ -639,12 +639,23 @@ function StitchPageInner() {
   function handleFiles(fileList: FileList | null) {
     if (!fileList) return;
     setError("");
-    const added = Array.from(fileList).map((file) => ({
+    const files = Array.from(fileList);
+    const videoFiles = files.filter((file) => file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi)$/i.test(file.name));
+    const audioFiles = files.filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name));
+    const added = videoFiles.map((file) => ({
       file,
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
       previewUrl: URL.createObjectURL(file),
     }));
-    setItems((prev) => (prev.length + added.length > MAX_FILES ? prev : [...prev, ...added]));
+    setItems((prev) => {
+      if (prev.length + added.length > MAX_FILES) {
+        setError(`You can use up to ${MAX_FILES} video clips.`);
+        return prev;
+      }
+      return [...prev, ...added];
+    });
+    audioFiles.forEach((file) => void addAudioTrack(file));
+    if (videoFiles.length === 0 && audioFiles.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
   }
 
   // Real OS drag-and-drop onto the timeline (2026-09-16, per direct
@@ -1971,6 +1982,11 @@ function StitchPageInner() {
               ))}
             </div>
           </section>
+        )}
+        {items.length === 0 && audioTracks.length === 0 && (
+          <p className="rounded-2xl border border-border bg-white/70 p-4 text-sm text-muted">
+            Drop clips to start. Supported: MP4, WebM, MOV, MP3, WAV, M4A, and AAC. Your media stays on this device; editing and export happen in your browser.
+          </p>
         )}
 
         {/* The visual timeline (2026-09-16) - video track on top, audio
