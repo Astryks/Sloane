@@ -851,6 +851,7 @@ Ran a systematic review across web, mobile, and the inference engine before a pl
 - Expanded manual text overlays to a full 3x3 position grid (TL/TC/TR, ML/MC/MR, BL/BC/BR), with matching browser preview and FFmpeg export coordinates.
 - Added a visible Files tray that retains every imported video and audio source as a local library after placement on the timeline.
 - Added Save locally/Load locally using browser IndexedDB. Saved projects retain the original video/audio/image File blobs plus trims, overlays, aspect preset, and export quality without accounts or server storage.
+- Loading a saved project now revokes the previous project’s preview/result object URLs first, preventing browser-memory leaks when users switch projects repeatedly.
 - Added explicit audio roles (Dialogue/Music/Other). New tracks default sensibly, saved projects migrate older tracks, and ducking now lowers only tracks labelled Music instead of depending on track order.
 - Added page-level drag/drop import with event isolation: files dropped anywhere route automatically by type, while Video/Audio/Image lanes handle their own drops without duplicates.
 - Added a client-side 500 MB per-file safety limit with a clear skipped-file message to protect weak devices from exhausting browser/FFmpeg memory.

@@ -729,6 +729,8 @@ function StitchPageInner() {
         setError("No project has been saved on this device yet.");
         return;
       }
+      revokeAllPreviewUrls(items, audioTracks, imageOverlays, resultUrl);
+      setResultUrl(null);
       setItems(saved.items.map((item) => ({ ...item, previewUrl: URL.createObjectURL(item.file) })));
       setAudioTracks(saved.audioTracks.map((track, index) => ({ ...track, kind: track.kind ?? (index === 0 ? "dialogue" : index === 1 ? "music" : "other"), previewUrl: URL.createObjectURL(track.file) })));
       setImageOverlays(saved.imageOverlays.map((overlay) => ({ ...overlay, previewUrl: URL.createObjectURL(overlay.file) })));
