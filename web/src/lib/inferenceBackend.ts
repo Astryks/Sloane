@@ -116,6 +116,19 @@ export async function generateViaPod(
 //    Hobby-plan 60s function ceiling (see route.ts's `maxDuration = 60`).
 const MAC_HEALTH_TIMEOUT_MS = 5_000;
 const MAC_GENERATE_TIMEOUT_MS = 45_000;
+// Real, if minor, inefficiency found while testing this end-to-end
+// (2026-09-17): with no memory between requests, a genuinely offline Mac
+// makes EVERY request pay the full health-check timeout before falling
+// through, not just the first one to discover it. A short in-memory cooldown
+// after a detected failure fixes that - cleared immediately on any success,
+// so a Mac that comes back online is trusted again right away. Deliberately
+// per-process (a plain module variable, not Postgres) rather than shared
+// across every warm serverless instance/region - avoids adding a DB round-
+// trip to every single generation request just for this one optimization;
+// the worst case is a handful of instances each independently re-probing
+// the Mac once, not everyone paying the tax forever.
+const MAC_COOLDOWN_MS = 2 * 60 * 1000;
+let macCooldownUntil = 0;
 
 async function generateViaMac(
   path: "/api/generate-preset" | "/api/clone-voice",
@@ -170,11 +183,17 @@ export async function generateViaCascade(
   upstreamForm: FormData,
   jobInput: Record<string, unknown>,
 ): Promise<{ mode: "sync"; audioBase64: string } | { mode: "async"; jobId: string }> {
-  try {
-    const { audioBase64 } = await generateViaMac(path, upstreamForm);
-    return { mode: "sync", audioBase64 };
-  } catch (macErr) {
-    console.warn("[cascade] Mac unavailable, falling back to Modal:", macErr instanceof Error ? macErr.message : macErr);
+  if (Date.now() >= macCooldownUntil) {
+    try {
+      const { audioBase64 } = await generateViaMac(path, upstreamForm);
+      macCooldownUntil = 0;
+      return { mode: "sync", audioBase64 };
+    } catch (macErr) {
+      macCooldownUntil = Date.now() + MAC_COOLDOWN_MS;
+      console.warn("[cascade] Mac unavailable, falling back to Modal (cooling down for 2min):", macErr instanceof Error ? macErr.message : macErr);
+    }
+  } else {
+    console.warn("[cascade] Skipping Mac (recent failure, still cooling down), falling back to Modal");
   }
   try {
     const { jobId } = await submitModalJob(jobInput);
