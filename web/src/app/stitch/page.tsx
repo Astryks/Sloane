@@ -236,6 +236,26 @@ function getVideoMeta(file: File): Promise<{ width: number; height: number; dura
   });
 }
 
+// Real fix (follow-up audit, 2026-09-17): `?videos=` (used by /ads to hand
+// off finished storyboard scenes, see the preload effect below) used to
+// fetch ANY url a visitor was given with no host check at all - a crafted
+// link could make a visitor's own browser fetch an arbitrary attacker
+// domain from this page. Every real value this ever carries is one of our
+// own generated scenes' fal.ai result URLs (fal's CDN serves from
+// `<version>.fal.media` subdomains, e.g. `v3b.fal.media` - see
+// characters.ts's own image URLs for the same pattern), so anything else is
+// rejected outright rather than trusted. Parsed with a real URL object, not
+// a substring check, so a hostname like "fal.media.evil.com" or
+// "evil.com/fal.media" can't slip past a naive `.includes("fal.media")`.
+function isAllowedPreloadUrl(url: string): boolean {
+  try {
+    const { hostname, protocol } = new URL(url);
+    return protocol === "https:" && (hostname === "fal.media" || hostname.endsWith(".fal.media"));
+  } catch {
+    return false;
+  }
+}
+
 function getAudioDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
     const audio = document.createElement("audio");
@@ -584,7 +604,12 @@ function StitchPageInner() {
   useEffect(() => {
     const videos = searchParams.get("videos");
     if (!videos || preloadedRef.current) return;
-    const urls = videos.split(",").map((u) => decodeURIComponent(u)).filter(Boolean).slice(0, MAX_FILES);
+    const urls = videos
+      .split(",")
+      .map((u) => decodeURIComponent(u))
+      .filter(Boolean)
+      .filter(isAllowedPreloadUrl)
+      .slice(0, MAX_FILES);
     if (urls.length === 0) return;
     preloadedRef.current = true;
     setPreloading(true);
@@ -1405,11 +1430,23 @@ function StitchPageInner() {
   }
 
   async function handleCombine() {
-    if (items.length < 2) return;
+    // Real fix (follow-up audit, 2026-09-17): a single clip with an
+    // overlay/audio track/caption added still has real reason to export
+    // (fade/speed/overlays/captions all still apply) - was blocked for no
+    // reason beyond an unexamined "at least 2 to combine" assumption. See
+    // the inputNames.length === 1 branch below for the filter-graph half of
+    // this fix.
+    if (items.length < 1) return;
     setError("");
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
     setProgress(0);
+    // Declared here (not inside the try block) so the `finally` cleanup
+    // below can still reach them regardless of where/whether the try block
+    // throws - see the MEMFS-cleanup comment further down for why this
+    // exists at all.
+    let ffmpegForCleanup: FFmpeg | undefined;
+    const writtenFiles: string[] = [];
     try {
       // Target frame size = the first clip's own real dimensions - every
       // other clip gets scaled to fit inside that box and letterboxed
@@ -1475,12 +1512,24 @@ function StitchPageInner() {
 
       const { fetchFile } = await import("@ffmpeg/util");
       const ffmpeg = await getFFmpeg();
+      ffmpegForCleanup = ffmpeg;
       setStatus("processing");
 
+      // Real fix (follow-up audit, 2026-09-17): every ffmpeg.writeFile below
+      // (input clips, audio tracks, image overlays, the font, text overlay
+      // files) used to accumulate forever in ffmpeg.wasm's in-memory
+      // filesystem (MEMFS) across repeat combines in the same session - the
+      // ffmpeg instance itself is a cached singleton (see getFFmpeg above),
+      // so nothing ever freed them. Tracked in the outer `writtenFiles` and
+      // deleted in `finally` below, success or failure, so a real session
+      // of "tweak a caption, re-export, tweak again" (the natural workflow
+      // the auto-captions feature encourages) doesn't grow memory with
+      // every export.
       const inputNames: string[] = [];
       for (let i = 0; i < items.length; i++) {
         const name = `input${i}.mp4`;
         await ffmpeg.writeFile(name, await fetchFile(items[i].file));
+        writtenFiles.push(name);
         inputNames.push(name);
       }
 
@@ -1572,6 +1621,19 @@ function StitchPageInner() {
         videoLabel = nextVideoLabel;
         audioLabel = nextAudioLabel;
       }
+      // Real fix (follow-up audit, 2026-09-17): with exactly one clip, the
+      // fold loop above never runs at all - videoLabel/audioLabel are still
+      // [v0]/[a0], and [outv]/[dialogue] (what every downstream step below,
+      // including the final -map, unconditionally expects) would never be
+      // defined in the filter graph, silently failing ffmpeg.exec. `copy`/
+      // `anull` are real no-op passthrough filters, used here purely to
+      // alias the single clip's own labels onto the names everything else
+      // already expects, rather than teaching every downstream step a
+      // separate "what if there's only one clip" case.
+      if (inputNames.length === 1) {
+        combineChain += `;${videoLabel}copy[outv]`;
+        combineChain += `;${audioLabel}anull[dialogue]`;
+      }
 
       const args = inputNames.flatMap((name) => ["-i", name]);
       let filterComplex = `${scaleChains};${audioChains}${combineChain}`;
@@ -1612,6 +1674,7 @@ function StitchPageInner() {
           if (duration <= 0) continue; // nothing real to place for this track
           const name = `audiotrack${i}.raw`;
           await ffmpeg.writeFile(name, await fetchFile(track.file));
+          writtenFiles.push(name);
           args.push("-stream_loop", "-1", "-i", name);
           const inputIndex = nextInputIndex++;
           const startMs = Math.round(start * 1000);
@@ -1684,6 +1747,7 @@ function StitchPageInner() {
       const hasRealImageOverlay = imageOverlays.some((o) => Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
       const hasRealTextOverlay = textOverlays.some((o) => o.text.trim() && Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
       let finalOutputName = "stage1.mp4";
+      writtenFiles.push("stage1.mp4");
 
       if (hasRealImageOverlay || hasRealTextOverlay) {
         const pass2Args = ["-i", "stage1.mp4"];
@@ -1700,6 +1764,7 @@ function StitchPageInner() {
             const ext = imageExtensionFor(overlay.file);
             const name = `imageoverlay${i}.${ext}`;
             await ffmpeg.writeFile(name, await fetchFile(overlay.file));
+            writtenFiles.push(name);
             pass2Args.push("-i", name);
             const inputIndex = pass2NextInputIndex++;
             // Scaled relative to the COMBINED video's own real width so it
@@ -1726,6 +1791,7 @@ function StitchPageInner() {
           // hosted here at /fonts/Geist-Regular.ttf rather than assuming
           // any system font.
           await ffmpeg.writeFile("geistfont.ttf", await fetchFile("/fonts/Geist-Regular.ttf"));
+          writtenFiles.push("geistfont.ttf");
           for (let i = 0; i < textOverlays.length; i++) {
             const overlay = textOverlays[i];
             const start = Math.max(0, Math.min(overlay.startSec, totalDuration));
@@ -1737,6 +1803,7 @@ function StitchPageInner() {
             // escaping - a real, easy-to-get-wrong class of bug otherwise.
             const textFileName = `textoverlay${i}.txt`;
             await ffmpeg.writeFile(textFileName, new TextEncoder().encode(overlay.text));
+            writtenFiles.push(textFileName);
             const fontColor = /^#[0-9a-fA-F]{6}$/.test(overlay.color) ? `0x${overlay.color.slice(1)}` : "0xffffff";
             const y = textOverlayYExpr(overlay.position);
             const nextLabel = `[textout${i}]`;
@@ -1749,6 +1816,7 @@ function StitchPageInner() {
           pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", "0:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "final.mp4");
           await ffmpeg.exec(pass2Args);
           finalOutputName = "final.mp4";
+          writtenFiles.push("final.mp4");
         }
       }
 
@@ -1774,6 +1842,16 @@ function StitchPageInner() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not combine these videos - try fewer or shorter clips.");
       setStatus("error");
+    } finally {
+      // Best-effort MEMFS cleanup (see the comment above writtenFiles) -
+      // runs whether this combine succeeded or failed, and per-file so one
+      // file that was never actually written (an early throw, before every
+      // writeFile call ran) doesn't stop the rest from being freed.
+      if (ffmpegForCleanup) {
+        for (const name of writtenFiles) {
+          await ffmpegForCleanup.deleteFile(name).catch(() => {});
+        }
+      }
     }
   }
 
@@ -2540,7 +2618,7 @@ function StitchPageInner() {
 
         <button
           onClick={handleCombine}
-          disabled={items.length < 2 || status === "loading-ffmpeg" || status === "processing"}
+          disabled={items.length < 1 || status === "loading-ffmpeg" || status === "processing"}
           className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50"
         >
           {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Combining… ${progress}%` : "Download my video"}
