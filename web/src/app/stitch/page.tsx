@@ -86,6 +86,44 @@ type ImageOverlay = {
   scalePercent: number;
 };
 
+// Speed ramping and clip-to-clip transitions (2026-09-17, per direct
+// request after reviewing what CapCut users say they love most - see
+// STATUS.md). `speed` changes a clip's own playback rate (0.5x-2x, the
+// safe single-instance range for ffmpeg's `atempo` audio filter, avoiding
+// needing to chain several); `transitionType`/`transitionDuration` describe
+// the transition INTO this clip FROM the previous one (so the first clip's
+// values are simply unused - there's nothing before it to transition from).
+type TransitionType = "none" | "fade" | "dissolve" | "wipeleft" | "wiperight" | "slideleft" | "slideright";
+const TRANSITION_TYPES: TransitionType[] = ["none", "fade", "dissolve", "wipeleft", "wiperight", "slideleft", "slideright"];
+const TRANSITION_LABELS: Record<TransitionType, string> = {
+  none: "✂",
+  fade: "Fade",
+  dissolve: "Dissolve",
+  wipeleft: "Wipe◀",
+  wiperight: "Wipe▶",
+  slideleft: "Slide◀",
+  slideright: "Slide▶",
+};
+const TRANSITION_DURATION_SECONDS = 0.5; // fixed rather than user-adjustable for v1 - one less dial, still a real feature
+const SPEED_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+type ItemTrim = {
+  start: number;
+  end: number;
+  fadeIn: number;
+  fadeOut: number;
+  speed: number;
+  transitionType: TransitionType;
+};
+
+// A clip's own real (post-speed) duration on the shared timeline - every
+// place that positions something against the timeline (block width, audio-
+// track snap points, totalVideoDuration) needs THIS, not the raw
+// (end-start) source length, once speed can differ from 1x.
+function effectiveClipDuration(trim: Pick<ItemTrim, "start" | "end" | "speed">): number {
+  return Math.max(0, (trim.end - trim.start) / Math.max(0.1, trim.speed));
+}
+
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
 const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
 const MAX_TEXT_OVERLAYS = 8; // titles/captions are cheap (no ffmpeg input each), a generous cap just to keep the timeline usable
@@ -486,7 +524,7 @@ function StitchPageInner() {
   // these in shortly after, same real-world lag the existing preview
   // thumbnail already has.
   const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
-  const [itemTrims, setItemTrims] = useState<Record<string, { start: number; end: number; fadeIn: number; fadeOut: number }>>({});
+  const [itemTrims, setItemTrims] = useState<Record<string, ItemTrim>>({});
   const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
   const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
   // Live floating readout shown next to the cursor while dragging any
@@ -668,9 +706,9 @@ function StitchPageInner() {
         });
         setItemDurations(durations);
         setItemTrims((prev) => {
-          const next: Record<string, { start: number; end: number; fadeIn: number; fadeOut: number }> = {};
+          const next: Record<string, ItemTrim> = {};
           items.forEach((item, i) => {
-            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0 };
+            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none" };
           });
           return next;
         });
@@ -708,16 +746,55 @@ function StitchPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 
-  // Live estimate of the combined video's real total length, honoring
-  // every clip's own trim range - drives the "your video is currently
-  // ~1:47 long" line in the audio-tracks section below. A plain derived
-  // value, not its own effect/state: it only ever depends on values
-  // already in hand, so there's nothing to keep in sync by hand.
-  const totalVideoDuration = items.reduce((sum, item) => {
-    const trim = itemTrims[item.id];
-    if (trim) return sum + Math.max(0, trim.end - trim.start);
-    return sum + (itemDurations[item.id] ?? 0);
-  }, 0);
+  // Same per-clip trims, but as {timelineStart, timelineEnd, trimStart,
+  // trimEnd, speed, transitionType, transitionDuration} entries - the
+  // single source of truth both the "as you go" preview player and
+  // totalVideoDuration/clipBoundaries below derive from. `timelineEnd -
+  // timelineStart` is the clip's real (POST-speed) length; a real
+  // transition INTO a clip (2026-09-17, per direct request after reviewing
+  // what CapCut users say they love) pulls that clip's timelineStart
+  // backward by the transition's own (clamped) duration, so it visually/
+  // temporally overlaps the tail of the previous clip - exactly matching
+  // what ffmpeg's `xfade`/`acrossfade` actually produce in the real export
+  // (see handleCombine), not just a cosmetic overlap.
+  type TimelineVideoEntry = {
+    item: VideoItem;
+    timelineStart: number;
+    timelineEnd: number;
+    trimStart: number;
+    trimEnd: number;
+    speed: number;
+    transitionType: TransitionType;
+    transitionDuration: number;
+  };
+  const videoTimelineEntries: TimelineVideoEntry[] = [];
+  {
+    let cursor = 0;
+    let prevEffectiveDuration = 0;
+    items.forEach((item, i) => {
+      const trim = itemTrims[item.id];
+      const trimStart = trim ? trim.start : 0;
+      const trimEnd = trim ? trim.end : (itemDurations[item.id] ?? 0);
+      const speed = trim?.speed ?? 1;
+      const effectiveDuration = effectiveClipDuration({ start: trimStart, end: trimEnd, speed });
+      const transitionType: TransitionType = i === 0 ? "none" : (trim?.transitionType ?? "none");
+      // Clamped so a transition can never eat more than either adjacent
+      // clip actually has (a transition longer than the shorter of the two
+      // clips it joins is meaningless, and would confuse ffmpeg's xfade).
+      const transitionDuration =
+        transitionType === "none" ? 0 : Math.max(0, Math.min(TRANSITION_DURATION_SECONDS, prevEffectiveDuration - 0.05, effectiveDuration - 0.05));
+      const timelineStart = Math.max(0, cursor - transitionDuration);
+      const timelineEnd = timelineStart + effectiveDuration;
+      videoTimelineEntries.push({ item, timelineStart, timelineEnd, trimStart, trimEnd, speed, transitionType, transitionDuration });
+      cursor = timelineEnd;
+      prevEffectiveDuration = effectiveDuration;
+    });
+  }
+
+  // Live estimate of the combined video's real total length - drives the
+  // "your video is currently ~1:47 long" line in the audio-tracks section
+  // below. A plain derived value, not its own effect/state.
+  const totalVideoDuration = videoTimelineEntries.length > 0 ? videoTimelineEntries[videoTimelineEntries.length - 1].timelineEnd : 0;
 
   // Every real cut point in the final video's timeline (2026-09-16, per
   // direct follow-up) - 0, the boundary between each pair of clips, and
@@ -725,41 +802,29 @@ function StitchPageInner() {
   // position onto a clip boundary when dragged close, the same way real
   // editors snap clips to cuts - see makeAxisDragHandler's `boundaries`
   // param and applyBoundarySnap.
-  const clipBoundaries: number[] = [0];
-  {
-    let cumulative = 0;
-    for (const item of items) {
-      const trim = itemTrims[item.id];
-      const duration = trim ? Math.max(0, trim.end - trim.start) : (itemDurations[item.id] ?? 0);
-      cumulative += duration;
-      clipBoundaries.push(cumulative);
-    }
-  }
+  const clipBoundaries: number[] = [0, ...videoTimelineEntries.map((e) => e.timelineEnd)];
 
-  // Same per-clip trims, but as {timelineStart, timelineEnd, trimStart,
-  // trimEnd} entries - what the "as you go" preview player below actually
-  // walks through to know which clip should be showing at a given moment
-  // on the FINAL timeline, and which part of that clip's own file to play.
-  type TimelineVideoEntry = { item: VideoItem; timelineStart: number; timelineEnd: number; trimStart: number; trimEnd: number };
-  const videoTimelineEntries: TimelineVideoEntry[] = [];
-  {
-    let cursor = 0;
-    for (const item of items) {
-      const trim = itemTrims[item.id];
-      const trimStart = trim ? trim.start : 0;
-      const trimEnd = trim ? trim.end : (itemDurations[item.id] ?? 0);
-      const duration = Math.max(0, trimEnd - trimStart);
-      videoTimelineEntries.push({ item, timelineStart: cursor, timelineEnd: cursor + duration, trimStart, trimEnd });
-      cursor += duration;
-    }
-  }
-
-  function updateItemTrim(id: string, patch: Partial<{ start: number; end: number; fadeIn: number; fadeOut: number }>) {
+  function updateItemTrim(id: string, patch: Partial<ItemTrim>) {
     setItemTrims((prev) => {
       const current = prev[id];
       if (!current) return prev;
       return { ...prev, [id]: { ...current, ...patch } };
     });
+  }
+
+  function cycleItemSpeed(item: VideoItem) {
+    const trim = itemTrims[item.id];
+    if (!trim) return;
+    const idx = SPEED_PRESETS.indexOf(trim.speed);
+    const next = SPEED_PRESETS[(idx === -1 ? SPEED_PRESETS.indexOf(1) : idx + 1) % SPEED_PRESETS.length];
+    updateItemTrim(item.id, { speed: next });
+  }
+
+  function cycleItemTransition(item: VideoItem) {
+    const trim = itemTrims[item.id];
+    if (!trim) return;
+    const next = TRANSITION_TYPES[(TRANSITION_TYPES.indexOf(trim.transitionType) + 1) % TRANSITION_TYPES.length];
+    updateItemTrim(item.id, { transitionType: next });
   }
 
   // Adds a new audio track, defaulted to play once from the start of the
@@ -939,7 +1004,7 @@ function StitchPageInner() {
     const item = items[index];
     const widths = items.map((it) => {
       const trim = itemTrims[it.id];
-      const duration = trim ? Math.max(0.2, trim.end - trim.start) : (itemDurations[it.id] ?? 1);
+      const duration = trim ? Math.max(0.2, effectiveClipDuration(trim)) : (itemDurations[it.id] ?? 1);
       return Math.max(48, duration * PIXELS_PER_SECOND) + 4; // +4px for the row's gap-1
     });
     const centers: number[] = [];
@@ -979,6 +1044,11 @@ function StitchPageInner() {
     if (!v) return;
     const onLoaded = () => {
       v.currentTime = localStart;
+      // Real speed ramping (2026-09-17) simulated live in the preview too,
+      // not just the export - native <video> playbackRate is a genuine,
+      // correct way to do this (unlike fades/transitions, which the quick
+      // preview doesn't attempt to simulate - see the panel's own note).
+      v.playbackRate = entry.speed;
       v.play().catch(() => {});
       v.removeEventListener("loadedmetadata", onLoaded);
     };
@@ -1021,12 +1091,18 @@ function StitchPageInner() {
     if (!previewPlaying) return;
     const entry = videoTimelineEntries.find((e) => clamped < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
     if (!entry) return;
-    const localStart = entry.trimStart + (clamped - entry.timelineStart);
+    // Final-timeline seconds -> this clip's own SOURCE-file seconds: at
+    // speed 2x, one final-timeline second corresponds to two real source
+    // seconds (the source plays twice as fast, so twice as much of it
+    // passes per final second) - see handleStageTimeUpdate's comment for
+    // the reverse direction of this same relationship.
+    const localStart = entry.trimStart + (clamped - entry.timelineStart) * entry.speed;
     if (currentStageItemIdRef.current !== entry.item.id) {
       currentStageItemIdRef.current = entry.item.id;
       loadAndPlayEntry(entry, localStart);
     } else if (stageVideoRef.current) {
       stageVideoRef.current.currentTime = localStart;
+      stageVideoRef.current.playbackRate = entry.speed;
     }
     syncAudioTracksTo(clamped, true);
   }
@@ -1056,12 +1132,13 @@ function StitchPageInner() {
     // Restart from the top once we've reached (or were already at) the end.
     const startAt = previewTime >= totalVideoDuration - 0.05 ? 0 : previewTime;
     const entry = videoTimelineEntries.find((e) => startAt < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
-    const localStart = entry.trimStart + (startAt - entry.timelineStart);
+    const localStart = entry.trimStart + (startAt - entry.timelineStart) * entry.speed;
     if (currentStageItemIdRef.current !== entry.item.id) {
       currentStageItemIdRef.current = entry.item.id;
       loadAndPlayEntry(entry, localStart);
     } else {
       v.currentTime = localStart;
+      v.playbackRate = entry.speed;
       v.play().catch(() => {});
     }
     syncAudioTracksTo(startAt, true);
@@ -1084,7 +1161,13 @@ function StitchPageInner() {
       setPreviewPlaying(false);
       return;
     }
-    const t = entry.timelineStart + (v.currentTime - entry.trimStart);
+    // Source-file seconds -> final-timeline seconds: at speed 2x, the
+    // <video> element's own currentTime (in source-file units, since
+    // playbackRate doesn't change what unit currentTime is measured in)
+    // advances twice as fast per real second as the final timeline does,
+    // so it has to be divided back down here to land on the right
+    // final-timeline position.
+    const t = entry.timelineStart + (v.currentTime - entry.trimStart) / entry.speed;
     setPreviewTime(t);
     syncAudioTracksTo(t, true);
     if (v.currentTime >= entry.trimEnd - 0.05) {
@@ -1212,20 +1295,45 @@ function StitchPageInner() {
         if (!t || t.end - t.start <= 0) return { start: 0, end: dur };
         return { start: Math.max(0, Math.min(t.start, dur)), end: Math.max(0, Math.min(t.end, dur)) };
       });
-      const totalDuration = trims.reduce((sum, t) => sum + (t.end - t.start), 0);
+      // Speed ramping (2026-09-17, per direct request after reviewing what
+      // CapCut users say they love) - clamped to ffmpeg's `atempo` filter's
+      // own safe single-instance range [0.5, 2.0] (SPEED_PRESETS never
+      // leaves that range anyway; this is defensive against any stale/
+      // corrupted state). Every place below that used to mean "this clip's
+      // real length" now means its POST-speed length instead.
+      const speeds = items.map((item) => Math.max(0.5, Math.min(2, itemTrims[item.id]?.speed ?? 1)));
+      const effectiveDurations = trims.map((t, i) => Math.max(0.1, (t.end - t.start) / speeds[i]));
       // Each clip's own fade in/out (2026-09-16, per direct request - "give
       // the ability to fade audio and video clips each"), clamped to at
-      // most half this clip's own trimmed length so a fade-in and fade-out
-      // on a short clip can never overlap/exceed its duration.
+      // most half this clip's own POST-speed length so a fade-in and
+      // fade-out on a short (or heavily sped-up) clip can never overlap/
+      // exceed its duration.
       const fades = items.map((item, i) => {
         const t = itemTrims[item.id];
-        const dur = trims[i].end - trims[i].start;
-        const half = dur / 2;
+        const half = effectiveDurations[i] / 2;
         return {
           fadeIn: Math.max(0, Math.min(t?.fadeIn ?? 0, half)),
           fadeOut: Math.max(0, Math.min(t?.fadeOut ?? 0, half)),
         };
       });
+      // Clip-to-clip transitions (2026-09-17, same request) - the transition
+      // INTO clip i, clamped so it can never eat more than either adjacent
+      // clip actually has left (a transition longer than the shorter clip
+      // it joins is meaningless and would confuse ffmpeg's xfade/
+      // acrossfade). The very first clip has nothing before it to
+      // transition from.
+      const transitions = items.map((item, i) => {
+        if (i === 0) return { type: "none" as TransitionType, duration: 0 };
+        const type = itemTrims[item.id]?.transitionType ?? "none";
+        if (type === "none") return { type, duration: 0 };
+        const duration = Math.max(0, Math.min(TRANSITION_DURATION_SECONDS, effectiveDurations[i - 1] - 0.05, effectiveDurations[i] - 0.05));
+        return { type, duration };
+      });
+      // Real total on the FINAL timeline, after transitions shorten it by
+      // however much each one overlaps two clips - what audio-track
+      // placement and fade math below both need, not the naive sum of
+      // individual clip lengths.
+      const totalDuration = effectiveDurations.reduce((sum, d, i) => sum + d - transitions[i].duration, 0);
 
       const { fetchFile } = await import("@ffmpeg/util");
       const ffmpeg = await getFFmpeg();
@@ -1257,11 +1365,16 @@ function StitchPageInner() {
 
       const scaleChains = inputNames
         .map((_, i) => {
-          const fade = fadeFilterFragment("fade", trims[i].end - trims[i].start, fades[i].fadeIn, fades[i].fadeOut);
-          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=PTS-STARTPTS,${fade}scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
+          const fade = fadeFilterFragment("fade", effectiveDurations[i], fades[i].fadeIn, fades[i].fadeOut);
+          // setpts does double duty here: `PTS-STARTPTS` resets this clip's
+          // own timestamps to start at 0 (as before), `/${speeds[i]}` is
+          // the actual speed change (dividing pts by >1 plays sooner =
+          // faster; by <1 plays later = slower) - the standard ffmpeg
+          // speed-ramp idiom, combined into one expression rather than two
+          // filter stages.
+          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=(PTS-STARTPTS)/${speeds[i]},${fade}scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
         })
         .join(";");
-      const concatVideoInputs = inputNames.map((_, i) => `[v${i}]`).join("");
 
       // Loudness-normalize every real dialogue/audio track to the same
       // target (EBU R128, -16 LUFS - the standard streaming/social-video
@@ -1271,15 +1384,59 @@ function StitchPageInner() {
       // `loudnorm` filter.
       const audioChains = inputNames
         .map((_, i) => {
-          if (!hasAudio[i]) return `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${trims[i].end - trims[i].start}[a${i}]`;
-          const fade = fadeFilterFragment("afade", trims[i].end - trims[i].start, fades[i].fadeIn, fades[i].fadeOut);
-          return `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,${fade}loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`;
+          if (!hasAudio[i]) return `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${effectiveDurations[i]}[a${i}]`;
+          const fade = fadeFilterFragment("afade", effectiveDurations[i], fades[i].fadeIn, fades[i].fadeOut);
+          // `atempo` is the pitch-preserving speed change for audio (safe
+          // in a single instance across ffmpeg's own supported [0.5,2.0]
+          // range, which speeds[i] is already clamped to) - applied right
+          // after the timestamp reset, before fade/loudnorm operate on
+          // what's now this clip's real POST-speed audio.
+          return `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,atempo=${speeds[i]},${fade}loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100[a${i}]`;
         })
         .join(";");
-      const concatAudioInputs = inputNames.map((_, i) => `[a${i}]`).join("");
+
+      // Real transitions (2026-09-17, per direct request after reviewing
+      // what CapCut users say they love) - a fold, not the previous flat
+      // N-way `concat`: each junction between clip i-1 and i is EITHER a
+      // plain hard-cut concat (transitions[i].type === "none", degrades to
+      // exactly the old behavior) OR a real `xfade` (video) + `acrossfade`
+      // (audio) pair, applied pairwise so the two can be mixed freely along
+      // one sequence of clips. Both concat and xfade/acrossfade take
+      // exactly 2 inputs -> 1 output, which is what makes folding work -
+      // the running "combined so far" stream is always input 1, the next
+      // raw clip is always input 2. The LAST iteration's output is
+      // deliberately named [outv]/[dialogue] (matching what a flat concat
+      // used to produce) so nothing downstream (audio-track mixing, the
+      // final -map) needs to know whether a fold or a plain concat ran.
+      let combineChain = "";
+      let videoLabel = "[v0]";
+      let audioLabel = "[a0]";
+      let cumulative = effectiveDurations[0];
+      for (let i = 1; i < inputNames.length; i++) {
+        const isLast = i === inputNames.length - 1;
+        const nextVideoLabel = isLast ? "[outv]" : `[vout${i}]`;
+        const nextAudioLabel = isLast ? "[dialogue]" : `[aout${i}]`;
+        const tr = transitions[i];
+        if (tr.type === "none" || tr.duration <= 0) {
+          combineChain += `;${videoLabel}[v${i}]concat=n=2:v=1:a=0${nextVideoLabel}`;
+          combineChain += `;${audioLabel}[a${i}]concat=n=2:v=0:a=1${nextAudioLabel}`;
+          cumulative += effectiveDurations[i];
+        } else {
+          // `offset` is where in the RUNNING combined stream (input 1's own
+          // timeline) the transition should start - the last `duration`
+          // seconds of it, so it blends into the first `duration` seconds
+          // of the next clip (input 2).
+          const offset = Math.max(0, cumulative - tr.duration);
+          combineChain += `;${videoLabel}[v${i}]xfade=transition=${tr.type}:duration=${tr.duration}:offset=${offset}${nextVideoLabel}`;
+          combineChain += `;${audioLabel}[a${i}]acrossfade=d=${tr.duration}${nextAudioLabel}`;
+          cumulative += effectiveDurations[i] - tr.duration;
+        }
+        videoLabel = nextVideoLabel;
+        audioLabel = nextAudioLabel;
+      }
 
       const args = inputNames.flatMap((name) => ["-i", name]);
-      let filterComplex = `${scaleChains};${audioChains};${concatVideoInputs}concat=n=${inputNames.length}:v=1:a=0[outv];${concatAudioInputs}concat=n=${inputNames.length}:v=0:a=1[dialogue]`;
+      let filterComplex = `${scaleChains};${audioChains}${combineChain}`;
       let finalAudioLabel = "[dialogue]";
       // Tracks the next free ffmpeg input index as audio tracks, then image
       // overlays, get appended after the video clips - shared across both
@@ -1552,7 +1709,7 @@ function StitchPageInner() {
                   <div className="flex gap-1">
                     {items.map((item, itemIndex) => {
                       const trim = itemTrims[item.id];
-                      const duration = trim ? Math.max(0.2, trim.end - trim.start) : (itemDurations[item.id] ?? 1);
+                      const duration = trim ? Math.max(0.2, effectiveClipDuration(trim)) : (itemDurations[item.id] ?? 1);
                       const thumb = itemThumbnails[item.id];
                       const fullDuration = itemDurations[item.id];
                       const isDragging = reorderDrag?.id === item.id;
@@ -1639,7 +1796,35 @@ function StitchPageInner() {
                               hover state at all, so a group-hover reveal
                               would leave these permanently unreachable
                               there). */}
-                          <div className="absolute inset-x-0 top-3.5 z-10 flex items-center justify-center gap-1">
+                          <div className="absolute inset-x-0 top-3.5 z-10 flex items-center justify-center gap-0.5">
+                            {trim && itemIndex > 0 && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  cycleItemTransition(item);
+                                }}
+                                title={`Transition in: ${TRANSITION_LABELS[trim.transitionType]} (click to change)`}
+                                className="flex h-4 items-center justify-center rounded-full bg-black/70 px-1 text-[7px] text-white"
+                              >
+                                {TRANSITION_LABELS[trim.transitionType]}
+                              </button>
+                            )}
+                            {trim && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  cycleItemSpeed(item);
+                                }}
+                                title={`Speed: ${trim.speed}x (click to change)`}
+                                className="flex h-4 items-center justify-center rounded-full bg-black/70 px-1 text-[7px] font-bold text-white"
+                              >
+                                {trim.speed}x
+                              </button>
+                            )}
                             <button
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
@@ -1708,7 +1893,7 @@ function StitchPageInner() {
                                   e.stopPropagation();
                                   makeAxisDragHandler(
                                     () => trim.fadeIn,
-                                    (v) => updateItemTrim(item.id, { fadeIn: Math.max(0, Math.min(v, (trim.end - trim.start) / 2)) }),
+                                    (v) => updateItemTrim(item.id, { fadeIn: Math.max(0, Math.min(v, effectiveClipDuration(trim) / 2)) }),
                                   )(e);
                                 }}
                                 title="Drag to fade in"
@@ -1719,7 +1904,7 @@ function StitchPageInner() {
                                   e.stopPropagation();
                                   makeAxisDragHandler(
                                     () => -trim.fadeOut,
-                                    (v) => updateItemTrim(item.id, { fadeOut: Math.max(0, Math.min(-v, (trim.end - trim.start) / 2)) }),
+                                    (v) => updateItemTrim(item.id, { fadeOut: Math.max(0, Math.min(-v, effectiveClipDuration(trim) / 2)) }),
                                   )(e);
                                 }}
                                 title="Drag to fade out"
@@ -2073,7 +2258,7 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a transition button (fade/dissolve/wipe/slide - blends into that clip from the one before it). Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
@@ -2183,7 +2368,7 @@ function StitchPageInner() {
               </div>
             </div>
             <p className="text-[11px] italic text-muted">
-              An approximate preview of your edit as it stands - clips in order with trims applied, your audio track(s) layered in at the position you set. Runs entirely on your device, nothing is uploaded or encoded yet, so it may not be perfectly frame-accurate - export below for the real file.
+              An approximate preview of your edit as it stands - clips in order with trims and speed applied, your audio track(s) layered in at the position you set. Runs entirely on your device, nothing is uploaded or encoded yet. Fades and transitions aren&apos;t simulated here (this player just plays your raw files) but they are real in the exported file - export below to see them.
             </p>
           </div>
         )}
