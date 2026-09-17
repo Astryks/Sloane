@@ -228,6 +228,43 @@ function formatTime(totalSeconds: number): string {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+type SavedStitchProject = {
+  items: Array<{ id: string; file: File }>;
+  audioTracks: Array<Omit<AudioTrack, "previewUrl">>;
+  imageOverlays: Array<Omit<ImageOverlay, "previewUrl">>;
+  textOverlays: TextOverlay[];
+  itemTrims: Record<string, ItemTrim>;
+  aspectPreset: AspectPreset;
+  exportQuality: ExportQuality;
+};
+
+function openStitchProjectDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("sloane-stitch-project", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("projects");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Could not open local project storage"));
+  });
+}
+
+function saveStitchProject(project: SavedStitchProject): Promise<void> {
+  return openStitchProjectDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction("projects", "readwrite");
+    tx.objectStore("projects").put(project, "latest");
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Could not save project locally")); };
+  }));
+}
+
+function loadStitchProject(): Promise<SavedStitchProject | null> {
+  return openStitchProjectDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction("projects", "readonly");
+    const request = tx.objectStore("projects").get("latest");
+    request.onsuccess = () => { db.close(); resolve((request.result as SavedStitchProject | undefined) ?? null); };
+    request.onerror = () => { db.close(); reject(request.error ?? new Error("Could not load local project")); };
+  }));
+}
+
 // Real bug found and fixed 2026-09-14 ("combined video file doesn't
 // work"): ffmpeg's concat FILTER requires every input to already share
 // the same frame size - it doesn't auto-scale. Scenes generated through
@@ -660,6 +697,45 @@ function StitchPageInner() {
     });
     audioFiles.forEach((file) => void addAudioTrack(file));
     if (videoFiles.length === 0 && audioFiles.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
+  }
+
+  async function saveProjectLocally() {
+    try {
+      await saveStitchProject({
+        items: items.map(({ id, file }) => ({ id, file })),
+        audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume })),
+        imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
+        textOverlays,
+        itemTrims,
+        aspectPreset,
+        exportQuality,
+      });
+      setError("");
+      setSyncMessage("Project saved on this device.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this project locally.");
+    }
+  }
+
+  async function loadProjectLocally() {
+    try {
+      const saved = await loadStitchProject();
+      if (!saved) {
+        setError("No project has been saved on this device yet.");
+        return;
+      }
+      setItems(saved.items.map((item) => ({ ...item, previewUrl: URL.createObjectURL(item.file) })));
+      setAudioTracks(saved.audioTracks.map((track) => ({ ...track, previewUrl: URL.createObjectURL(track.file) })));
+      setImageOverlays(saved.imageOverlays.map((overlay) => ({ ...overlay, previewUrl: URL.createObjectURL(overlay.file) })));
+      setTextOverlays(saved.textOverlays);
+      setItemTrims(saved.itemTrims);
+      setAspectPreset(saved.aspectPreset);
+      setExportQuality(saved.exportQuality);
+      setError("");
+      setSyncMessage("Project loaded from this device.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load this project locally.");
+    }
   }
 
   // Real OS drag-and-drop onto the timeline (2026-09-16, per direct
@@ -1975,7 +2051,10 @@ function StitchPageInner() {
           <section className="rounded-2xl border border-border bg-white p-4">
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold uppercase tracking-wide text-muted">Files</p>
-              <span className="text-xs text-muted">Sources stay available after placement</span>
+              <div className="flex items-center gap-2">
+                <button onClick={saveProjectLocally} className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-muted">Save locally</button>
+                <button onClick={loadProjectLocally} className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-muted">Load locally</button>
+              </div>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {items.map((item) => (

@@ -850,6 +850,7 @@ Ran a systematic review across web, mobile, and the inference engine before a pl
 - Added keyboard preview controls: Space toggles play/pause and Left/Right nudge the playhead by 0.1 seconds; form controls remain excluded from shortcut handling.
 - Expanded manual text overlays to a full 3x3 position grid (TL/TC/TR, ML/MC/MR, BL/BC/BR), with matching browser preview and FFmpeg export coordinates.
 - Added a visible Files tray that retains every imported video and audio source as a local library after placement on the timeline.
+- Added Save locally/Load locally using browser IndexedDB. Saved projects retain the original video/audio/image File blobs plus trims, overlays, aspect preset, and export quality without accounts or server storage.
 - Corrected generic import routing: supported video files append to the Video lane, supported audio files create audio tracks automatically, and unsupported files receive a clear format message. Added a local-only empty-state explanation with supported formats.
 - Re-ran the full production verification after the latest Stitch changes: `tsc --noEmit` passes and `next build --webpack` passes, compiling the app, collecting all API routes, and generating all 65 static pages.
 - Video trim handles now snap to existing clip boundaries and the current playhead, matching the magnetic behavior already used by audio and overlay timeline controls.
