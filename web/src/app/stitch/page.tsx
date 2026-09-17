@@ -550,6 +550,7 @@ function StitchPageInner() {
   const [reorderDrag, setReorderDrag] = useState<{ id: string; offsetPx: number } | null>(null);
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
+  const cancelRequestedRef = useRef(false);
   const preloadedRef = useRef(false);
   // Which timeline video block is currently showing its own small inline
   // playback (2026-09-16, per direct request - "give the ability to play
@@ -1410,6 +1411,7 @@ function StitchPageInner() {
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
     setProgress(0);
+    cancelRequestedRef.current = false;
     try {
       // Target frame size = the first clip's own real dimensions - every
       // other clip gets scaled to fit inside that box and letterboxed
@@ -1768,13 +1770,26 @@ function StitchPageInner() {
       // - not a runtime concern for this non-threaded core build).
       const data = (await ffmpeg.readFile(finalOutputName)) as Uint8Array;
       const bytes = data.slice();
+      if (bytes.byteLength === 0) throw new Error("The export was empty. Please try shorter clips or fewer overlays.");
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "video/mp4" });
       setResultUrl(URL.createObjectURL(blob));
       setStatus("done");
     } catch (err) {
+      if (cancelRequestedRef.current) {
+        setError("Export cancelled.");
+        setStatus("idle");
+        return;
+      }
       setError(err instanceof Error ? err.message : "Could not combine these videos - try fewer or shorter clips.");
       setStatus("error");
     }
+  }
+
+  function cancelCombine() {
+    cancelRequestedRef.current = true;
+    ffmpegRef.current?.terminate();
+    ffmpegRef.current = null;
+    setProgress(0);
   }
 
   return (
@@ -2545,6 +2560,12 @@ function StitchPageInner() {
         >
           {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Combining… ${progress}%` : "Download my video"}
         </button>
+
+        {status === "processing" && (
+          <button onClick={cancelCombine} className="ml-2 rounded-full border border-border px-4 py-3 text-sm font-semibold text-muted">
+            Cancel export
+          </button>
+        )}
 
         {status === "done" && resultUrl && (
           <div className="space-y-3 rounded-2xl border border-border bg-white p-6">
