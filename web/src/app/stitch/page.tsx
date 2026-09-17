@@ -1406,7 +1406,7 @@ function StitchPageInner() {
   }
 
   async function handleCombine() {
-    if (items.length < 2) return;
+    if (items.length < 1) return;
     setError("");
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
@@ -2555,10 +2555,10 @@ function StitchPageInner() {
 
         <button
           onClick={handleCombine}
-          disabled={items.length < 2 || status === "loading-ffmpeg" || status === "processing"}
+          disabled={items.length < 1 || status === "loading-ffmpeg" || status === "processing"}
           className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50"
         >
-          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Combining… ${progress}%` : "Download my video"}
+          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Exporting 1080p… ${progress}%` : "Download 1080p"}
         </button>
 
         {status === "processing" && (
