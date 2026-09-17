@@ -11,7 +11,7 @@ import {
   setSubscriptionVideoJobSilentVideo,
   releaseVideoCredits,
 } from "@/lib/db";
-import { getFalJobStatus, getFalJobResult, uploadBufferToFal, submitFalJob, submitMergeAudioVideo, FFMPEG_MERGE_ENDPOINT } from "@/lib/fal";
+import { getFalJobStatus, getFalJobResult, uploadBufferToFal, submitFalJob, submitMergeAudioVideo, hasRealRequestId, FFMPEG_MERGE_ENDPOINT } from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
 
 const VEO_ENDPOINT = "fal-ai/veo3.1/fast/image-to-video";
@@ -50,7 +50,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Phase 0: waiting on Lucy TTS/clone before Veo can even be submitted.
-  if (job.modal_job_id && !job.fal_request_id) {
+  // Real fix (follow-up audit, 2026-09-17): see hasRealRequestId's own
+  // comment in fal.ts - a bare truthiness check treats the 'CLAIMING'
+  // sentinel as "already submitted".
+  if (job.modal_job_id && !hasRealRequestId(job.fal_request_id)) {
     let modalStatus;
     try {
       modalStatus = await getModalJobStatus(job.modal_job_id.startsWith("modal:") ? job.modal_job_id.slice(6) : job.modal_job_id);
@@ -96,12 +99,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (!job.fal_request_id) {
+  if (!hasRealRequestId(job.fal_request_id)) {
     return NextResponse.json({ status: "IN_PROGRESS" });
   }
 
   // Phase 2: merge already submitted - poll the merge job for the final result.
-  if (job.merge_request_id) {
+  if (hasRealRequestId(job.merge_request_id)) {
     let mergeStatus;
     try {
       mergeStatus = await getFalJobStatus(FFMPEG_MERGE_ENDPOINT, job.merge_request_id);

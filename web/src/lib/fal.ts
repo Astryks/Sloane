@@ -132,6 +132,23 @@ function pollingEndpoint(submitEndpoint: string): string {
 // costing real fal money for nothing while also giving the credit back for
 // free. Now throws on a non-2xx response instead, so callers can retry on
 // the next poll rather than treating "we couldn't check" as "it failed."
+// Real fix (follow-up audit, 2026-09-17): every status route's own
+// "has this job already been submitted to fal?" gate used to be a plain
+// truthiness check (`!job.fal_request_id`, `if (job.merge_request_id)`) -
+// but the atomic claim functions in db.ts write the STRING 'CLAIMING' as a
+// sentinel before the real id is known, and 'CLAIMING' is truthy in
+// JavaScript. That meant: once a claim committed, every later poll treated
+// the job as "already submitted" and skipped straight to polling fal WITH
+// THE LITERAL STRING "CLAIMING" as the request id - a call that always
+// fails, caught into an endless IN_PROGRESS with no way out, since the
+// route never called the claim function again to trigger its own 10-minute
+// staleness reclaim (that SQL only helps if something actually re-invokes
+// it). Every "is this actually submitted yet" check must use this instead
+// of a bare truthiness check.
+export function hasRealRequestId(id: string | null | undefined): id is string {
+  return Boolean(id) && id !== "CLAIMING";
+}
+
 export async function getFalJobStatus(endpoint: string, requestId: string): Promise<FalJobStatus> {
   const res = await fetch(`${FAL_BASE}/${pollingEndpoint(endpoint)}/requests/${requestId}/status`, {
     headers: falHeaders(),

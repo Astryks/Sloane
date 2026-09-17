@@ -40,18 +40,35 @@ export async function POST(req: NextRequest) {
   // retry of the exact same event would see it as "already processed" and
   // never actually retry the failed effect. Unclaim before surfacing the
   // error so a redelivery can genuinely reprocess it.
+  //
+  // Second real fix (same pass): unclaiming unconditionally is itself
+  // unsafe for the video-credit-pack branch below - if addVideoCredits
+  // already committed and a LATER step in the same handler call throws
+  // (e.g. the receipt email), unclaiming would let Stripe's retry run
+  // addVideoCredits a second time for the same event, double-granting
+  // credits. ctx.creditsCommitted is set the instant the grant lands, and
+  // gates whether unclaim is safe to do.
+  const ctx: EventHandlerContext = { creditsCommitted: false };
   try {
-    await handleStripeEvent(event);
+    await handleStripeEvent(event, ctx);
   } catch (err) {
     console.error("Stripe webhook handler failed", event.type, event.id, err);
-    await unclaimStripeEvent(event.id);
+    if (!ctx.creditsCommitted) {
+      await unclaimStripeEvent(event.id);
+    } else {
+      console.error("Video credits already granted for", event.id, "- leaving event claimed to avoid a double grant despite the later failure");
+    }
     return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });
 }
 
-async function handleStripeEvent(event: Stripe.Event) {
+interface EventHandlerContext {
+  creditsCommitted: boolean;
+}
+
+async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -70,6 +87,7 @@ async function handleStripeEvent(event: Stripe.Event) {
         const userId = session.client_reference_id;
         if (pack && userId) {
           await addVideoCredits(userId, pack.credits);
+          ctx.creditsCommitted = true;
           const email = session.customer_details?.email;
           if (email) await sendVideoCreditReceiptEmail(email, pack, session.amount_total ?? pack.priceUsdCents);
         } else {

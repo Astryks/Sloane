@@ -533,6 +533,30 @@ async function pollVideoJob(
 
 type VideoJobType = "paygo" | "character" | "custom" | "cinematic";
 
+// Real fix (follow-up audit, 2026-09-17): access_token used to travel as a
+// query-string param on the download link, leaking into server logs,
+// browser history, and any Referer header - same class of bug already
+// fixed on every status route's polling call. /api/download-video now reads
+// it from an x-access-token header instead, which means a plain <a href>
+// can't carry it anymore - fetch the file ourselves (with the header),
+// then hand the browser a same-origin blob URL to actually save.
+async function downloadVideoFile(jobType: VideoJobType, jobId: string, accessToken: string | null | undefined, variant: "final" | "silent") {
+  const headers: Record<string, string> = accessToken ? { "x-access-token": accessToken } : {};
+  const params = new URLSearchParams({ jobType, jobId });
+  if (variant === "silent") params.set("variant", "silent");
+  const res = await fetch(`/api/download-video?${params.toString()}`, { headers });
+  if (!res.ok) throw new Error("Download failed");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `lucy-labs-${jobType}-${jobId}${variant === "silent" ? "-no-audio" : ""}.mp4`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // Real video + a real download that streams through our own domain (see
 // /api/download-video) instead of sending people to fal's raw CDN URL.
 // Whenever a job went through a two-step pipeline (an engine's raw silent
@@ -556,26 +580,39 @@ function VideoResultPlayer({
   accessToken?: string | null;
   silentVideoUrl?: string | null;
 }) {
-  const tokenQuery = accessToken ? `&access_token=${encodeURIComponent(accessToken)}` : "";
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  async function handleDownload(variant: "final" | "silent") {
+    setDownloadError(null);
+    try {
+      await downloadVideoFile(jobType, jobId, accessToken, variant);
+    } catch {
+      setDownloadError("Download failed - try again in a moment.");
+    }
+  }
+
   return (
     <div>
       <video className="w-full rounded-xl" src={videoUrl} controls autoPlay loop playsInline />
       <div className="mt-3 flex flex-wrap gap-2">
-        <a
-          href={`/api/download-video?jobType=${jobType}&jobId=${encodeURIComponent(jobId)}${tokenQuery}`}
+        <button
+          type="button"
+          onClick={() => handleDownload("final")}
           className="inline-block rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold text-foreground hover:bg-white/70"
         >
           {silentVideoUrl ? "Download with audio" : "Download MP4"}
-        </a>
+        </button>
         {silentVideoUrl && (
-          <a
-            href={`/api/download-video?jobType=${jobType}&jobId=${encodeURIComponent(jobId)}&variant=silent${tokenQuery}`}
+          <button
+            type="button"
+            onClick={() => handleDownload("silent")}
             className="inline-block rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold text-foreground hover:bg-white/70"
           >
             Download original (no audio)
-          </a>
+          </button>
         )}
       </div>
+      {downloadError && <p className="mt-2 text-xs text-red-600">{downloadError}</p>}
       {silentVideoUrl && (
         <p className="mt-2 text-xs text-muted">
           &quot;Download with audio&quot; is our attempt at adding sound. &quot;Download original (no audio)&quot; is the model&apos;s actual footage, exactly as we got it back, before we touched it.

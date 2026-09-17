@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import {
+  claimProductAdJobForLipsyncSubmit,
   completeProductAdJob,
   failProductAdJob,
   getProductAdJob,
@@ -9,7 +10,7 @@ import {
   setProductAdLipsyncRequestId,
   setProductAdSilentVideo,
 } from "@/lib/db";
-import { getFalJobResult, getFalJobStatus, getFalVideoUrl, submitLipsyncJob, uploadBufferToFal, LIPSYNC_ENDPOINT } from "@/lib/fal";
+import { getFalJobResult, getFalJobStatus, getFalVideoUrl, hasRealRequestId, submitLipsyncJob, uploadBufferToFal, LIPSYNC_ENDPOINT } from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
 import { padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 
@@ -97,7 +98,15 @@ export async function GET(req: NextRequest) {
 
   if (!audioUrl || !silentVideoUrl) return NextResponse.json({ status: "IN_PROGRESS", phase: audioUrl ? "Rendering silent video" : "Preparing dialogue" });
 
-  if (!job.lipsync_request_id) {
+  if (!hasRealRequestId(job.lipsync_request_id)) {
+    // Real double-submit race fixed here (follow-up audit, 2026-09-17): a
+    // bare check-then-submit let two overlapping polls both observe
+    // lipsync_request_id still null and both submit a paid Kling lipsync
+    // job for the one credit already spent - claim atomically first, same
+    // as every other merge/lipsync submission in the app.
+    if (!(await claimProductAdJobForLipsyncSubmit(job.id))) {
+      return NextResponse.json({ status: "IN_PROGRESS", phase: "Lip-syncing dialogue" });
+    }
     try {
       const lipsyncRequestId = await submitLipsyncJob(silentVideoUrl, audioUrl);
       await setProductAdLipsyncRequestId(job.id, lipsyncRequestId);

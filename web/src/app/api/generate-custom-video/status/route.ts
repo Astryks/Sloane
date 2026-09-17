@@ -8,7 +8,7 @@ import {
   setSubscriptionVideoJobResolvedAudio,
   releaseVideoCredits,
 } from "@/lib/db";
-import { submitFalJob, getFalJobStatus, getFalJobResult, uploadBufferToFal } from "@/lib/fal";
+import { submitFalJob, getFalJobStatus, getFalJobResult, uploadBufferToFal, hasRealRequestId } from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
 import { padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: "FAILED", error: job.error });
   }
 
-  if (job.modal_job_id && !job.fal_request_id) {
+  if (job.modal_job_id && !hasRealRequestId(job.fal_request_id)) {
     let modalStatus;
     try {
       modalStatus = await getModalJobStatus(job.modal_job_id.startsWith("modal:") ? job.modal_job_id.slice(6) : job.modal_job_id);
@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (!job.fal_request_id) {
+  if (!hasRealRequestId(job.fal_request_id)) {
     return NextResponse.json({ status: "IN_PROGRESS" });
   }
 

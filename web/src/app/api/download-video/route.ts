@@ -65,7 +65,11 @@ async function resolveVideoUrl(jobType: JobType, jobId: string, accessToken: str
 export async function GET(req: NextRequest) {
   const jobType = req.nextUrl.searchParams.get("jobType") as JobType | null;
   const jobId = req.nextUrl.searchParams.get("jobId");
-  const accessToken = req.nextUrl.searchParams.get("access_token");
+  // Real fix (follow-up audit, 2026-09-17): read from a request header, not
+  // the query string - a query-string token leaks into server logs, browser
+  // history, and any Referer header a downstream request sends, same class
+  // of fix already applied to every status route's polling call.
+  const accessToken = req.headers.get("x-access-token");
   const variant = (req.nextUrl.searchParams.get("variant") === "silent" ? "silent" : "final") as Variant;
   if (!jobType || !jobId || !["paygo", "product-ad", "character", "custom", "cinematic"].includes(jobType)) {
     return NextResponse.json({ error: "jobType and jobId are required" }, { status: 400 });

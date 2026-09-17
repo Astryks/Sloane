@@ -504,6 +504,10 @@ export async function initSchema() {
   await sql`ALTER TABLE character_video_jobs ADD COLUMN IF NOT EXISTS fal_claimed_at TIMESTAMPTZ`;
   await sql`ALTER TABLE subscription_video_jobs ADD COLUMN IF NOT EXISTS fal_claimed_at TIMESTAMPTZ`;
   await sql`ALTER TABLE subscription_video_jobs ADD COLUMN IF NOT EXISTS merge_claimed_at TIMESTAMPTZ`;
+  // Same shape, for product-ad's lipsync submission (follow-up audit,
+  // 2026-09-17) - this route never had an atomic claim at all until now,
+  // unlike every other paygo/subscription path's merge/lipsync step.
+  await sql`ALTER TABLE product_ad_jobs ADD COLUMN IF NOT EXISTS lipsync_claimed_at TIMESTAMPTZ`;
 }
 
 // Every claim*ForFalSubmit/claim*ForMergeSubmit function below uses this
@@ -1294,6 +1298,22 @@ export async function setProductAdSilentVideo(jobId: string, videoUrl: string) {
 
 export async function setProductAdLipsyncRequestId(jobId: string, requestId: string) {
   await sql`UPDATE product_ad_jobs SET lipsync_request_id = ${requestId} WHERE id = ${jobId}`;
+}
+
+// Real double-submit race fixed here (follow-up audit, 2026-09-17): this
+// route used to do a bare check-then-submit (`if (!job.lipsync_request_id)`)
+// with no atomic claim at all, unlike every other paygo/subscription path's
+// merge/lipsync step - two overlapping polls could both observe
+// lipsync_request_id still null and both submit a paid Kling lipsync job
+// for the one credit already spent. Same claim/reclaim shape as
+// claimVideoPaygoJobForMergeSubmit above.
+export async function claimProductAdJobForLipsyncSubmit(jobId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE product_ad_jobs SET lipsync_request_id = 'CLAIMING', lipsync_claimed_at = now()
+    WHERE id = ${jobId} AND (lipsync_request_id IS NULL OR (lipsync_request_id = 'CLAIMING' AND lipsync_claimed_at < now() - interval '10 minutes'))
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function completeProductAdJob(jobId: string, finalVideoUrl: string) {

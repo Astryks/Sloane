@@ -19,6 +19,7 @@ import {
   submitMergeAudioVideo,
   submitFalJob,
   uploadBufferToFal,
+  hasRealRequestId,
   LIPSYNC_ENDPOINT,
   FFMPEG_MERGE_ENDPOINT,
 } from "@/lib/fal";
@@ -55,7 +56,11 @@ export async function GET(req: NextRequest) {
   // everything else renders silent (the lipsync phase below runs a real
   // lip-sync pass once THAT finishes). Mirrors
   // generate-cinematic-video/status/route.ts's phase 0.
-  if (job.modal_job_id && !job.fal_request_id) {
+  // Real fix (follow-up audit, 2026-09-17): see hasRealRequestId's own
+  // comment in fal.ts - a bare `!job.fal_request_id` treats the 'CLAIMING'
+  // sentinel as "already submitted" and skips straight to polling fal with
+  // that literal string, which always fails into an endless IN_PROGRESS.
+  if (job.modal_job_id && !hasRealRequestId(job.fal_request_id)) {
     let modalStatus;
     try {
       modalStatus = await getModalJobStatus(job.modal_job_id.startsWith("modal:") ? job.modal_job_id.slice(6) : job.modal_job_id);
@@ -108,7 +113,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (!job.fal_request_id || !job.fal_endpoint) {
+  if (!hasRealRequestId(job.fal_request_id) || !job.fal_endpoint) {
     return NextResponse.json({ status: "IN_PROGRESS" });
   }
 
@@ -118,7 +123,7 @@ export async function GET(req: NextRequest) {
   // final result instead of the original silent generation. The DB column
   // is still named merge_request_id (no schema change needed - same
   // one-extra-fal-job-after-the-video shape either way).
-  if (job.merge_request_id) {
+  if (hasRealRequestId(job.merge_request_id)) {
     // Which fal job is being polled depends on which choice the user made
     // up front (see lip_sync_mode's column comment in db.ts): a real
     // lip-sync attempt polls Kling's lipsync endpoint, a plain voiceover
