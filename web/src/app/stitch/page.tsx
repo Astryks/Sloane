@@ -798,7 +798,8 @@ function StitchPageInner() {
       if (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
-        event.shiftKey ? redoEdit() : undoEdit();
+        if (event.shiftKey) redoEdit();
+        else undoEdit();
       }
     }
     window.addEventListener("keydown", onKeyDown);
