@@ -56,6 +56,7 @@ type AudioTrack = {
   startSec: number; // where this track starts playing, in the FINAL video's timeline
   endSec: number; // where it stops - (endSec - startSec) is how long it plays for
   volume: number; // 0..1, applied locally during export and preview
+  kind: "dialogue" | "music" | "other";
   fadeIn: number; // seconds, ramps up from silence at the start of its own play window
   fadeOut: number; // seconds, ramps down to silence at the end of its own play window
 };
@@ -703,7 +704,7 @@ function StitchPageInner() {
     try {
       await saveStitchProject({
         items: items.map(({ id, file }) => ({ id, file })),
-        audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume })),
+        audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
         imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
         textOverlays,
         itemTrims,
@@ -725,7 +726,7 @@ function StitchPageInner() {
         return;
       }
       setItems(saved.items.map((item) => ({ ...item, previewUrl: URL.createObjectURL(item.file) })));
-      setAudioTracks(saved.audioTracks.map((track) => ({ ...track, previewUrl: URL.createObjectURL(track.file) })));
+      setAudioTracks(saved.audioTracks.map((track, index) => ({ ...track, kind: track.kind ?? (index === 0 ? "dialogue" : index === 1 ? "music" : "other"), previewUrl: URL.createObjectURL(track.file) })));
       setImageOverlays(saved.imageOverlays.map((overlay) => ({ ...overlay, previewUrl: URL.createObjectURL(overlay.file) })));
       setTextOverlays(saved.textOverlays);
       setItemTrims(saved.itemTrims);
@@ -1047,7 +1048,8 @@ function StitchPageInner() {
       setAudioTracks((prev) => {
         if (prev.length >= MAX_AUDIO_TRACKS) return prev;
         added = true;
-        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1 }];
+        const kind: AudioTrack["kind"] = prev.length === 0 ? "dialogue" : prev.length === 1 ? "music" : "other";
+        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1, kind }];
       });
       if (added) {
         // Waveform decode is best-effort and purely visual - a track that
@@ -1062,7 +1064,7 @@ function StitchPageInner() {
     }
   }
 
-  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut" | "volume">>) {
+  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut" | "volume" | "kind">>) {
     setAudioTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
@@ -1435,10 +1437,10 @@ function StitchPageInner() {
   // instant, un-encoded preview, not a frame-accurate guarantee of what the
   // real exported file will sound like.
   function syncAudioTracksTo(t: number, shouldPlay: boolean) {
-    for (const [trackIndex, track] of audioTracks.entries()) {
+    for (const track of audioTracks) {
       const el = audioElRefs.current[track.id];
       if (!el) continue;
-      el.volume = Math.max(0, Math.min(1, (track.volume ?? 1) * (duckMusic && trackIndex > 0 ? 0.35 : 1)));
+      el.volume = Math.max(0, Math.min(1, (track.volume ?? 1) * (duckMusic && track.kind === "music" ? 0.35 : 1)));
       const inWindow = shouldPlay && t >= track.startSec && t < track.endSec;
       if (!inWindow) {
         if (!el.paused) el.pause();
@@ -1867,7 +1869,7 @@ function StitchPageInner() {
           const trackLabel = `[track${i}]`;
           const gain = Math.max(0, Math.min(1, track.volume ?? 1)) * 0.25;
           filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},${fade}volume=${gain},aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS${trackLabel}`;
-          if (duckMusic && i > 0) {
+          if (duckMusic && track.kind === "music") {
             const duckedLabel = `[ducked${i}]`;
             filterComplex += `;${trackLabel}[dialogue]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=300${duckedLabel}`;
             trackLabels.push(duckedLabel);
@@ -2409,6 +2411,9 @@ function StitchPageInner() {
                           {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.file.name}</span>}
                         </div>
                         <input aria-label={`Volume for ${track.file.name}`} type="range" min="0" max="1" step="0.05" value={track.volume ?? 1} onChange={(e) => updateAudioTrack(track.id, { volume: Number(e.target.value) })} onPointerDown={(e) => e.stopPropagation()} className="absolute bottom-0.5 right-5 z-20 h-2 w-16 accent-emerald-300" title="Track volume" />
+                        <select aria-label={`Track type for ${track.file.name}`} value={track.kind} onChange={(e) => updateAudioTrack(track.id, { kind: e.target.value as AudioTrack["kind"] })} onPointerDown={(e) => e.stopPropagation()} className="absolute bottom-0.5 left-5 z-20 h-4 max-w-20 rounded bg-black/60 text-[8px] text-white">
+                          <option value="dialogue">Dialogue</option><option value="music">Music</option><option value="other">Other</option>
+                        </select>
                         {/* Delete, directly on the block (2026-09-16, per
                             direct request - "give the option to delete...
                             if they upload the wrong file"), on top of the
