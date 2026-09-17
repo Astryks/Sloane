@@ -2221,6 +2221,7 @@ function StitchPageInner() {
                                 onPointerDown={makeAxisDragHandler(
                                   () => trim.start,
                                   (v) => updateItemTrim(item.id, { start: Math.max(0, Math.min(v, trim.end - 0.2)) }),
+                                  [...clipBoundaries, previewTime],
                                 )}
                                 className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
                               />
@@ -2228,6 +2229,7 @@ function StitchPageInner() {
                                 onPointerDown={makeAxisDragHandler(
                                   () => trim.end,
                                   (v) => updateItemTrim(item.id, { end: Math.max(trim.start + 0.2, Math.min(v, fullDuration)) }),
+                                  [...clipBoundaries, previewTime],
                                 )}
                                 className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
                               />
