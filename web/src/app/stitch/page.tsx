@@ -70,7 +70,7 @@ type TextOverlay = {
   text: string;
   startSec: number; // where this appears, in the FINAL video's timeline
   endSec: number;
-  position: "top" | "center" | "bottom";
+  position: "top-left" | "top-center" | "top-right" | "middle-left" | "middle-center" | "middle-right" | "bottom-left" | "bottom-center" | "bottom-right";
   size: "small" | "medium" | "large";
   color: string; // hex, e.g. "#ffffff"
 };
@@ -196,13 +196,25 @@ const TEXT_SIZE_FRACTIONS: Record<TextOverlay["size"], number> = { small: 0.045,
 // and bottom-padding stay correct without ffmpeg guessing.
 function textOverlayYExpr(position: TextOverlay["position"], pad = "h*0.06"): string {
   switch (position) {
-    case "top":
+    case "top-left":
+    case "top-center":
+    case "top-right":
       return pad;
-    case "center":
+    case "middle-left":
+    case "middle-center":
+    case "middle-right":
       return "(h-text_h)/2";
-    case "bottom":
+    case "bottom-left":
+    case "bottom-center":
+    case "bottom-right":
       return `h-text_h-${pad}`;
   }
+}
+
+function textOverlayXExpr(position: TextOverlay["position"], pad = "w*0.06"): string {
+  if (position.endsWith("left")) return pad;
+  if (position.endsWith("right")) return `w-text_w-${pad}`;
+  return "(w-text_w)/2";
 }
 
 function formatTime(totalSeconds: number): string {
@@ -1023,7 +1035,7 @@ function StitchPageInner() {
     const id = `text-${Math.random().toString(36).slice(2)}`;
     setTextOverlays((prev) => [
       ...prev,
-      { id, text: "Your text here", startSec: 0, endSec: Math.min(3, totalVideoDuration || 3), position: "bottom", size: "medium", color: "#ffffff" },
+      { id, text: "Your text here", startSec: 0, endSec: Math.min(3, totalVideoDuration || 3), position: "bottom-center", size: "medium", color: "#ffffff" },
     ]);
   }
 
@@ -1035,7 +1047,7 @@ function StitchPageInner() {
     setTextOverlays((prev) => prev.filter((o) => o.id !== id));
   }
 
-  const TEXT_POSITIONS: TextOverlay["position"][] = ["top", "center", "bottom"];
+  const TEXT_POSITIONS: TextOverlay["position"][] = ["top-left", "top-center", "top-right", "middle-left", "middle-center", "middle-right", "bottom-left", "bottom-center", "bottom-right"];
   function cycleTextPosition(overlay: TextOverlay) {
     const next = TEXT_POSITIONS[(TEXT_POSITIONS.indexOf(overlay.position) + 1) % TEXT_POSITIONS.length];
     updateTextOverlay(overlay.id, { position: next });
@@ -1154,7 +1166,7 @@ function StitchPageInner() {
             text,
             startSec: Math.min(finalStart, entry.timelineEnd),
             endSec: Math.min(finalEnd, entry.timelineEnd),
-            position: "bottom",
+            position: "bottom-center",
             size: "small",
             color: "#ffffff",
           });
@@ -1886,7 +1898,7 @@ function StitchPageInner() {
             const fontColor = /^#[0-9a-fA-F]{6}$/.test(overlay.color) ? `0x${overlay.color.slice(1)}` : "0xffffff";
             const y = textOverlayYExpr(overlay.position);
             const nextLabel = `[textout${i}]`;
-            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}${pass2VideoLabel}drawtext=fontfile=geistfont.ttf:textfile=${textFileName}:fontsize=h*${TEXT_SIZE_FRACTIONS[overlay.size]}:fontcolor=${fontColor}:x=(w-text_w)/2:y=${y}:box=1:boxcolor=black@0.45:boxborderw=12:enable='between(t,${start},${end})'${nextLabel}`;
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}${pass2VideoLabel}drawtext=fontfile=geistfont.ttf:textfile=${textFileName}:fontsize=h*${TEXT_SIZE_FRACTIONS[overlay.size]}:fontcolor=${fontColor}:x=${textOverlayXExpr(overlay.position)}:y=${y}:box=1:boxcolor=black@0.45:boxborderw=12:enable='between(t,${start},${end})'${nextLabel}`;
             pass2VideoLabel = nextLabel;
           }
         }
@@ -2438,7 +2450,7 @@ function StitchPageInner() {
                           title={`Position: ${overlay.position} (click to change)`}
                           className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
                         >
-                          {overlay.position === "top" ? "▲" : overlay.position === "center" ? "●" : "▼"}
+                          {overlay.position.includes("left") ? "◀" : overlay.position.includes("right") ? "▶" : overlay.position.startsWith("top") ? "▲" : overlay.position.startsWith("middle") ? "●" : "▼"}
                         </button>
                         <button
                           type="button"
@@ -2695,12 +2707,13 @@ function StitchPageInner() {
               })}
               {textOverlays.map((overlay) => {
                 if (previewTime < overlay.startSec || previewTime >= overlay.endSec || !overlay.text.trim()) return null;
-                const posClass = overlay.position === "top" ? "top-3" : overlay.position === "center" ? "top-1/2 -translate-y-1/2" : "bottom-3";
+                const posClass = overlay.position.startsWith("top") ? "top-3" : overlay.position.startsWith("middle") ? "top-1/2 -translate-y-1/2" : "bottom-3";
+                const xClass = overlay.position.endsWith("left") ? "left-3 text-left" : overlay.position.endsWith("right") ? "right-3 text-right" : "inset-x-2 text-center";
                 const sizeClass = overlay.size === "small" ? "text-sm" : overlay.size === "medium" ? "text-lg" : "text-2xl";
                 return (
                   <div
                     key={overlay.id}
-                    className={`pointer-events-none absolute inset-x-2 ${posClass} truncate rounded bg-black/45 px-3 py-1 text-center font-bold ${sizeClass}`}
+                    className={`pointer-events-none absolute ${xClass} ${posClass} truncate rounded bg-black/45 px-3 py-1 font-bold ${sizeClass}`}
                     style={{ color: overlay.color }}
                   >
                     {overlay.text}

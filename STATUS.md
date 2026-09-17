@@ -848,3 +848,4 @@ Ran a systematic review across web, mobile, and the inference engine before a pl
 - Added `S` to split at the playhead and Delete/Backspace to remove the clip under the playhead; text fields and controls are excluded so normal typing is unaffected. TypeScript passes after this change.
 - Added per-video embedded-audio mute/detach behavior. The source file remains unchanged; export omits that clip's audio stream and the local preview mutes it for that clip.
 - Added keyboard preview controls: Space toggles play/pause and Left/Right nudge the playhead by 0.1 seconds; form controls remain excluded from shortcut handling.
+- Expanded manual text overlays to a full 3x3 position grid (TL/TC/TR, ML/MC/MR, BL/BC/BR), with matching browser preview and FFmpeg export coordinates.
