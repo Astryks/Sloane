@@ -849,4 +849,5 @@ Ran a systematic review across web, mobile, and the inference engine before a pl
 - Added per-video embedded-audio mute/detach behavior. The source file remains unchanged; export omits that clip's audio stream and the local preview mutes it for that clip.
 - Added keyboard preview controls: Space toggles play/pause and Left/Right nudge the playhead by 0.1 seconds; form controls remain excluded from shortcut handling.
 - Expanded manual text overlays to a full 3x3 position grid (TL/TC/TR, ML/MC/MR, BL/BC/BR), with matching browser preview and FFmpeg export coordinates.
+- Added a visible Files tray that retains every imported video and audio source as a local library after placement on the timeline.
 - **Build audit fix:** made Neon and Stripe clients lazy so missing production secrets no longer crash the Next.js build while still producing clear runtime configuration errors for routes that require them. Verified with `tsc --noEmit` and a full `next build --webpack` (65 static pages generated; all API routes collected successfully).

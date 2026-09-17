@@ -1956,6 +1956,23 @@ function StitchPageInner() {
           <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">Loading your scenes from Ads…</p>
         )}
 
+        {(items.length > 0 || audioTracks.length > 0) && (
+          <section className="rounded-2xl border border-border bg-white p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-wide text-muted">Files</p>
+              <span className="text-xs text-muted">Sources stay available after placement</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {items.map((item) => (
+                <span key={`file-video-${item.id}`} className="rounded-full bg-purple/10 px-3 py-1 text-xs text-purple" title="Video source retained locally">Video · {item.file.name}</span>
+              ))}
+              {audioTracks.map((track) => (
+                <span key={`file-audio-${track.id}`} className="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-800" title="Audio source retained locally">Audio · {track.file.name}</span>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* The visual timeline (2026-09-16) - video track on top, audio
             tracks below, both drop zones directly built into their own
             area rather than a separate generic upload box, per direct
