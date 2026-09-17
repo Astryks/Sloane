@@ -62,7 +62,9 @@ export async function GET(req: NextRequest) {
   }
 
   let silentVideoUrl = job.silent_video_url;
-  if (job.fal_request_id && !silentVideoUrl) {
+  // Defensive: never poll fal with the CLAIMING sentinel (lipsync uses it;
+  // keep the same gate on fal_request_id for consistency).
+  if (hasRealRequestId(job.fal_request_id) && !silentVideoUrl) {
     if (!job.fal_endpoint) {
       await fail(job.id, user.id, "Product ad job is missing its provider endpoint");
       return NextResponse.json({ status: "FAILED", error: "Product ad job is missing its provider endpoint" });

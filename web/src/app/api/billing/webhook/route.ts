@@ -100,7 +100,17 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
             ctx.creditsCommitted = true;
           }
           const email = session.customer_details?.email;
-          if (email) await sendVideoCreditReceiptEmail(email, pack, session.amount_total ?? pack.priceUsdCents);
+          // Real fix (follow-up audit, 2026-09-17): isolate receipt email after
+          // durable credit grant. A throw here must NOT rethrow into the outer
+          // handler (which would 500 / confuse retries) once credits are
+          // committed - log and continue so Stripe gets a clean 200.
+          if (email) {
+            try {
+              await sendVideoCreditReceiptEmail(email, pack, session.amount_total ?? pack.priceUsdCents);
+            } catch (err) {
+              console.error("Video credit receipt email failed after grant", event.id, err);
+            }
+          }
         } else {
           console.error("Video credit checkout completed but couldn't resolve pack/user", { priceId, userId });
         }
@@ -128,7 +138,14 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
       // Only on first checkout, not every renewal (invoice.paid fires
       // monthly too) - a "welcome, here's your code" email every renewal
       // would be spammy and confusing.
-      await sendAccessCodeEmail(email, accessToken, plan, session.amount_total ?? PLANS[plan].priceUsdCents);
+      // Real fix (follow-up audit, 2026-09-17): isolate welcome email after
+      // upsertSubscriberForCheckout so a mailer failure cannot unclaim the
+      // Stripe event / force a confusing retry of an already-durable write.
+      try {
+        await sendAccessCodeEmail(email, accessToken, plan, session.amount_total ?? PLANS[plan].priceUsdCents);
+      } catch (err) {
+        console.error("Access code email failed after subscriber upsert", event.id, err);
+      }
       // If checkout was started from a logged-in session, link this
       // subscriber straight to that account so /account shows it immediately
       // without waiting for a lazy email-match on next login.
@@ -180,7 +197,15 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
         await setSubscriberStatus(subscription.customer as string, "past_due");
         const customer = await stripe.customers.retrieve(subscription.customer as string);
         const customerEmail = !customer.deleted ? customer.email : null;
-        if (customerEmail) await sendPaymentFailedEmail(customerEmail);
+        // Real fix (follow-up audit, 2026-09-17): isolate payment-failed email
+        // after the durable status write so mailer errors never fail the webhook.
+        if (customerEmail) {
+          try {
+            await sendPaymentFailedEmail(customerEmail);
+          } catch (err) {
+            console.error("Payment failed email failed after status update", event.id, err);
+          }
+        }
       } else if (subscription.status === "active") {
         await setSubscriberStatus(subscription.customer as string, "active");
       }
