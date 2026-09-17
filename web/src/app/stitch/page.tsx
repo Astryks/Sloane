@@ -686,10 +686,16 @@ function StitchPageInner() {
   // frame-exact sync with the real exported file.
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewMuted, setPreviewMuted] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewTime, setPreviewTime] = useState(0); // position on the FINAL combined timeline, in seconds
   const stageVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const currentStageItemIdRef = useRef<string | null>(null); // which item's file is currently loaded into the stage <video>, so we only reassign .src on an actual clip change
+  // Intent flags so async loadedmetadata play() (which is outside the click
+  // gesture) can still honor mute preferences and recover from autoplay blocks.
+  const previewWantPlayRef = useRef(false);
+  const previewMutedRef = useRef(previewMuted);
+  previewMutedRef.current = previewMuted;
   // Real fade/transition preview simulation (follow-up review, 2026-09-17,
   // direct request "simulate everything"). A second, overlaid <video>
   // plays the INCOMING clip during a transition window while the primary
@@ -1523,29 +1529,84 @@ function StitchPageInner() {
     window.addEventListener("pointerup", onUp);
   }
 
+  // Play a media element even when the call happens after an async load
+  // (loadedmetadata), which is outside the original click gesture. Browsers
+  // often block unmuted autoplay in that case and our old .catch(() => {})
+  // swallowed it — Preview looked "on" but nothing moved.
+  async function safePlayMedia(el: HTMLMediaElement): Promise<boolean> {
+    try {
+      await el.play();
+      return true;
+    } catch {
+      const preferSound = !previewMutedRef.current;
+      if (!el.muted) {
+        el.muted = true;
+        try {
+          await el.play();
+          if (preferSound) {
+            // Try restoring sound after playback has started.
+            el.muted = false;
+            setPreviewMuted(false);
+          } else {
+            setPreviewMuted(true);
+          }
+          if (preferSound && el.muted) {
+            setPreviewError("Browser blocked sound on Preview — tap the speaker icon to unmute.");
+          }
+          return true;
+        } catch {
+          /* fall through */
+        }
+      }
+      setPreviewError("Preview couldn't start playback. Tap ▶ Preview again.");
+      previewWantPlayRef.current = false;
+      setPreviewPlaying(false);
+      return false;
+    }
+  }
+
   // Loads a different clip's file into the stage <video> and plays it from
   // a given local (that clip's own file) position - only called when the
   // preview is actually crossing into a new clip, never for scrubbing
   // within the same one (see the `currentStageItemIdRef` check at each call
   // site), since reassigning `.src` always forces a real reload.
   // `currentTime` can only be set once the browser has metadata for the
-  // new src, hence the one-shot `loadedmetadata` listener.
+  // new src, hence the one-shot `loadedmetadata` listener — and we also
+  // apply immediately when metadata is already cached (blob: reuse).
   function loadAndPlayEntry(entry: TimelineVideoEntry, localStart: number, shouldPlay = true) {
     const v = stageVideoRef.current;
     if (!v) return;
-    const onLoaded = () => {
-      v.currentTime = localStart;
+    const apply = () => {
+      try {
+        v.currentTime = localStart;
+      } catch {
+        /* ignore seek-before-ready races */
+      }
       // Real speed ramping (2026-09-17) simulated live in the preview too,
       // not just the export - native <video> playbackRate is a genuine,
       // correct way to do this.
       v.playbackRate = entry.speed;
-      v.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
-      if (shouldPlay) v.play().catch(() => {});
-      v.removeEventListener("loadedmetadata", onLoaded);
+      v.muted = previewMutedRef.current || Boolean(itemTrims[entry.item.id]?.muteAudio);
+      if (shouldPlay && previewWantPlayRef.current) {
+        void safePlayMedia(v);
+      } else if (!shouldPlay) {
+        v.pause();
+      }
     };
+    const onLoaded = () => {
+      v.removeEventListener("loadedmetadata", onLoaded);
+      apply();
+    };
+    // Same blob URL already loaded — don't force a full reload (that was
+    // losing the user-gesture window and blanking the stage).
+    if (v.src === entry.item.previewUrl && v.readyState >= 1) {
+      apply();
+      return;
+    }
     v.addEventListener("loadedmetadata", onLoaded);
     v.src = entry.item.previewUrl;
     v.load();
+    if (v.readyState >= 1) onLoaded();
   }
 
   // Drives the secondary (transition) <video> during a real transition
@@ -1559,18 +1620,37 @@ function StitchPageInner() {
     const localStart = toEntry.trimStart + (t - toEntry.timelineStart) * toEntry.speed;
     if (currentTransitionItemIdRef.current !== toEntry.item.id) {
       currentTransitionItemIdRef.current = toEntry.item.id;
-      const onLoaded = () => {
-        sv.currentTime = localStart;
+      const apply = () => {
+        try {
+          sv.currentTime = localStart;
+        } catch {
+          /* ignore */
+        }
         sv.playbackRate = toEntry.speed;
-        if (shouldPlay) sv.play().catch(() => {});
-        sv.removeEventListener("loadedmetadata", onLoaded);
+        if (shouldPlay && previewWantPlayRef.current) void safePlayMedia(sv);
+        else sv.pause();
       };
+      const onLoaded = () => {
+        sv.removeEventListener("loadedmetadata", onLoaded);
+        apply();
+      };
+      if (sv.src === toEntry.item.previewUrl && sv.readyState >= 1) {
+        apply();
+        return;
+      }
       sv.addEventListener("loadedmetadata", onLoaded);
       sv.src = toEntry.item.previewUrl;
       sv.load();
+      if (sv.readyState >= 1) onLoaded();
     } else {
-      if (Math.abs(sv.currentTime - localStart) > 0.3) sv.currentTime = localStart;
-      if (shouldPlay && sv.paused) sv.play().catch(() => {});
+      if (Math.abs(sv.currentTime - localStart) > 0.3) {
+        try {
+          sv.currentTime = localStart;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (shouldPlay && previewWantPlayRef.current && sv.paused) void safePlayMedia(sv);
       if (!shouldPlay && !sv.paused) sv.pause();
     }
   }
@@ -1594,16 +1674,23 @@ function StitchPageInner() {
     for (const track of audioTracks) {
       const el = audioElRefs.current[track.id];
       if (!el) continue;
+      el.muted = previewMutedRef.current;
       el.volume = Math.max(0, Math.min(1, (track.volume ?? 1) * (duckMusic && track.kind === "music" ? 0.35 : 1)));
-      const inWindow = shouldPlay && t >= track.startSec && t < track.endSec;
+      const inWindow = shouldPlay && previewWantPlayRef.current && t >= track.startSec && t < track.endSec;
       if (!inWindow) {
         if (!el.paused) el.pause();
         continue;
       }
       const rawLocal = t - track.startSec;
       const local = track.sourceDuration > 0 ? rawLocal % track.sourceDuration : rawLocal;
-      if (Math.abs(el.currentTime - local) > 0.35) el.currentTime = local;
-      if (el.paused) el.play().catch(() => {});
+      if (Math.abs(el.currentTime - local) > 0.35) {
+        try {
+          el.currentTime = local;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (el.paused) void safePlayMedia(el);
     }
   }
 
@@ -1620,7 +1707,7 @@ function StitchPageInner() {
     // render live from `previewTime`, since the CSS blend would move but
     // the video underneath wouldn't. Now always syncs the actual frame;
     // only whether it PLAYS afterward depends on previewPlaying.
-    const entry = videoTimelineEntries.find((e) => clamped < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
+    const entry = videoTimelineEntries.find((e) => clamped >= e.timelineStart && clamped < e.timelineEnd) ?? videoTimelineEntries.find((e) => clamped < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
     if (!entry) return;
     // Final-timeline seconds -> this clip's own SOURCE-file seconds: at
     // speed 2x, one final-timeline second corresponds to two real source
@@ -1630,16 +1717,20 @@ function StitchPageInner() {
     const localStart = entry.trimStart + (clamped - entry.timelineStart) * entry.speed;
     if (currentStageItemIdRef.current !== entry.item.id) {
       currentStageItemIdRef.current = entry.item.id;
-      loadAndPlayEntry(entry, localStart, previewPlaying);
+      loadAndPlayEntry(entry, localStart, previewWantPlayRef.current);
     } else if (stageVideoRef.current) {
-      stageVideoRef.current.currentTime = localStart;
+      try {
+        stageVideoRef.current.currentTime = localStart;
+      } catch {
+        /* ignore */
+      }
       stageVideoRef.current.playbackRate = entry.speed;
-      stageVideoRef.current.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
-      if (!previewPlaying && !stageVideoRef.current.paused) stageVideoRef.current.pause();
+      stageVideoRef.current.muted = previewMutedRef.current || Boolean(itemTrims[entry.item.id]?.muteAudio);
+      if (!previewWantPlayRef.current && !stageVideoRef.current.paused) stageVideoRef.current.pause();
     }
-    syncAudioTracksTo(clamped, previewPlaying);
+    syncAudioTracksTo(clamped, previewWantPlayRef.current);
     const transition = getActiveTransition(clamped);
-    if (transition) syncTransitionVideoTo(transition.to, clamped, previewPlaying);
+    if (transition) syncTransitionVideoTo(transition.to, clamped, previewWantPlayRef.current);
     else clearTransitionVideo();
   }
 
@@ -1657,8 +1748,12 @@ function StitchPageInner() {
   // encoding, nothing sent anywhere.
   function handlePreviewPlayToggle() {
     const v = stageVideoRef.current;
-    if (!v) return;
-    if (previewPlaying) {
+    if (!v) {
+      setPreviewError("Preview player is not ready yet — add a clip and try again.");
+      return;
+    }
+    if (previewPlaying || previewWantPlayRef.current) {
+      previewWantPlayRef.current = false;
       v.pause();
       transitionVideoRef.current?.pause();
       for (const el of Object.values(audioElRefs.current)) el?.pause();
@@ -1666,24 +1761,41 @@ function StitchPageInner() {
       return;
     }
     if (videoTimelineEntries.length === 0) return;
+    setPreviewError(null);
     // Restart from the top once we've reached (or were already at) the end.
     const startAt = previewTime >= totalVideoDuration - 0.05 ? 0 : previewTime;
-    const entry = videoTimelineEntries.find((e) => startAt < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
+    const entry = videoTimelineEntries.find((e) => startAt >= e.timelineStart && startAt < e.timelineEnd) ?? videoTimelineEntries.find((e) => startAt < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
+    if (!entry) return;
     const localStart = entry.trimStart + (startAt - entry.timelineStart) * entry.speed;
-    if (currentStageItemIdRef.current !== entry.item.id) {
+    previewWantPlayRef.current = true;
+    setPreviewTime(startAt);
+    setPreviewPlaying(true);
+
+    // Unlock audio elements inside the user-gesture turn before any await.
+    for (const track of audioTracks) {
+      const el = audioElRefs.current[track.id];
+      if (!el) continue;
+      el.muted = previewMutedRef.current;
+      void el.play().then(() => el.pause()).catch(() => {});
+    }
+
+    if (currentStageItemIdRef.current !== entry.item.id || !v.src || v.src !== entry.item.previewUrl) {
       currentStageItemIdRef.current = entry.item.id;
-      loadAndPlayEntry(entry, localStart);
+      loadAndPlayEntry(entry, localStart, true);
     } else {
-      v.currentTime = localStart;
+      try {
+        v.currentTime = localStart;
+      } catch {
+        /* ignore */
+      }
       v.playbackRate = entry.speed;
-      v.play().catch(() => {});
+      v.muted = previewMutedRef.current || Boolean(itemTrims[entry.item.id]?.muteAudio);
+      void safePlayMedia(v);
     }
     syncAudioTracksTo(startAt, true);
     const transitionOnPlay = getActiveTransition(startAt);
     if (transitionOnPlay) syncTransitionVideoTo(transitionOnPlay.to, startAt, true);
     else clearTransitionVideo();
-    setPreviewTime(startAt);
-    setPreviewPlaying(true);
   }
 
   // Drives the preview forward every real timeupdate tick from the stage
@@ -2323,6 +2435,173 @@ function StitchPageInner() {
           </p>
         )}
 
+        {/* Live preview ABOVE the timeline (2026-09-18): users need to
+            see/hear the edit while scrubbing; keeping it under a long
+            timeline made Preview feel broken. Playback also uses
+            safePlayMedia so async clip loads do not lose the click gesture. */}
+        {/* Hidden audio elements powering the preview below - one per
+            track, kept in sync via syncAudioTracksTo. Not visible; the
+            waveform block above and the stage <video> below are what the
+            user actually looks at. */}
+        {audioTracks.map((track) => (
+          <audio
+            key={track.id}
+            ref={(el) => {
+              audioElRefs.current[track.id] = el;
+            }}
+            src={track.previewUrl}
+            preload="auto"
+            muted={previewMuted}
+            className="hidden"
+          />
+        ))}
+
+        {/* The free "as you go" preview (2026-09-16, per direct request -
+            "give the ability to play the full audio and video as we go as
+            it is edited... make sure this doesn't cost anything in server
+            etc. and is fast"). Genuinely free and instant: just the
+            visitor's own already-downloaded files played through native
+            <video>/<audio> elements with real seeks - no ffmpeg, no
+            encoding, nothing leaves the browser. */}
+        {items.length > 0 && (
+          <div className="space-y-2 rounded-2xl border border-border bg-white p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted">Live preview</p>
+              <span className="text-xs text-muted">
+                {formatTime(previewTime)} / {formatTime(totalVideoDuration)}
+              </span>
+            </div>
+            {/* Fixed-size stage, regardless of the source clips' own
+                dimensions (2026-09-16, per direct feedback - "the preview
+                changes in size according to video files inputed we need to
+                keep it the same and keep the preview window smaller so you
+                can see it within the screen"). A portrait clip used to make
+                this box very tall since the <video> just sized itself to
+                its own intrinsic aspect ratio at full container width -
+                now the box height never changes, and object-contain
+                letterboxes whatever's playing (any mix of portrait/
+                landscape clips) inside it instead. */}
+            <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
+              <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
+              {/* Real transition simulation (2026-09-17, "simulate
+                  everything"): a second <video> overlaid on the primary,
+                  playing the INCOMING clip's own head while the primary
+                  plays the OUTGOING clip's tail - see getActiveTransition/
+                  syncTransitionVideoTo above. The CSS per transition type
+                  is a genuine visual approximation (opacity cross-fade for
+                  fade/dissolve, a clip-path reveal for wipes, a transform
+                  slide for slides) matched to each button's own arrow
+                  direction - not pixel-identical to ffmpeg's own xfade
+                  curves, but a real, moving preview of the actual chosen
+                  transition rather than a hard cut. Always mounted (so its
+                  ref is stable for the sync functions above) but only
+                  visually shown during an active transition window. */}
+              {(() => {
+                const transition = getActiveTransition(previewTime);
+                const blend = transition?.blend ?? 0;
+                const type = transition?.to.transitionType ?? "none";
+                const style: React.CSSProperties =
+                  type === "wipeleft"
+                    ? { clipPath: `inset(0 0 0 ${(1 - blend) * 100}%)` }
+                    : type === "wiperight"
+                      ? { clipPath: `inset(0 ${(1 - blend) * 100}% 0 0)` }
+                      : type === "slideleft"
+                        ? { transform: `translateX(${(1 - blend) * 100}%)` }
+                        : type === "slideright"
+                          ? { transform: `translateX(${-(1 - blend) * 100}%)` }
+                          : { opacity: blend }; // fade/dissolve/none
+                return (
+                  <video
+                    ref={transitionVideoRef}
+                    muted
+                    playsInline
+                    className="absolute inset-0 h-full w-full object-contain"
+                    style={{ ...style, visibility: transition ? "visible" : "hidden" }}
+                  />
+                );
+              })()}
+              {/* Real per-clip fade-to-black simulation (2026-09-17, same
+                  request) - see getFadeOpacityAt above. Deliberately layered
+                  below the image/text overlays further down, matching the
+                  real export's own order (pass 1 fades the raw video; pass
+                  2 draws overlays on top of the already-faded frames
+                  afterward), so overlay content stays legible through a
+                  fade instead of fading out itself. */}
+              <div className="pointer-events-none absolute inset-0 bg-black" style={{ opacity: getFadeOpacityAt(previewTime) }} />
+              {/* Text/image overlays are shown live here too (2026-09-16) -
+                  unlike fades, these are purely positional/content-based,
+                  so a plain absolutely-positioned DOM layer synced to
+                  `previewTime` can approximate them without needing any
+                  real compositing. Positioned against the fixed preview
+                  box itself (not the letterboxed video content inside it),
+                  so it's a close approximation, not pixel-identical to the
+                  real export. */}
+              {imageOverlays.map((overlay) => {
+                if (previewTime < overlay.startSec || previewTime >= overlay.endSec) return null;
+                const posClass = {
+                  "top-left": "left-2 top-2",
+                  "top-right": "right-2 top-2",
+                  "bottom-left": "bottom-2 left-2",
+                  "bottom-right": "bottom-2 right-2",
+                  center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+                }[overlay.position];
+                return (
+                  // eslint-disable-next-line @next/next/no-img-element -- a runtime blob: URL preview, not a static/remote asset next/image is built for
+                  <img key={overlay.id} src={overlay.previewUrl} alt="" className={`pointer-events-none absolute ${posClass}`} style={{ width: `${overlay.scalePercent}%` }} />
+                );
+              })}
+              {textOverlays.map((overlay) => {
+                if (previewTime < overlay.startSec || previewTime >= overlay.endSec || !overlay.text.trim()) return null;
+                const posClass = overlay.position.startsWith("top") ? "top-3" : overlay.position.startsWith("middle") ? "top-1/2 -translate-y-1/2" : "bottom-3";
+                const xClass = overlay.position.endsWith("left") ? "left-3 text-left" : overlay.position.endsWith("right") ? "right-3 text-right" : "inset-x-2 text-center";
+                const sizeClass = overlay.size === "small" ? "text-sm" : overlay.size === "medium" ? "text-lg" : "text-2xl";
+                return (
+                  <div
+                    key={overlay.id}
+                    className={`pointer-events-none absolute ${xClass} ${posClass} truncate rounded bg-black/45 px-3 py-1 font-bold ${sizeClass}`}
+                    style={{ color: overlay.color }}
+                  >
+                    {overlay.text}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={handlePreviewPlayToggle} className="shrink-0 rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
+                {previewPlaying ? "❚❚ Pause" : "▶ Preview"}
+              </button>
+              <button onClick={splitAtPlayhead} disabled={!videoTimelineEntries.some((entry) => previewTime > entry.timelineStart + 0.1 && previewTime < entry.timelineEnd - 0.1)} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted disabled:opacity-40" title="Split the selected video at the playhead">
+                Split
+              </button>
+              {/* Undo/Redo moved to the top of the page (always visible,
+                  regardless of timeline state) - see the comment there. */}
+              {/* Mute toggle (2026-09-16, per direct request - "preview
+                  should have the option to mute or play with sound") -
+                  covers both the stage video's own dialogue/audio AND every
+                  layered audio track at once, since both elements share
+                  this same `previewMuted` flag. */}
+              <button
+                onClick={() => setPreviewMuted((m) => !m)}
+                title={previewMuted ? "Unmute preview" : "Mute preview"}
+                className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted"
+              >
+                {previewMuted ? "🔇" : "🔊"}
+              </button>
+              <div onClick={handleScrubberClick} className="relative h-2 flex-1 cursor-pointer rounded-full bg-border">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-purple"
+                  style={{ width: `${totalVideoDuration > 0 ? Math.min(100, (previewTime / totalVideoDuration) * 100) : 0}%` }}
+                />
+              </div>
+            </div>
+            {previewError && <p className="text-xs text-coral-dark">{previewError}</p>}
+            <p className="text-[11px] italic text-muted">
+              Live local preview with the same clip order, trims, source windows, speed, audio placement, volume, selected canvas ratio, and now fades/transitions too - a real visual approximation, not pixel-identical to the exact encoded result you get from Export.
+            </p>
+          </div>
+        )}
+
+
         {/* The visual timeline (2026-09-16) - video track on top, audio
             tracks below, both drop zones directly built into their own
             area rather than a separate generic upload box, per direct
@@ -2338,7 +2617,7 @@ function StitchPageInner() {
           <div className="overflow-x-auto">
             <div className="relative" style={{ minWidth: Math.max(240, totalVideoDuration * PIXELS_PER_SECOND) }}>
               {/* Live playhead (2026-09-16) - tracks the "as you go" preview
-                  player below across the ruler, video track, and audio
+                  player across the ruler, video track, and audio
                   lanes, all sharing this same PIXELS_PER_SECOND axis. */}
               {totalVideoDuration > 0 && (previewPlaying || previewTime > 0) && (
                 <div
@@ -3023,167 +3302,6 @@ function StitchPageInner() {
             </div>
           );
         })()}
-
-        {/* Hidden audio elements powering the preview below - one per
-            track, kept in sync via syncAudioTracksTo. Not visible; the
-            waveform block above and the stage <video> below are what the
-            user actually looks at. */}
-        {audioTracks.map((track) => (
-          <audio
-            key={track.id}
-            ref={(el) => {
-              audioElRefs.current[track.id] = el;
-            }}
-            src={track.previewUrl}
-            preload="auto"
-            muted={previewMuted}
-            className="hidden"
-          />
-        ))}
-
-        {/* The free "as you go" preview (2026-09-16, per direct request -
-            "give the ability to play the full audio and video as we go as
-            it is edited... make sure this doesn't cost anything in server
-            etc. and is fast"). Genuinely free and instant: just the
-            visitor's own already-downloaded files played through native
-            <video>/<audio> elements with real seeks - no ffmpeg, no
-            encoding, nothing leaves the browser. */}
-        {items.length > 0 && (
-          <div className="space-y-2 rounded-2xl border border-border bg-white p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-muted">Preview (before exporting)</p>
-              <span className="text-xs text-muted">
-                {formatTime(previewTime)} / {formatTime(totalVideoDuration)}
-              </span>
-            </div>
-            {/* Fixed-size stage, regardless of the source clips' own
-                dimensions (2026-09-16, per direct feedback - "the preview
-                changes in size according to video files inputed we need to
-                keep it the same and keep the preview window smaller so you
-                can see it within the screen"). A portrait clip used to make
-                this box very tall since the <video> just sized itself to
-                its own intrinsic aspect ratio at full container width -
-                now the box height never changes, and object-contain
-                letterboxes whatever's playing (any mix of portrait/
-                landscape clips) inside it instead. */}
-            <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
-              <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
-              {/* Real transition simulation (2026-09-17, "simulate
-                  everything"): a second <video> overlaid on the primary,
-                  playing the INCOMING clip's own head while the primary
-                  plays the OUTGOING clip's tail - see getActiveTransition/
-                  syncTransitionVideoTo above. The CSS per transition type
-                  is a genuine visual approximation (opacity cross-fade for
-                  fade/dissolve, a clip-path reveal for wipes, a transform
-                  slide for slides) matched to each button's own arrow
-                  direction - not pixel-identical to ffmpeg's own xfade
-                  curves, but a real, moving preview of the actual chosen
-                  transition rather than a hard cut. Always mounted (so its
-                  ref is stable for the sync functions above) but only
-                  visually shown during an active transition window. */}
-              {(() => {
-                const transition = getActiveTransition(previewTime);
-                const blend = transition?.blend ?? 0;
-                const type = transition?.to.transitionType ?? "none";
-                const style: React.CSSProperties =
-                  type === "wipeleft"
-                    ? { clipPath: `inset(0 0 0 ${(1 - blend) * 100}%)` }
-                    : type === "wiperight"
-                      ? { clipPath: `inset(0 ${(1 - blend) * 100}% 0 0)` }
-                      : type === "slideleft"
-                        ? { transform: `translateX(${(1 - blend) * 100}%)` }
-                        : type === "slideright"
-                          ? { transform: `translateX(${-(1 - blend) * 100}%)` }
-                          : { opacity: blend }; // fade/dissolve/none
-                return (
-                  <video
-                    ref={transitionVideoRef}
-                    muted
-                    playsInline
-                    className="absolute inset-0 h-full w-full object-contain"
-                    style={{ ...style, visibility: transition ? "visible" : "hidden" }}
-                  />
-                );
-              })()}
-              {/* Real per-clip fade-to-black simulation (2026-09-17, same
-                  request) - see getFadeOpacityAt above. Deliberately layered
-                  below the image/text overlays further down, matching the
-                  real export's own order (pass 1 fades the raw video; pass
-                  2 draws overlays on top of the already-faded frames
-                  afterward), so overlay content stays legible through a
-                  fade instead of fading out itself. */}
-              <div className="pointer-events-none absolute inset-0 bg-black" style={{ opacity: getFadeOpacityAt(previewTime) }} />
-              {/* Text/image overlays are shown live here too (2026-09-16) -
-                  unlike fades, these are purely positional/content-based,
-                  so a plain absolutely-positioned DOM layer synced to
-                  `previewTime` can approximate them without needing any
-                  real compositing. Positioned against the fixed preview
-                  box itself (not the letterboxed video content inside it),
-                  so it's a close approximation, not pixel-identical to the
-                  real export. */}
-              {imageOverlays.map((overlay) => {
-                if (previewTime < overlay.startSec || previewTime >= overlay.endSec) return null;
-                const posClass = {
-                  "top-left": "left-2 top-2",
-                  "top-right": "right-2 top-2",
-                  "bottom-left": "bottom-2 left-2",
-                  "bottom-right": "bottom-2 right-2",
-                  center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-                }[overlay.position];
-                return (
-                  // eslint-disable-next-line @next/next/no-img-element -- a runtime blob: URL preview, not a static/remote asset next/image is built for
-                  <img key={overlay.id} src={overlay.previewUrl} alt="" className={`pointer-events-none absolute ${posClass}`} style={{ width: `${overlay.scalePercent}%` }} />
-                );
-              })}
-              {textOverlays.map((overlay) => {
-                if (previewTime < overlay.startSec || previewTime >= overlay.endSec || !overlay.text.trim()) return null;
-                const posClass = overlay.position.startsWith("top") ? "top-3" : overlay.position.startsWith("middle") ? "top-1/2 -translate-y-1/2" : "bottom-3";
-                const xClass = overlay.position.endsWith("left") ? "left-3 text-left" : overlay.position.endsWith("right") ? "right-3 text-right" : "inset-x-2 text-center";
-                const sizeClass = overlay.size === "small" ? "text-sm" : overlay.size === "medium" ? "text-lg" : "text-2xl";
-                return (
-                  <div
-                    key={overlay.id}
-                    className={`pointer-events-none absolute ${xClass} ${posClass} truncate rounded bg-black/45 px-3 py-1 font-bold ${sizeClass}`}
-                    style={{ color: overlay.color }}
-                  >
-                    {overlay.text}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={handlePreviewPlayToggle} className="shrink-0 rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
-                {previewPlaying ? "❚❚ Pause" : "▶ Preview"}
-              </button>
-              <button onClick={splitAtPlayhead} disabled={!videoTimelineEntries.some((entry) => previewTime > entry.timelineStart + 0.1 && previewTime < entry.timelineEnd - 0.1)} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted disabled:opacity-40" title="Split the selected video at the playhead">
-                Split
-              </button>
-              {/* Undo/Redo moved to the top of the page (always visible,
-                  regardless of timeline state) - see the comment there. */}
-              {/* Mute toggle (2026-09-16, per direct request - "preview
-                  should have the option to mute or play with sound") -
-                  covers both the stage video's own dialogue/audio AND every
-                  layered audio track at once, since both elements share
-                  this same `previewMuted` flag. */}
-              <button
-                onClick={() => setPreviewMuted((m) => !m)}
-                title={previewMuted ? "Unmute preview" : "Mute preview"}
-                className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted"
-              >
-                {previewMuted ? "🔇" : "🔊"}
-              </button>
-              <div onClick={handleScrubberClick} className="relative h-2 flex-1 cursor-pointer rounded-full bg-border">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-purple"
-                  style={{ width: `${totalVideoDuration > 0 ? Math.min(100, (previewTime / totalVideoDuration) * 100) : 0}%` }}
-                />
-              </div>
-            </div>
-            <p className="text-[11px] italic text-muted">
-              Live local preview with the same clip order, trims, source windows, speed, audio placement, volume, selected canvas ratio, and now fades/transitions too - a real visual approximation, not pixel-identical to the exact encoded result you get from Export.
-            </p>
-          </div>
-        )}
 
         {/* Per direct feedback (2026-09-16): reordering and masking/trimming
             now live entirely as drag interactions directly on the timeline
