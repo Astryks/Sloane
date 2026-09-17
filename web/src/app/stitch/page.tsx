@@ -38,6 +38,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 
 type VideoItem = { file: File; id: string; previewUrl: string };
 type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
+type AspectPreset = "16:9" | "9:16" | "1:1";
 
 // A single audio layer placed on the COMBINED video's own timeline - e.g.
 // "this song plays from 1:23 to 1:45 of the final video" - not a trim of
@@ -500,6 +501,7 @@ function StitchPageInner() {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
+  const [aspectPreset, setAspectPreset] = useState<AspectPreset>("16:9");
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
@@ -1419,7 +1421,14 @@ function StitchPageInner() {
       // cropped. See getVideoMeta's comment above for why this step
       // exists at all.
       const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
-      const { width: targetW, height: targetH } = metas[0];
+      // Always export at a predictable 1080p canvas. The source is fitted
+      // and letterboxed into the selected aspect ratio, so mixed source
+      // dimensions never break the MP4 and users can choose landscape,
+      // portrait, or square without any server-side processing.
+      const targetW = aspectPreset === "9:16" ? 608 : 1920;
+      const targetH = aspectPreset === "9:16" ? 1080 : aspectPreset === "1:1" ? 1080 : 1080;
+      const outputW = aspectPreset === "1:1" ? 1080 : targetW;
+      const outputH = aspectPreset === "1:1" ? 1080 : targetH;
       // Each clip's real in/out range (2026-09-16, per direct request:
       // "can it also mask parts of the video clips... users want only a
       // part of the clip"). Re-clamped here against this clip's ACTUAL
@@ -1512,7 +1521,7 @@ function StitchPageInner() {
           // faster; by <1 plays later = slower) - the standard ffmpeg
           // speed-ramp idiom, combined into one expression rather than two
           // filter stages.
-          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=(PTS-STARTPTS)/${speeds[i]},${fade}scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
+          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=(PTS-STARTPTS)/${speeds[i]},${fade}scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=decrease,pad=${outputW}:${outputH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
         })
         .join(";");
 
@@ -1710,7 +1719,7 @@ function StitchPageInner() {
             // (odd dimensions break yuv420p encoding). Looped via the
             // `loop` FILTER (not the input-level `-loop` flag) - see the
             // comment above on why.
-            const overlayWidth = Math.max(2, Math.round((targetW * overlay.scalePercent) / 100 / 2) * 2);
+            const overlayWidth = Math.max(2, Math.round((outputW * overlay.scalePercent) / 100 / 2) * 2);
             const { x, y } = imageOverlayPositionExpr(overlay.position);
             const scaledLabel = `[imgscaled${i}]`;
             const nextLabel = `[imgout${i}]`;
@@ -2552,6 +2561,15 @@ function StitchPageInner() {
         {overlayError && <p className="text-xs text-coral-dark">{overlayError}</p>}
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
+
+        <label className="mr-2 inline-flex items-center gap-2 text-sm text-muted">
+          Format
+          <select value={aspectPreset} onChange={(e) => setAspectPreset(e.target.value as AspectPreset)} className="rounded-full border border-border bg-white px-3 py-2 text-sm text-ink">
+            <option value="16:9">Landscape 16:9</option>
+            <option value="9:16">Portrait 9:16</option>
+            <option value="1:1">Square 1:1</option>
+          </select>
+        </label>
 
         <button
           onClick={handleCombine}
