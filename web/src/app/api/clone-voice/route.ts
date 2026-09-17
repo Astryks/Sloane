@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSubscriberByToken, checkQuota, reserveCharacterUsage, checkFreeQuota, recordFreeUsage, createPendingGeneration, initSchema, recordConsent } from "@/lib/db";
-import { isPodMode, generateViaPod, submitGenerationJob } from "@/lib/inferenceBackend";
+import { getInferenceBackend, generateViaPod, generateViaCascade, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 import { PLANS } from "@/lib/plans";
+
+// See generate-preset/route.ts's identical export for why - Cascade mode's
+// Mac attempt needs the full Hobby-plan ceiling before falling back to Modal.
+export const maxDuration = 60;
 
 // Real legal-risk mitigation, matching ElevenLabs' own actual approach
 // (researched earlier this project - not ID-document upload, a required
@@ -88,31 +92,57 @@ export async function POST(req: NextRequest) {
       ipAddress: req.headers.get("x-forwarded-for"),
     });
 
-    let result: { status: "COMPLETED"; audioBase64: string } | { jobId: string };
-    if (await isPodMode()) {
+    const backend = await getInferenceBackend();
+
+    // Normalizes all four backends into one shape before any post-processing
+    // runs, same as generate-preset/route.ts. Pod/Cascade send the Blob
+    // as-is (multipart, like the original single-backend code did); Modal/
+    // RunPod need it base64-encoded into a JSON body instead - `Blob`s
+    // support being read more than once, so building both from the same
+    // `referenceAudio` needs no extra copying.
+    let generationResult: { mode: "sync"; audioBase64: string } | { mode: "async"; jobId: string };
+    if (backend === "pod" || backend === "cascade") {
       const upstreamForm = new FormData();
       upstreamForm.append("text", text);
       upstreamForm.append("reference_audio", referenceAudio, "reference.wav");
       if (exaggeration) upstreamForm.append("exaggeration", String(exaggeration));
       if (speed) upstreamForm.append("speed", String(speed));
-      const { audioBase64 } = await generateViaPod("/api/clone-voice", upstreamForm);
+      generationResult =
+        backend === "pod"
+          ? { mode: "sync", ...(await generateViaPod("/api/clone-voice", upstreamForm)) }
+          : await generateViaCascade("/api/clone-voice", upstreamForm, {
+              action: "clone-voice",
+              text,
+              reference_audio_base64: Buffer.from(await referenceAudio.arrayBuffer()).toString("base64"),
+              ...(exaggeration ? { exaggeration: Number(exaggeration) } : {}),
+              ...(speed ? { speed: Number(speed) } : {}),
+            });
+    } else {
+      generationResult = {
+        mode: "async",
+        ...(await submitGenerationJob({
+          action: "clone-voice",
+          text,
+          reference_audio_base64: Buffer.from(await referenceAudio.arrayBuffer()).toString("base64"),
+          ...(exaggeration ? { exaggeration: Number(exaggeration) } : {}),
+          ...(speed ? { speed: Number(speed) } : {}),
+        })),
+      };
+    }
+
+    let result: { status: "COMPLETED"; audioBase64: string } | { jobId: string };
+    if (generationResult.mode === "sync") {
+      const { audioBase64 } = generationResult;
       result = { status: "COMPLETED", audioBase64 };
       if (sessionUser) {
         await saveGenerationAudio({ userId: sessionUser.id, kind: "clone", voiceLabel: null, text, audioBase64 });
       }
     } else {
-      const referenceAudioBase64 = Buffer.from(await referenceAudio.arrayBuffer()).toString("base64");
-      const { jobId } = await submitGenerationJob({
-        action: "clone-voice",
-        text,
-        reference_audio_base64: referenceAudioBase64,
-        ...(exaggeration ? { exaggeration: Number(exaggeration) } : {}),
-        ...(speed ? { speed: Number(speed) } : {}),
-      });
+      const { jobId } = generationResult;
       result = { jobId };
       if (sessionUser) {
-        // Best-effort like saveGenerationAudio - a DB hiccup here should
-        // cost the user their history entry, not their generation.
+        // Best-effort like saveGenerationAudio above - a DB hiccup here
+        // should cost the user their history entry, not their generation.
         await createPendingGeneration({ jobId, userId: sessionUser.id, kind: "clone", voiceLabel: null, text }).catch(
           (err) => console.error("[clone-voice] failed to record pending generation", err),
         );

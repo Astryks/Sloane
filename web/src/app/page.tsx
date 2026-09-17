@@ -514,11 +514,17 @@ async function pollVideoJob(
   accessToken?: string | null,
 ): Promise<{ videoUrl: string; silentVideoUrl: string | null }> {
   const startedAt = Date.now();
-  const tokenQuery = accessToken ? `&access_token=${encodeURIComponent(accessToken)}` : "";
+  // Real fix (follow-up audit, 2026-09-17): this used to be a `?access_token=`
+  // query param - the token then lands in server access logs, browser
+  // history, and any Referer header, for the entire lifetime of the poll.
+  // Sent as a request header instead (this is a same-origin fetch, not a
+  // plain link, so a header costs nothing extra) - see the 3 status routes'
+  // own matching fix for the read side.
+  const headers: Record<string, string> = accessToken ? { "x-access-token": accessToken } : {};
   for (;;) {
     if (Date.now() - startedAt > VIDEO_POLL_TIMEOUT_MS) throw new Error("Taking much longer than usual - try again shortly.");
     await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
-    const res = await fetch(`${statusEndpoint}?jobId=${encodeURIComponent(jobId)}${tokenQuery}`);
+    const res = await fetch(`${statusEndpoint}?jobId=${encodeURIComponent(jobId)}`, { headers });
     const data = await res.json();
     if (data.status === "COMPLETED") return { videoUrl: data.videoUrl as string, silentVideoUrl: (data.silentVideoUrl as string | null) ?? null };
     if (data.status === "FAILED") throw new Error(data.error ?? "Generation failed");
@@ -1904,17 +1910,37 @@ function VideoOptionCard({
   description,
   href,
   cta,
+  imageSrc,
 }: {
   icon: string;
   title: string;
   description: string;
   href: string;
   cta: string;
+  // Optional image replacing the emoji icon badge itself (2026-09-17, per
+  // direct request/correction for the "Free video editor" card - a separate
+  // illustration below the text wasn't what was wanted, the icon itself
+  // should be the image). Tinted toward the site's purple rather than shown
+  // as flat grayscale, same reasoning as before: this card's own art (a
+  // black-and-white vintage engraving) would clash with the site's clean
+  // white-card/purple-accent look otherwise.
+  imageSrc?: string;
 }) {
   return (
     <a href={href} className="block rounded-2xl border border-border bg-white p-5 shadow-soft transition hover:shadow-lg">
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-purple-wash text-lg">{icon}</div>
+        {imageSrc ? (
+          <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-purple-wash">
+            {/* eslint-disable-next-line @next/next/no-img-element -- a small static decorative asset, not worth next/image's overhead here */}
+            <img
+              src={imageSrc}
+              alt=""
+              className="h-full w-full object-cover opacity-80 grayscale [filter:sepia(0.4)_saturate(1.4)_hue-rotate(220deg)]"
+            />
+          </div>
+        ) : (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-purple-wash text-lg">{icon}</div>
+        )}
         <div className="min-w-0 flex-1">
           <p className="text-base font-bold text-foreground">{title}</p>
           <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>
@@ -1983,6 +2009,7 @@ export default function Home() {
           description="Stitch different scenes together to create one video here for free. Combine your generated clips (from any section above, or your storyboard) in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
           href="/stitch"
           cta="Combine my videos"
+          imageSrc="/vintage-camera.jpg"
         />
 
         <Footer />

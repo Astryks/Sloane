@@ -11,7 +11,7 @@ type Stats = {
   activePaths: { path: string; visitors: number }[];
 };
 
-type BackendMode = "pod" | "serverless" | "modal";
+type BackendMode = "pod" | "serverless" | "modal" | "cascade";
 
 export default function AdminDashboard() {
   const [password, setPassword] = useState<string | null>(null);
@@ -65,7 +65,8 @@ export default function AdminDashboard() {
     fetch("/api/admin/backend-mode", { headers: { "x-admin-password": password } })
       .then((r) => r.json())
       .then((data) => {
-        if (data.mode === "pod" || data.mode === "serverless" || data.mode === "modal") setBackendMode(data.mode);
+        if (data.mode === "pod" || data.mode === "serverless" || data.mode === "modal" || data.mode === "cascade")
+          setBackendMode(data.mode);
       })
       .catch(() => {});
   }, [password]);
@@ -140,13 +141,16 @@ export default function AdminDashboard() {
             the seconds not minutes). RunPod Serverless is kept around only to burn down its remaining
             prepaid credit or as a same-day rollback - its real-world cold starts measured ~2-3 minutes,
             not the ~20-60s originally designed for. Pod is fast and no-cold-start but billed hourly whether
-            used or not - only for an explicit high-traffic window.
+            used or not - only for an explicit high-traffic window. Cascade (2026-09-17) tries a free local
+            Mac first, then Modal, then RunPod - only reacts to the Mac being unreachable/erroring (not to
+            Modal&apos;s own GPU concurrency limit specifically), and needs MAC_INFERENCE_URL set to a real,
+            currently-running tunnel or every request just falls straight through to Modal anyway.
           </p>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 grid grid-cols-2 gap-2">
             <button
               onClick={() => switchBackendMode("modal")}
               disabled={switchingMode || backendMode === "modal"}
-              className={`flex-1 rounded-full py-2.5 text-sm font-bold transition disabled:cursor-default ${
+              className={`rounded-full py-2.5 text-sm font-bold transition disabled:cursor-default ${
                 backendMode === "modal"
                   ? "bg-coral text-white"
                   : "border border-border bg-white text-foreground hover:bg-white/70"
@@ -155,9 +159,20 @@ export default function AdminDashboard() {
               Modal (cheap, fast)
             </button>
             <button
+              onClick={() => switchBackendMode("cascade")}
+              disabled={switchingMode || backendMode === "cascade"}
+              className={`rounded-full py-2.5 text-sm font-bold transition disabled:cursor-default ${
+                backendMode === "cascade"
+                  ? "bg-coral text-white"
+                  : "border border-border bg-white text-foreground hover:bg-white/70"
+              }`}
+            >
+              Mac → Modal → RunPod
+            </button>
+            <button
               onClick={() => switchBackendMode("pod")}
               disabled={switchingMode || backendMode === "pod"}
-              className={`flex-1 rounded-full py-2.5 text-sm font-bold transition disabled:cursor-default ${
+              className={`rounded-full py-2.5 text-sm font-bold transition disabled:cursor-default ${
                 backendMode === "pod"
                   ? "bg-coral text-white"
                   : "border border-border bg-white text-foreground hover:bg-white/70"
@@ -168,7 +183,7 @@ export default function AdminDashboard() {
             <button
               onClick={() => switchBackendMode("serverless")}
               disabled={switchingMode || backendMode === "serverless"}
-              className={`flex-1 rounded-full py-2.5 text-sm font-bold transition disabled:cursor-default ${
+              className={`rounded-full py-2.5 text-sm font-bold transition disabled:cursor-default ${
                 backendMode === "serverless"
                   ? "bg-coral text-white"
                   : "border border-border bg-white text-foreground hover:bg-white/70"
@@ -180,6 +195,7 @@ export default function AdminDashboard() {
           <p className="mt-2 text-xs text-muted">
             Current: {backendMode ?? "loading…"}
             {backendMode === "pod" && " — make sure a pod is actually running and INFERENCE_SERVER_URL points at it."}
+            {backendMode === "cascade" && " — make sure the Mac's tunnel is actually running and MAC_INFERENCE_URL points at it."}
           </p>
         </div>
 

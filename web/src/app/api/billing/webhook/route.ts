@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
-import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, addVideoCredits, claimStripeEvent } from "@/lib/db";
+import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, addVideoCredits, claimStripeEvent, unclaimStripeEvent } from "@/lib/db";
 import { planFromStripePriceId, PLANS } from "@/lib/plans";
 import { videoCreditPackFromStripePriceId } from "@/lib/videoPaygo";
 import { sendAccessCodeEmail, sendPaymentFailedEmail, sendVideoCreditReceiptEmail } from "@/lib/email";
@@ -34,6 +34,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true, duplicate: true });
   }
 
+  // Real fix (follow-up audit, 2026-09-17): the switch below used to run
+  // un-wrapped - if any side effect threw (a transient DB error mid-way
+  // through, say), the claim above had already committed, so Stripe's
+  // retry of the exact same event would see it as "already processed" and
+  // never actually retry the failed effect. Unclaim before surfacing the
+  // error so a redelivery can genuinely reprocess it.
+  try {
+    await handleStripeEvent(event);
+  } catch (err) {
+    console.error("Stripe webhook handler failed", event.type, event.id, err);
+    await unclaimStripeEvent(event.id);
+    return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
+  }
+
+  return NextResponse.json({ received: true });
+}
+
+async function handleStripeEvent(event: Stripe.Event) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -140,6 +158,4 @@ export async function POST(req: NextRequest) {
       break;
     }
   }
-
-  return NextResponse.json({ received: true });
 }

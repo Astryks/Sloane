@@ -24,8 +24,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null);
     const mode = body?.mode;
-    if (mode !== "pod" && mode !== "serverless" && mode !== "modal") {
-      return NextResponse.json({ error: "mode must be 'pod', 'serverless', or 'modal'" }, { status: 400 });
+    if (mode !== "pod" && mode !== "serverless" && mode !== "modal" && mode !== "cascade") {
+      return NextResponse.json({ error: "mode must be 'pod', 'serverless', 'modal', or 'cascade'" }, { status: 400 });
     }
     await setInferenceBackend(mode);
     return NextResponse.json({ mode });

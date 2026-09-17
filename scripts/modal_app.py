@@ -28,6 +28,7 @@ Local smoke test (runs the function directly, no deploy):
     modal run scripts/modal_app.py
 """
 import base64
+import hmac
 import io
 import os
 
@@ -283,7 +284,12 @@ def _require_shared_secret(request: fastapi.Request):
         # "no auth required".
         raise fastapi.HTTPException(status_code=500, detail="Server misconfigured: MODAL_SHARED_SECRET not set")
     provided = request.headers.get("authorization", "")
-    if provided != f"Bearer {expected}":
+    # Real fix (2026-09-17, follow-up audit): plain `!=` on secrets is a
+    # timing side-channel (same class of bug already fixed for the admin
+    # dashboard password in web/src/lib/adminAuth.ts) - compare_digest is
+    # the standard library's constant-time equivalent and, unlike a manual
+    # digest trick, already handles differing lengths safely on its own.
+    if not hmac.compare_digest(provided, f"Bearer {expected}"):
         raise fastapi.HTTPException(status_code=401, detail="Unauthorized")
 
 

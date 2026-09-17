@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getSubscriptionVideoJob,
+  claimSubscriptionVideoJobForFalSubmit,
   completeSubscriptionVideoJob,
   failSubscriptionVideoJob,
   setSubscriptionVideoJobRequestId,
@@ -19,7 +20,10 @@ const KLING_AVATAR_ENDPOINT = "fal-ai/kling-video/ai-avatar/v2/standard";
 // Avatar's lip-synced output already IS the final video+audio together.
 export async function GET(req: NextRequest) {
   const jobId = req.nextUrl.searchParams.get("jobId");
-  const accessToken = req.nextUrl.searchParams.get("access_token");
+  // Real fix (follow-up audit, 2026-09-17): read from a request header, not
+  // the query string - see pollVideoJob's matching fix in page.tsx for why
+  // (server logs/browser history/Referer exposure otherwise).
+  const accessToken = req.headers.get("x-access-token");
   if (!jobId) {
     return NextResponse.json({ error: "jobId is required" }, { status: 400 });
   }
@@ -54,6 +58,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
+      return NextResponse.json({ status: "IN_PROGRESS" });
+    }
+    // Real double-submit race fixed here (follow-up audit, 2026-09-17): two
+    // overlapping polls could both observe modalStatus COMPLETED and
+    // fal_request_id still null, both submitting a paid Kling Avatar job for
+    // the one credit already spent - same fix as generate-cinematic-video/
+    // status/route.ts's identical claim, just missing here until now.
+    if (!(await claimSubscriptionVideoJobForFalSubmit(job.id))) {
       return NextResponse.json({ status: "IN_PROGRESS" });
     }
 

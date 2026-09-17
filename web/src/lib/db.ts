@@ -490,7 +490,31 @@ export async function initSchema() {
   // same behavior as before this column existed.
   await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS duration_seconds INTEGER`;
   await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS aspect_ratio TEXT`;
+  // Real fix (follow-up audit, 2026-09-17): the 'CLAIMING' sentinel used by
+  // claim*ForFalSubmit/claim*ForMergeSubmit below could stall a job forever
+  // if the process died between writing the sentinel and writing the real
+  // id (a crash/redeploy mid-request, not the already-handled "submission
+  // itself throws" case) - the job would sit un-reclaimable, with its
+  // credits never released, since a truthy sentinel always looked like "a
+  // submission is already in flight". These timestamps let each claim
+  // function tell "genuinely in flight" apart from "abandoned minutes ago"
+  // and reclaim the latter - see STALE_CLAIM_INTERVAL below.
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS fal_claimed_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS merge_claimed_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE character_video_jobs ADD COLUMN IF NOT EXISTS fal_claimed_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE subscription_video_jobs ADD COLUMN IF NOT EXISTS fal_claimed_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE subscription_video_jobs ADD COLUMN IF NOT EXISTS merge_claimed_at TIMESTAMPTZ`;
 }
+
+// Every claim*ForFalSubmit/claim*ForMergeSubmit function below uses this
+// same "10 minutes" window, hardcoded directly in each query rather than
+// interpolated from a shared constant - a Neon `sql` tagged template binds
+// ANY `${}` as a query parameter regardless of surrounding quote characters,
+// so interpolating a value INSIDE `interval '...'` silently produces
+// malformed SQL (`interval '$1'`) instead of splicing in the literal text.
+// Same real bug already caught once this session (see createLoginToken's
+// own comment) - not repeating it here. If this window ever needs to
+// change, update all 5 occurrences of `interval '10 minutes'` below.
 
 // Generic runtime settings, switchable from the admin dashboard without a
 // redeploy - see @/lib/inferenceBackend for why this exists (env vars
@@ -583,6 +607,19 @@ export async function claimStripeEvent(eventId: string): Promise<boolean> {
     RETURNING event_id
   `;
   return rows.length > 0;
+}
+
+// Real fix (follow-up audit, 2026-09-17): claimStripeEvent runs BEFORE the
+// webhook's actual side effect (granting credits, upserting a subscriber,
+// etc.) - if that side effect then throws, the claim had already committed,
+// so Stripe's automatic retry of the same event (triggered by the 500 the
+// throw produces) would find the event already "processed" and skip
+// straight to a no-op duplicate response, never actually retrying the
+// effect that failed. Call this from the webhook route's catch block to
+// undo the claim before returning an error, so the next redelivery can
+// genuinely reprocess instead of being silently swallowed.
+export async function unclaimStripeEvent(eventId: string): Promise<void> {
+  await sql`DELETE FROM processed_stripe_events WHERE event_id = ${eventId}`;
 }
 
 // Atomic claim with a short grace window, not strict one-shot - see
@@ -1129,8 +1166,8 @@ export async function setVideoPaygoJobRequestId(jobId: string, falRequestId: str
 // than left reclaimable, so there's no need to reset this back to null.
 export async function claimVideoPaygoJobForFalSubmit(jobId: string): Promise<boolean> {
   const rows = await sql`
-    UPDATE video_paygo_jobs SET fal_request_id = 'CLAIMING'
-    WHERE id = ${jobId} AND fal_request_id IS NULL
+    UPDATE video_paygo_jobs SET fal_request_id = 'CLAIMING', fal_claimed_at = now()
+    WHERE id = ${jobId} AND (fal_request_id IS NULL OR (fal_request_id = 'CLAIMING' AND fal_claimed_at < now() - interval '10 minutes'))
     RETURNING id
   `;
   return rows.length > 0;
@@ -1437,18 +1474,41 @@ export async function setAdStudioSceneImageRequestId(sceneId: string, requestId:
 // without being unbounded.
 export const MAX_SCENE_IMAGE_GENERATIONS = 5;
 
-// Same atomic increment-and-check shape as recordAdStudioSceneEdit below -
-// the caller does a cheap pre-check before paying for the fal call, but
-// THIS is what actually enforces the cap, closing the same
-// read-then-check-then-write race that pattern exists to prevent elsewhere.
-export async function recordAdStudioSceneImageGeneration(sceneId: string, imageUrl: string): Promise<boolean> {
+// Real fix (follow-up audit, 2026-09-17): the caller's pre-check + this
+// function used to be check-then-spend, not atomic - two concurrent
+// requests for the same scene could both read image_generate_count under
+// the cap, both pay for the (real, billed) fal call below, and only THEN
+// race for which one's atomic UPDATE actually recorded. That still could
+// never over-COUNT past the cap, but it could still over-SPEND (both fal
+// calls happen regardless of which one wins the write). Fixed the same way
+// video credits are handled elsewhere in this file: reserve the slot
+// atomically BEFORE spending anything, release it if the paid call then
+// fails, and finalize (no cap check needed - already reserved) once it
+// succeeds.
+export async function claimAdStudioSceneImageSlot(sceneId: string): Promise<boolean> {
   const rows = await sql`
     UPDATE ad_studio_scenes
-    SET image_url = ${imageUrl}, image_generate_count = image_generate_count + 1, status = 'image_ready'
+    SET image_generate_count = image_generate_count + 1
     WHERE id = ${sceneId} AND image_generate_count < ${MAX_SCENE_IMAGE_GENERATIONS}
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+export async function releaseAdStudioSceneImageSlot(sceneId: string): Promise<void> {
+  await sql`
+    UPDATE ad_studio_scenes
+    SET image_generate_count = GREATEST(0, image_generate_count - 1)
+    WHERE id = ${sceneId}
+  `;
+}
+
+export async function recordAdStudioSceneImageGeneration(sceneId: string, imageUrl: string): Promise<void> {
+  await sql`
+    UPDATE ad_studio_scenes
+    SET image_url = ${imageUrl}, status = 'image_ready'
+    WHERE id = ${sceneId}
+  `;
 }
 
 // Real cost-exposure fix (2026-09-14): a flat-priced project had no cap on
@@ -1711,8 +1771,8 @@ export async function setCharacterVideoJobRequestId(jobId: string, falRequestId:
 // check-then-submit shape.
 export async function claimCharacterVideoJobForFalSubmit(jobId: string): Promise<boolean> {
   const rows = await sql`
-    UPDATE character_video_jobs SET fal_request_id = 'CLAIMING'
-    WHERE id = ${jobId} AND fal_request_id IS NULL
+    UPDATE character_video_jobs SET fal_request_id = 'CLAIMING', fal_claimed_at = now()
+    WHERE id = ${jobId} AND (fal_request_id IS NULL OR (fal_request_id = 'CLAIMING' AND fal_claimed_at < now() - interval '10 minutes'))
     RETURNING id
   `;
   return rows.length > 0;
@@ -1810,8 +1870,8 @@ export async function setSubscriptionVideoJobMergeRequestId(jobId: string, merge
 // has both the identical phase-0 (Veo submit) and merge-submit shapes.
 export async function claimSubscriptionVideoJobForFalSubmit(jobId: string): Promise<boolean> {
   const rows = await sql`
-    UPDATE subscription_video_jobs SET fal_request_id = 'CLAIMING'
-    WHERE id = ${jobId} AND fal_request_id IS NULL
+    UPDATE subscription_video_jobs SET fal_request_id = 'CLAIMING', fal_claimed_at = now()
+    WHERE id = ${jobId} AND (fal_request_id IS NULL OR (fal_request_id = 'CLAIMING' AND fal_claimed_at < now() - interval '10 minutes'))
     RETURNING id
   `;
   return rows.length > 0;
@@ -1819,8 +1879,8 @@ export async function claimSubscriptionVideoJobForFalSubmit(jobId: string): Prom
 
 export async function claimSubscriptionVideoJobForMergeSubmit(jobId: string): Promise<boolean> {
   const rows = await sql`
-    UPDATE subscription_video_jobs SET merge_request_id = 'CLAIMING'
-    WHERE id = ${jobId} AND merge_request_id IS NULL
+    UPDATE subscription_video_jobs SET merge_request_id = 'CLAIMING', merge_claimed_at = now()
+    WHERE id = ${jobId} AND (merge_request_id IS NULL OR (merge_request_id = 'CLAIMING' AND merge_claimed_at < now() - interval '10 minutes'))
     RETURNING id
   `;
   return rows.length > 0;
@@ -1862,8 +1922,8 @@ export async function setVideoPaygoJobMergeRequestId(jobId: string, mergeRequest
 // silent render completes - the same double-submit race applies here too.
 export async function claimVideoPaygoJobForMergeSubmit(jobId: string): Promise<boolean> {
   const rows = await sql`
-    UPDATE video_paygo_jobs SET merge_request_id = 'CLAIMING'
-    WHERE id = ${jobId} AND merge_request_id IS NULL
+    UPDATE video_paygo_jobs SET merge_request_id = 'CLAIMING', merge_claimed_at = now()
+    WHERE id = ${jobId} AND (merge_request_id IS NULL OR (merge_request_id = 'CLAIMING' AND merge_claimed_at < now() - interval '10 minutes'))
     RETURNING id
   `;
   return rows.length > 0;
