@@ -134,11 +134,22 @@ function effectiveClipDuration(trim: Pick<ItemTrim, "start" | "end" | "speed">):
 }
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
-const MAX_FILE_BYTES = 500 * 1024 * 1024; // local-only guard for weak devices; avoids loading an unexpectedly huge source into ffmpeg.wasm memory
 const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
 const MAX_TEXT_OVERLAYS = 8; // MANUALLY added titles/captions - a generous cap for a few titles/watermarks, kept small deliberately since each is its own row in the editable list below
 const MAX_CAPTION_OVERLAYS_TOTAL = 150; // auto-CAPTIONS (2026-09-17) reuse the same TextOverlay model but realistically produce many short segments (one per spoken phrase) - a separate, much higher cap so a real multi-minute video isn't truncated to a handful of captions, while still bounding the ffmpeg drawtext filter graph for an extreme edge case
 const MAX_IMAGE_OVERLAYS = 4; // each is a real extra ffmpeg input held in browser memory, same reasoning as audio tracks
+// A soft (dismissible, non-blocking) warning threshold, not a hard cap - per
+// direct discussion (2026-09-17, "why have the cap at all"): this tool costs
+// nothing server-side regardless of file size, and a fixed byte limit would
+// be somewhat arbitrary anyway (a real ceiling only exists per-device, based
+// on how much memory that visitor's own browser/machine can give ffmpeg.wasm
+// before it crashes, not a number this app can know in advance). The actual
+// problem worth solving is the silent-crash surprise, not the size itself -
+// so this just turns that into an informed choice rather than blocking
+// anyone whose device could actually handle a large project fine. (A merge
+// from another editing pass briefly reintroduced a hard 500MB block here -
+// removed again, same reasoning as before.)
+const LARGE_PROJECT_WARNING_BYTES = 1024 * 1024 * 1024; // 1GB total across all added clips
 // Shared time scale for the visual timeline below - both the video track
 // (a plain flex row, its blocks' widths summing to the real total) and
 // every audio lane (each block absolutely positioned by real start/end
@@ -228,6 +239,32 @@ function formatTime(totalSeconds: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+function formatBytes(bytes: number): string {
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)}GB`;
+  return `${Math.round(bytes / (1024 * 1024))}MB`;
+}
+
+// Real fix (follow-up audit, 2026-09-17): `?videos=` (used by /ads to hand
+// off finished storyboard scenes, see the preload effect below) used to
+// fetch ANY url a visitor was given with no host check at all - a crafted
+// link could make a visitor's own browser fetch an arbitrary attacker
+// domain from this page. Every real value this ever carries is one of our
+// own generated scenes' fal.ai result URLs (fal's CDN serves from
+// `<version>.fal.media` subdomains, e.g. `v3b.fal.media` - see
+// characters.ts's own image URLs for the same pattern), so anything else is
+// rejected outright rather than trusted. Parsed with a real URL object, not
+// a substring check, so a hostname like "fal.media.evil.com" or
+// "evil.com/fal.media" can't slip past a naive `.includes("fal.media")`.
+function isAllowedPreloadUrl(url: string): boolean {
+  try {
+    const { hostname, protocol } = new URL(url);
+    return protocol === "https:" && (hostname === "fal.media" || hostname.endsWith(".fal.media"));
+  } catch {
+    return false;
+  }
 }
 
 type SavedStitchProject = {
@@ -571,6 +608,12 @@ function StitchPageInner() {
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [imageOverlays, setImageOverlays] = useState<ImageOverlay[]>([]);
   const [overlayError, setOverlayError] = useState("");
+  // Soft large-project warning (2026-09-17, see LARGE_PROJECT_WARNING_BYTES'
+  // own comment for why this is a dismissible warning, not a hard cap).
+  // Dismissing clears it for the rest of this session, even if more clips
+  // push the total higher still - a nag the user already dismissed once
+  // shouldn't keep reappearing every time they add one more file.
+  const [sizeWarningDismissed, setSizeWarningDismissed] = useState(false);
   // Auto-captions (2026-09-17, per direct request - "auto captions would be
   // good too"). `captionsBusy` covers both the one-time Whisper model
   // download and the actual per-clip transcription so the button can't be
@@ -654,7 +697,12 @@ function StitchPageInner() {
   useEffect(() => {
     const videos = searchParams.get("videos");
     if (!videos || preloadedRef.current) return;
-    const urls = videos.split(",").map((u) => decodeURIComponent(u)).filter(Boolean).slice(0, MAX_FILES);
+    const urls = videos
+      .split(",")
+      .map((u) => decodeURIComponent(u))
+      .filter(Boolean)
+      .filter(isAllowedPreloadUrl)
+      .slice(0, MAX_FILES);
     if (urls.length === 0) return;
     preloadedRef.current = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- preload state is the external fetch lifecycle.
@@ -684,10 +732,11 @@ function StitchPageInner() {
     if (!fileList) return;
     setError("");
     const files = Array.from(fileList);
-    const oversized = files.filter((file) => file.size > MAX_FILE_BYTES);
-    const usableFiles = files.filter((file) => file.size <= MAX_FILE_BYTES);
-    const videoFiles = usableFiles.filter((file) => file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi)$/i.test(file.name));
-    const audioFiles = usableFiles.filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name));
+    // No size gate here - see LARGE_PROJECT_WARNING_BYTES' own comment for
+    // why this is a soft, dismissible warning (shown once total size is
+    // known, in the JSX below) rather than silently skipping large files.
+    const videoFiles = files.filter((file) => file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi)$/i.test(file.name));
+    const audioFiles = files.filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name));
     const added = videoFiles.map((file) => ({
       file,
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
@@ -701,8 +750,7 @@ function StitchPageInner() {
       return [...prev, ...added];
     });
     audioFiles.forEach((file) => void addAudioTrack(file));
-    if (oversized.length > 0) setError(`${oversized.length} file${oversized.length === 1 ? "" : "s"} exceeded the 500 MB local limit and was skipped.`);
-    if (videoFiles.length === 0 && audioFiles.length === 0 && oversized.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
+    if (videoFiles.length === 0 && audioFiles.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
   }
 
   async function saveProjectLocally() {
@@ -1026,6 +1074,12 @@ function StitchPageInner() {
   // below. A plain derived value, not its own effect/state.
   const totalVideoDuration = videoTimelineEntries.length > 0 ? videoTimelineEntries[videoTimelineEntries.length - 1].timelineEnd : 0;
 
+  // Sum of every added clip's own real file size - just the video clips
+  // (by far the dominant contributor; audio tracks/images are typically
+  // much smaller) - drives the soft large-project warning below.
+  const totalFileBytes = items.reduce((sum, item) => sum + item.file.size, 0);
+  const showSizeWarning = totalFileBytes > LARGE_PROJECT_WARNING_BYTES && !sizeWarningDismissed;
+
   // Every real cut point in the final video's timeline (2026-09-16, per
   // direct follow-up) - 0, the boundary between each pair of clips, and
   // the very end. Used to magnetically snap an audio block's edges/
@@ -1065,10 +1119,6 @@ function StitchPageInner() {
   // independently placed on the combined video's timeline.
   async function addAudioTrack(file: File) {
     setAudioTrackError("");
-    if (file.size > MAX_FILE_BYTES) {
-      setAudioTrackError("This audio file is over the 500 MB local limit and was skipped.");
-      return;
-    }
     try {
       const duration = await getAudioDuration(file);
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
@@ -1311,10 +1361,6 @@ function StitchPageInner() {
   // common "brand bug" placement; fully adjustable afterward.
   function addImageOverlay(file: File) {
     setOverlayError("");
-    if (file.size > MAX_FILE_BYTES) {
-      setOverlayError("This image is over the 500 MB local limit and was skipped.");
-      return;
-    }
     const id = `img-${Math.random().toString(36).slice(2)}`;
     setImageOverlays((prev) => [
       ...prev,
@@ -1678,6 +1724,12 @@ function StitchPageInner() {
     setProgress(0);
     cancelRequestedRef.current = false;
     let exportStep = "starting";
+    // Declared here (not inside the try block) so the `finally` cleanup
+    // below can still reach them regardless of where/whether the try block
+    // throws - see the MEMFS-cleanup comment further down for why this
+    // exists at all.
+    let ffmpegForCleanup: FFmpeg | undefined;
+    const writtenFiles: string[] = [];
     try {
       // Target frame size = the first clip's own real dimensions - every
       // other clip gets scaled to fit inside that box and letterboxed
@@ -1753,13 +1805,25 @@ function StitchPageInner() {
       const { fetchFile } = await import("@ffmpeg/util");
       exportStep = "loading local FFmpeg";
       const ffmpeg = await getFFmpeg();
+      ffmpegForCleanup = ffmpeg;
       setStatus("processing");
 
+      // Real fix (follow-up audit, 2026-09-17): every ffmpeg.writeFile below
+      // (input clips, audio tracks, image overlays, the font, text overlay
+      // files) used to accumulate forever in ffmpeg.wasm's in-memory
+      // filesystem (MEMFS) across repeat combines in the same session - the
+      // ffmpeg instance itself is a cached singleton (see getFFmpeg above),
+      // so nothing ever freed them. Tracked in the outer `writtenFiles` and
+      // deleted in `finally` below, success or failure, so a real session
+      // of "tweak a caption, re-export, tweak again" (the natural workflow
+      // the auto-captions feature encourages) doesn't grow memory with
+      // every export.
       const inputNames: string[] = [];
       for (let i = 0; i < items.length; i++) {
         const name = `input${i}.mp4`;
         exportStep = `copying ${items[i].file.name} into local FFmpeg`;
         await ffmpeg.writeFile(name, await fetchFile(items[i].file));
+        writtenFiles.push(name);
         inputNames.push(name);
       }
 
@@ -1776,9 +1840,10 @@ function StitchPageInner() {
       // an earlier clip's real audio line arrived while both listeners
       // were attached at once).
       const hasAudio: boolean[] = [];
-      for (const name of inputNames) {
+      for (let i = 0; i < inputNames.length; i++) {
+        const name = inputNames[i];
         exportStep = `checking audio in ${name}`;
-        hasAudio.push(!itemTrims[items[hasAudio.length].id]?.muteAudio && await hasAudioStream(ffmpeg, name));
+        hasAudio.push(!itemTrims[items[i].id]?.muteAudio && (await hasAudioStream(ffmpeg, name)));
       }
 
       const scaleChains = inputNames
@@ -1900,6 +1965,7 @@ function StitchPageInner() {
           if (duration <= 0) continue; // nothing real to place for this track
           const name = `audiotrack${i}.raw`;
           await ffmpeg.writeFile(name, await fetchFile(track.file));
+          writtenFiles.push(name);
           args.push("-stream_loop", "-1", "-i", name);
           const inputIndex = nextInputIndex++;
           const startMs = Math.round(start * 1000);
@@ -1981,6 +2047,7 @@ function StitchPageInner() {
       const hasRealImageOverlay = imageOverlays.some((o) => Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
       const hasRealTextOverlay = textOverlays.some((o) => o.text.trim() && Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
       let finalOutputName = "stage1.mp4";
+      writtenFiles.push("stage1.mp4");
 
       if (hasRealImageOverlay || hasRealTextOverlay) {
         const pass2Args = ["-i", "stage1.mp4"];
@@ -1997,6 +2064,7 @@ function StitchPageInner() {
             const ext = imageExtensionFor(overlay.file);
             const name = `imageoverlay${i}.${ext}`;
             await ffmpeg.writeFile(name, await fetchFile(overlay.file));
+            writtenFiles.push(name);
             pass2Args.push("-i", name);
             const inputIndex = pass2NextInputIndex++;
             // Scaled relative to the COMBINED video's own real width so it
@@ -2023,6 +2091,7 @@ function StitchPageInner() {
           // hosted here at /fonts/Geist-Regular.ttf rather than assuming
           // any system font.
           await ffmpeg.writeFile("geistfont.ttf", await fetchFile("/fonts/Geist-Regular.ttf"));
+          writtenFiles.push("geistfont.ttf");
           for (let i = 0; i < textOverlays.length; i++) {
             const overlay = textOverlays[i];
             const start = Math.max(0, Math.min(overlay.startSec, totalDuration));
@@ -2034,6 +2103,7 @@ function StitchPageInner() {
             // escaping - a real, easy-to-get-wrong class of bug otherwise.
             const textFileName = `textoverlay${i}.txt`;
             await ffmpeg.writeFile(textFileName, new TextEncoder().encode(overlay.text));
+            writtenFiles.push(textFileName);
             const fontColor = /^#[0-9a-fA-F]{6}$/.test(overlay.color) ? `0x${overlay.color.slice(1)}` : "0xffffff";
             const y = textOverlayYExpr(overlay.position);
             const nextLabel = `[textout${i}]`;
@@ -2047,6 +2117,7 @@ function StitchPageInner() {
           exportStep = "applying overlays to the MP4";
           await ffmpeg.exec(pass2Args);
           finalOutputName = "final.mp4";
+          writtenFiles.push("final.mp4");
         }
       }
 
@@ -2080,6 +2151,19 @@ function StitchPageInner() {
       const detail = err instanceof Error ? err.message : String(err);
       setError(detail ? `Could not combine these videos while ${exportStep}: ${detail}` : `Could not combine these videos while ${exportStep}.`);
       setStatus("error");
+    } finally {
+      // Best-effort MEMFS cleanup (see the comment above writtenFiles) -
+      // runs whether this combine succeeded, failed, or was cancelled, and
+      // per-file so one file that was never actually written (an early
+      // throw, before every writeFile call ran) doesn't stop the rest from
+      // being freed. A no-op after a real cancel (cancelCombine already
+      // terminated this exact ffmpeg instance, which frees its own memory
+      // outright), but harmless to attempt regardless.
+      if (ffmpegForCleanup) {
+        for (const name of writtenFiles) {
+          await ffmpegForCleanup.deleteFile(name).catch(() => {});
+        }
+      }
     }
   }
 
@@ -2094,6 +2178,22 @@ function StitchPageInner() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
+        {/* Real bug found and fixed (follow-up review, 2026-09-17): Undo/Redo
+            used to live only inside the preview panel below, which is
+            itself conditionally rendered on `totalVideoDuration > 0` - the
+            exact moment someone deletes their only clip (the single most
+            common "undo that!" scenario), the whole panel including these
+            buttons vanished, leaving only the undocumented Cmd/Ctrl+Z
+            shortcut as a way back. Moved here so Undo/Redo are always
+            reachable regardless of what's currently on the timeline. */}
+        <div className="flex items-center gap-2">
+          <button onClick={undoEdit} className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-muted" title="Undo (⌘Z)">
+            ↩ Undo
+          </button>
+          <button onClick={redoEdit} className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-muted" title="Redo (⇧⌘Z)">
+            ↪ Redo
+          </button>
+        </div>
         {preloading && (
           <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">Loading your scenes from Ads…</p>
         )}
@@ -2168,6 +2268,23 @@ function StitchPageInner() {
                 </div>
               )}
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white/40">Video</p>
+              {showSizeWarning && (
+                <div className="mb-2 flex items-start justify-between gap-2 rounded-xl border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                  <span>
+                    You&apos;ve added {formatBytes(totalFileBytes)} of footage - combining this may be slow, or your browser could run
+                    low on memory since everything processes on your own device. You can still continue; just don&apos;t be surprised if
+                    it takes a while, or if it&apos;s smoother with fewer/shorter clips.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSizeWarningDismissed(true)}
+                    className="shrink-0 text-amber-100/70 hover:text-amber-100"
+                    aria-label="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               {/* Plain div (not a <label>) wraps the whole drop target -
                   the blocks themselves live OUTSIDE any <label>/<input>
                   pairing on purpose: a <label> treats ANY click inside it,
@@ -2900,12 +3017,8 @@ function StitchPageInner() {
               <button onClick={splitAtPlayhead} disabled={!videoTimelineEntries.some((entry) => previewTime > entry.timelineStart + 0.1 && previewTime < entry.timelineEnd - 0.1)} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted disabled:opacity-40" title="Split the selected video at the playhead">
                 Split
               </button>
-              <button onClick={undoEdit} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted" title="Undo (⌘Z)">
-                Undo
-              </button>
-              <button onClick={redoEdit} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted" title="Redo (⇧⌘Z)">
-                Redo
-              </button>
+              {/* Undo/Redo moved to the top of the page (always visible,
+                  regardless of timeline state) - see the comment there. */}
               {/* Mute toggle (2026-09-16, per direct request - "preview
                   should have the option to mute or play with sound") -
                   covers both the stage video's own dialogue/audio AND every
