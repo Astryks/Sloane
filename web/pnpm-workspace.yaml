@@ -1,6 +1,0 @@
-allowBuilds:
-  onnxruntime-node: set this to true or false
-  protobufjs: set this to true or false
-  unrs-resolver: set this to true or false
-minimumReleaseAgeExclude:
-  - '@huggingface/transformers@4.3.0'

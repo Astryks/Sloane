@@ -1304,9 +1304,6 @@ def apply_pitch_jitter(audio: np.ndarray, sr: int, jitter_semitones: float, seed
 
 
 def apply_pitch_shift_clean(audio: np.ndarray, sr: int, semitones: float) -> np.ndarray:
-    if pw is None:
-        print("[engine] pyworld unavailable; skipping pitch DSP")
-        return audio
     """Static per-voice pitch shift via pyworld's harvest/cheaptrick/d4c/
     synthesize - the same real parametric-vocoder approach apply_pitch_jitter
     and apply_terminal_fall/rise already use, instead of
@@ -1324,6 +1321,9 @@ def apply_pitch_shift_clean(audio: np.ndarray, sr: int, semitones: float) -> np.
     terminal-fall/rise instead of naive DSP. Only the F0 curve moves;
     silence/unvoiced frames (f0 <= 0) are left alone.
     """
+    if pw is None:
+        print("[engine] pyworld unavailable; skipping pitch DSP")
+        return audio
     if not semitones:
         return audio
     audio64 = np.ascontiguousarray(audio.astype(np.float64))

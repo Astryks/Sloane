@@ -127,6 +127,8 @@ def process_speaker(model: WhisperModel, speaker_dir: Path) -> None:
 
 
 def main() -> None:
+    import torch
+
     # CTranslate2 has no MPS backend; use CUDA when available and CPU on Mac.
     whisper_device = "cuda" if torch.cuda.is_available() else "cpu"
     whisper_compute_type = "float16" if whisper_device == "cuda" else "int8"
