@@ -1483,7 +1483,14 @@ function ProductAdSection() {
 
         <div className="mx-auto mt-3 max-w-md overflow-hidden rounded-2xl border border-border">
           <iframe
-            src="https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2Fjojo-pasabay-delivery%2F2521431254554554%2F&show_text=false&width=560&t=0"
+            // Real fix (live QA find, 2026-09-17): the descriptive slug
+            // ("jojo-pasabay-delivery") in the href's video permalink isn't
+            // something the video.php plugin resolves - it silently failed
+            // to embed and fell through to a broken/blank iframe instead.
+            // Facebook's own embed-code generator for this exact video
+            // (confirmed by opening its Embed panel directly) omits the
+            // slug entirely, so match that canonical form.
+            src="https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2F2521431254554554%2F&show_text=false&width=560&t=0"
             width="100%"
             height="314"
             style={{ border: "none", overflow: "hidden" }}
