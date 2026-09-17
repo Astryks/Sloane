@@ -127,7 +127,10 @@ def process_speaker(model: WhisperModel, speaker_dir: Path) -> None:
 
 
 def main() -> None:
-    model = WhisperModel("small", device="cuda", compute_type="float16")
+    # CTranslate2 has no MPS backend; use CUDA when available and CPU on Mac.
+    whisper_device = "cuda" if torch.cuda.is_available() else "cpu"
+    whisper_compute_type = "float16" if whisper_device == "cuda" else "int8"
+    model = WhisperModel("small", device=whisper_device, compute_type=whisper_compute_type)
     for speaker_dir in sorted(CLEAN_DIR.iterdir()):
         if speaker_dir.is_dir():
             process_speaker(model, speaker_dir)

@@ -11,6 +11,7 @@ generation path.
 Usage:
     python3 scripts/04_zeroshot_test.py
 """
+import argparse
 from pathlib import Path
 
 import torch
@@ -22,8 +23,7 @@ TRAINING_DATA = PROJECT_ROOT / "training_data"
 OUT_DIR = PROJECT_ROOT / "zeroshot_test_output"
 
 REFERENCE_CLIPS = {
-    "art_instructor": TRAINING_DATA / "art_instructor" / "clips" / "00266.wav",
-    "music_instructor": TRAINING_DATA / "music_instructor" / "clips" / "00042.wav",
+    "harper": PROJECT_ROOT / "scripts" / "voice_references" / "harper.wav",
 }
 
 TEST_SENTENCES = [
@@ -33,14 +33,27 @@ TEST_SENTENCES = [
 
 
 def main() -> None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    parser = argparse.ArgumentParser(description="Run a local Chatterbox zero-shot TTS test")
+    parser.add_argument("--reference", type=Path, help="WAV reference used for the clone")
+    parser.add_argument("--text", help="Text to synthesize")
+    args = parser.parse_args()
+
+    device = (
+        "cuda" if torch.cuda.is_available()
+        else "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+        else "cpu"
+    )
     print(f"device: {device}")
     model = ChatterboxTTS.from_pretrained(device=device)
 
+    references = {"custom": args.reference} if args.reference else REFERENCE_CLIPS
+    sentences = [args.text] if args.text else TEST_SENTENCES
     OUT_DIR.mkdir(exist_ok=True)
-    for speaker, ref_path in REFERENCE_CLIPS.items():
+    for speaker, ref_path in references.items():
+        if not ref_path.is_file():
+            raise FileNotFoundError(f"Reference WAV not found: {ref_path}")
         print(f"\n=== {speaker} (reference: {ref_path.name}) ===")
-        for i, sentence in enumerate(TEST_SENTENCES, start=1):
+        for i, sentence in enumerate(sentences, start=1):
             print(f"  generating [{i}]: {sentence[:60]}...")
             wav = model.generate(sentence, audio_prompt_path=str(ref_path))
             out_path = OUT_DIR / f"{speaker}_{i:02d}.wav"

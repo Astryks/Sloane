@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { Nunito } from "next/font/google";
 import { VisitTracker } from "@/components/VisitTracker";
 import "./globals.css";
@@ -14,7 +15,7 @@ export const metadata: Metadata = {
   description: "Lucy Labs — voice and video cloning",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${nunito.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
