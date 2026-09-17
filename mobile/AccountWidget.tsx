@@ -35,7 +35,7 @@ export function AccountWidget() {
       setStatus(null);
       return;
     }
-    fetch(`${WEB_BASE}/api/billing/status?token=${encodeURIComponent(token)}`)
+    fetch(`${WEB_BASE}/api/billing/status`, { headers: { "x-access-token": token } })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {

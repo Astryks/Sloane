@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { getGridStoryboardSlot, getGridStoryboardSlotProjectOwner, initSchema, refundVideoCredit, setGridStoryboardSlotVideoRequest, spendVideoCredit } from "@/lib/db";
+import {
+  claimGridStoryboardSlotForVideoSubmit,
+  failGridStoryboardSlot,
+  getGridStoryboardSlot,
+  getGridStoryboardSlotProjectOwner,
+  initSchema,
+  refundVideoCredit,
+  setGridStoryboardSlotVideoRequest,
+  spendVideoCredit,
+} from "@/lib/db";
 import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from "@/lib/adStudio";
 import { hasEnoughFalBalanceToGenerate, submitFalJob } from "@/lib/fal";
 
@@ -38,7 +47,16 @@ export async function POST(req: NextRequest) {
     if (!(await hasEnoughFalBalanceToGenerate())) {
       return NextResponse.json({ error: "Video generation is temporarily paused while the provider balance is topped up." }, { status: 503 });
     }
+    // Real double-submit fix (follow-up audit, 2026-09-17): claim the slot
+    // atomically BEFORE spending anything, so two concurrent POSTs for the
+    // same slot can't both pass this point and both submit a real, paid
+    // fal.ai job - see claimGridStoryboardSlotForVideoSubmit's own comment.
+    if (!(await claimGridStoryboardSlotForVideoSubmit(slotId))) {
+      return NextResponse.json({ error: "Video generation is already in progress or already finished for this scene." }, { status: 409 });
+    }
+
     if (!(await spendVideoCredit(user.id))) {
+      await failGridStoryboardSlot(slotId, "No video credits left");
       return NextResponse.json({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
     }
 
@@ -48,7 +66,9 @@ export async function POST(req: NextRequest) {
       await setGridStoryboardSlotVideoRequest(slotId, prompt, videoModel, requestId);
       return NextResponse.json({ requestId });
     } catch (err) {
-      await refundVideoCredit(user.id);
+      if (await failGridStoryboardSlot(slotId, err instanceof Error ? err.message : "Video submission failed")) {
+        await refundVideoCredit(user.id);
+      }
       throw err;
     }
   } catch (err) {

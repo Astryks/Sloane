@@ -4,7 +4,12 @@ import { PLANS } from "@/lib/plans";
 
 export async function GET(req: NextRequest) {
   try {
-    const token = req.nextUrl.searchParams.get("token");
+    // Real fix (follow-up audit, 2026-09-17): read from a request header,
+    // not the query string - a query-string access token leaks into server
+    // logs, browser history, and any Referer header a downstream request
+    // sends, same class of fix already applied to every other access_token-
+    // gated route in the app.
+    const token = req.headers.get("x-access-token");
     if (!token) {
       return NextResponse.json({ error: "Missing token" }, { status: 400 });
     }

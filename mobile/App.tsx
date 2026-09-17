@@ -201,7 +201,7 @@ function useUsage(token: string | null, freeTierId: string | null) {
   async function refresh() {
     try {
       if (token) {
-        const res = await fetch(`${WEB_BASE}/api/billing/status?token=${encodeURIComponent(token)}`);
+        const res = await fetch(`${WEB_BASE}/api/billing/status`, { headers: { "x-access-token": token } });
         const data = await res.json();
         if (res.ok && !data.error) {
           setUsage({

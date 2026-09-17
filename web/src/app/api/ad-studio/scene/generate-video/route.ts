@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, refundVideoCredit, setAdStudioSceneVideoRequestId, spendVideoCredit } from "@/lib/db";
+import {
+  claimAdStudioSceneForVideoSubmit,
+  failAdStudioScene,
+  getAdStudioScene,
+  getAdStudioSceneProjectOwner,
+  initSchema,
+  refundVideoCredit,
+  setAdStudioSceneVideoRequestId,
+  spendVideoCredit,
+} from "@/lib/db";
 import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from "@/lib/adStudio";
 import { hasEnoughFalBalanceToGenerate, submitFalJob } from "@/lib/fal";
 
@@ -34,6 +43,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This scene's video model is no longer supported" }, { status: 500 });
     }
 
+    // Real double-submit fix (follow-up audit, 2026-09-17): claim the scene
+    // atomically BEFORE spending anything, so two concurrent POSTs for the
+    // same scene can't both pass this point and both submit a real, paid
+    // fal.ai job - see claimAdStudioSceneForVideoSubmit's own comment.
+    if (!(await claimAdStudioSceneForVideoSubmit(sceneId))) {
+      return NextResponse.json({ error: "Video generation is already in progress or already finished for this scene." }, { status: 409 });
+    }
+
     // Real cost-exposure fix (security audit, 2026-09-16): this route spent
     // no credit at all - a scene's video generation is a real, billed fal.ai
     // call (the expensive one, unlike the image calls above), charged here
@@ -42,6 +59,7 @@ export async function POST(req: NextRequest) {
     // video-paygo/generate's own spend/refund).
     const spent = await spendVideoCredit(user.id);
     if (!spent) {
+      await failAdStudioScene(sceneId, "No video credits left");
       return NextResponse.json({ error: "No video credits left - buy more to generate this scene's video." }, { status: 402 });
     }
 
@@ -52,7 +70,9 @@ export async function POST(req: NextRequest) {
       await setAdStudioSceneVideoRequestId(sceneId, requestId);
       return NextResponse.json({ requestId });
     } catch (err) {
-      await refundVideoCredit(user.id);
+      if (await failAdStudioScene(sceneId, err instanceof Error ? err.message : "Video submission failed")) {
+        await refundVideoCredit(user.id);
+      }
       throw err;
     }
   } catch (err) {

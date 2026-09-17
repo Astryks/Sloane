@@ -1103,19 +1103,36 @@ export async function addVideoCredits(userId: string, amount: number) {
   `;
 }
 
-// Call this BEFORE addVideoCredits in the Stripe webhook's video-credit-pack
-// branch, and only actually grant if it returns true - see
-// stripe_credit_grants' own comment in initSchema for why this exists.
-// Atomic (INSERT ... ON CONFLICT DO NOTHING), so no number of concurrent or
-// repeated deliveries of the same Stripe event can ever grant twice.
-export async function claimVideoCreditGrant(eventId: string, userId: string, credits: number): Promise<boolean> {
+// Real fix (follow-up audit, 2026-09-17): the previous version of this did
+// the ledger insert and the balance update as two separate statements
+// (claimVideoCreditGrant, then addVideoCredits) - if the balance update
+// ever failed AFTER the ledger insert committed, the ledger would
+// permanently remember "already granted" for an event whose credits were
+// never actually added, and no retry could ever fix it (the webhook's own
+// unclaim-and-retry logic would just keep re-hitting the same already-
+// claimed ledger row and skipping the grant forever, while still sending a
+// receipt email claiming success). A single SQL statement is implicitly
+// one atomic transaction in Postgres even with multiple CTEs - either both
+// the ledger row and the balance update land, or neither does, so the two
+// can never diverge. Returns true only when THIS call actually performed
+// the grant (i.e. this event id hadn't been seen before); the webhook
+// route should only send the receipt email when this is true.
+export async function claimAndGrantVideoCredits(eventId: string, userId: string, credits: number): Promise<boolean> {
   const rows = await sql`
-    INSERT INTO stripe_credit_grants (event_id, user_id, credits)
-    VALUES (${eventId}, ${userId}, ${credits})
-    ON CONFLICT (event_id) DO NOTHING
-    RETURNING event_id
+    WITH grant_claim AS (
+      INSERT INTO stripe_credit_grants (event_id, user_id, credits)
+      VALUES (${eventId}, ${userId}, ${credits})
+      ON CONFLICT (event_id) DO NOTHING
+      RETURNING event_id
+    ), balance_update AS (
+      INSERT INTO video_credits (user_id, balance)
+      SELECT ${userId}, ${credits} WHERE EXISTS (SELECT 1 FROM grant_claim)
+      ON CONFLICT (user_id) DO UPDATE SET balance = video_credits.balance + ${credits}, updated_at = now()
+      RETURNING user_id
+    )
+    SELECT count(*)::int AS granted FROM grant_claim
   `;
-  return rows.length > 0;
+  return Number(rows[0]?.granted ?? 0) > 0;
 }
 
 // Atomic decrement guarded by the balance check in the same statement -
@@ -1585,6 +1602,23 @@ export async function recordAdStudioSceneEdit(sceneId: string, imageUrl: string)
   return rows.length > 0;
 }
 
+// Real double-submit fix (follow-up audit, 2026-09-17): generate-video/
+// route.ts used to be bare check-then-submit with no atomic claim at all -
+// two concurrent POSTs for the same scene (a double-click, a network retry,
+// two tabs) could both pass every check and both submit a real, separately-
+// billed fal.ai video job, each spending its own credit for what the user
+// intended as one generation. Same claim/reclaim shape as every other
+// atomic claim in this file - transitions straight to 'pending_video' so a
+// losing concurrent call sees a non-claimable status and bails out.
+export async function claimAdStudioSceneForVideoSubmit(sceneId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE ad_studio_scenes SET status = 'pending_video'
+    WHERE id = ${sceneId} AND status NOT IN ('pending_video', 'video_ready', 'approved')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
 export async function setAdStudioSceneVideoRequestId(sceneId: string, requestId: string) {
   await sql`UPDATE ad_studio_scenes SET video_fal_request_id = ${requestId}, status = 'pending_video' WHERE id = ${sceneId}`;
 }
@@ -1741,6 +1775,19 @@ export async function deleteStoryboardReference(referenceId: string) {
 // generation - no need to hunt down and redo every scene individually.
 export async function updateStoryboardReferenceImage(referenceId: string, imageUrl: string) {
   await sql`UPDATE storyboard_references SET image_url = ${imageUrl} WHERE id = ${referenceId}`;
+}
+
+// Same real double-submit fix as claimAdStudioSceneForVideoSubmit above,
+// for the grid-storyboard's own generate-video route (2026-09-17 follow-up
+// audit) - it had the identical bare check-then-submit shape with no atomic
+// claim at all.
+export async function claimGridStoryboardSlotForVideoSubmit(slotId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE grid_storyboard_slots SET status = 'pending_video'
+    WHERE id = ${slotId} AND status NOT IN ('pending_video', 'video_ready')
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function setGridStoryboardSlotVideoRequest(slotId: string, prompt: string, videoModel: string, requestId: string) {
