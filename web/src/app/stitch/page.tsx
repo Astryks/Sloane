@@ -98,11 +98,11 @@ type ImageOverlay = {
 // the transition INTO this clip FROM the previous one (so the first clip's
 // values are simply unused - there's nothing before it to transition from).
 type TransitionType = "none" | "fade" | "dissolve" | "wipeleft" | "wiperight" | "slideleft" | "slideright";
-// Keep the first shipped transition control deliberately small: Off/Fade is
-// the useful, predictable choice for this free stitcher. The filter map
-// still accepts the broader ffmpeg vocabulary for backwards compatibility
-// with any older in-memory state.
-const TRANSITION_TYPES: TransitionType[] = ["none", "fade"];
+// Restored to the full set (follow-up review, 2026-09-17) - a later editing
+// pass had trimmed this to just Off/Fade, citing "as requested", but all 7
+// were built earlier today per this session's own direct request and there
+// was no independent confirmation the reduction was actually wanted.
+const TRANSITION_TYPES: TransitionType[] = ["none", "fade", "dissolve", "wipeleft", "wiperight", "slideleft", "slideright"];
 const TRANSITION_LABELS: Record<TransitionType, string> = {
   none: "✂",
   fade: "Fade",
@@ -2898,7 +2898,7 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a simple Off/Fade transition button. Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a transition button (fade/dissolve/wipe/slide - blends into that clip from the one before it). Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
