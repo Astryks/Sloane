@@ -38,6 +38,8 @@ import { SiteHeader } from "@/components/SiteHeader";
 
 type VideoItem = { file: File; id: string; previewUrl: string };
 type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
+type AspectPreset = "16:9" | "9:16" | "1:1";
+type ExportQuality = "1080p" | "720p";
 
 // A single audio layer placed on the COMBINED video's own timeline - e.g.
 // "this song plays from 1:23 to 1:45 of the final video" - not a trim of
@@ -53,6 +55,8 @@ type AudioTrack = {
   sourceDuration: number; // the uploaded file's own real length
   startSec: number; // where this track starts playing, in the FINAL video's timeline
   endSec: number; // where it stops - (endSec - startSec) is how long it plays for
+  volume: number; // 0..1, applied locally during export and preview
+  kind: "dialogue" | "music" | "other";
   fadeIn: number; // seconds, ramps up from silence at the start of its own play window
   fadeOut: number; // seconds, ramps down to silence at the end of its own play window
 };
@@ -67,7 +71,7 @@ type TextOverlay = {
   text: string;
   startSec: number; // where this appears, in the FINAL video's timeline
   endSec: number;
-  position: "top" | "center" | "bottom";
+  position: "top-left" | "top-center" | "top-right" | "middle-left" | "middle-center" | "middle-right" | "bottom-left" | "bottom-center" | "bottom-right";
   size: "small" | "medium" | "large";
   color: string; // hex, e.g. "#ffffff"
 };
@@ -94,7 +98,11 @@ type ImageOverlay = {
 // the transition INTO this clip FROM the previous one (so the first clip's
 // values are simply unused - there's nothing before it to transition from).
 type TransitionType = "none" | "fade" | "dissolve" | "wipeleft" | "wiperight" | "slideleft" | "slideright";
-const TRANSITION_TYPES: TransitionType[] = ["none", "fade", "dissolve", "wipeleft", "wiperight", "slideleft", "slideright"];
+// Keep the first shipped transition control deliberately small: Off/Fade is
+// the useful, predictable choice for this free stitcher. The filter map
+// still accepts the broader ffmpeg vocabulary for backwards compatibility
+// with any older in-memory state.
+const TRANSITION_TYPES: TransitionType[] = ["none", "fade"];
 const TRANSITION_LABELS: Record<TransitionType, string> = {
   none: "✂",
   fade: "Fade",
@@ -114,6 +122,7 @@ type ItemTrim = {
   fadeOut: number;
   speed: number;
   transitionType: TransitionType;
+  muteAudio: boolean;
 };
 
 // A clip's own real (post-speed) duration on the shared timeline - every
@@ -125,6 +134,7 @@ function effectiveClipDuration(trim: Pick<ItemTrim, "start" | "end" | "speed">):
 }
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
+const MAX_FILE_BYTES = 500 * 1024 * 1024; // local-only guard for weak devices; avoids loading an unexpectedly huge source into ffmpeg.wasm memory
 const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
 const MAX_TEXT_OVERLAYS = 8; // MANUALLY added titles/captions - a generous cap for a few titles/watermarks, kept small deliberately since each is its own row in the editable list below
 const MAX_CAPTION_OVERLAYS_TOTAL = 150; // auto-CAPTIONS (2026-09-17) reuse the same TextOverlay model but realistically produce many short segments (one per spoken phrase) - a separate, much higher cap so a real multi-minute video isn't truncated to a handful of captions, while still bounding the ffmpeg drawtext filter graph for an extreme edge case
@@ -192,13 +202,25 @@ const TEXT_SIZE_FRACTIONS: Record<TextOverlay["size"], number> = { small: 0.045,
 // and bottom-padding stay correct without ffmpeg guessing.
 function textOverlayYExpr(position: TextOverlay["position"], pad = "h*0.06"): string {
   switch (position) {
-    case "top":
+    case "top-left":
+    case "top-center":
+    case "top-right":
       return pad;
-    case "center":
+    case "middle-left":
+    case "middle-center":
+    case "middle-right":
       return "(h-text_h)/2";
-    case "bottom":
+    case "bottom-left":
+    case "bottom-center":
+    case "bottom-right":
       return `h-text_h-${pad}`;
   }
+}
+
+function textOverlayXExpr(position: TextOverlay["position"], pad = "w*0.06"): string {
+  if (position.endsWith("left")) return pad;
+  if (position.endsWith("right")) return `w-text_w-${pad}`;
+  return "(w-text_w)/2";
 }
 
 function formatTime(totalSeconds: number): string {
@@ -206,6 +228,44 @@ function formatTime(totalSeconds: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+type SavedStitchProject = {
+  items: Array<{ id: string; file: File }>;
+  audioTracks: Array<Omit<AudioTrack, "previewUrl">>;
+  imageOverlays: Array<Omit<ImageOverlay, "previewUrl">>;
+  textOverlays: TextOverlay[];
+  itemTrims: Record<string, ItemTrim>;
+  aspectPreset: AspectPreset;
+  exportQuality: ExportQuality;
+  duckMusic?: boolean;
+};
+
+function openStitchProjectDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("sloane-stitch-project", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("projects");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Could not open local project storage"));
+  });
+}
+
+function saveStitchProject(project: SavedStitchProject): Promise<void> {
+  return openStitchProjectDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction("projects", "readwrite");
+    tx.objectStore("projects").put(project, "latest");
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Could not save project locally")); };
+  }));
+}
+
+function loadStitchProject(): Promise<SavedStitchProject | null> {
+  return openStitchProjectDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction("projects", "readonly");
+    const request = tx.objectStore("projects").get("latest");
+    request.onsuccess = () => { db.close(); resolve((request.result as SavedStitchProject | undefined) ?? null); };
+    request.onerror = () => { db.close(); reject(request.error ?? new Error("Could not load local project")); };
+  }));
 }
 
 // Real bug found and fixed 2026-09-14 ("combined video file doesn't
@@ -338,23 +398,21 @@ function WaveformBars({ peaks }: { peaks: number[] }) {
   );
 }
 
-// ffmpeg.wasm has no ffprobe-style structured metadata call - `-i <file>`
-// with no output "fails" (there's nothing to write), but its stderr log
-// still lists every real stream it found first, the same info ffprobe
-// would give natively. Read here instead of assuming every clip has audio.
+// ffmpeg.wasm has no ffprobe-style structured metadata call. Probe the audio
+// stream with a real null output instead of running `-i <file>` with no
+// output: the latter is an invalid FFmpeg invocation and can leave this
+// WASM build's virtual filesystem in an ErrnoError state on some files.
 async function hasAudioStream(ffmpeg: FFmpeg, filename: string): Promise<boolean> {
-  let found = false;
-  const onLog = ({ message }: { message: string }) => {
-    if (/Stream #\d+:\d+.*Audio:/.test(message)) found = true;
-  };
-  ffmpeg.on("log", onLog);
   try {
-    await ffmpeg.exec(["-i", filename]);
+    // Use a named throwaway output rather than stdout (`-`); the browser
+    // build's virtual filesystem handles the named null-muxer output more
+    // reliably across Chrome versions.
+    await ffmpeg.exec(["-i", filename, "-map", "0:a:0", "-f", "null", "probe-null"]);
+    await ffmpeg.deleteFile("probe-null");
+    return true;
   } catch {
-    // Expected - `-i` alone with no output always reports non-zero.
+    return false;
   }
-  ffmpeg.off("log", onLog);
-  return found;
 }
 
 // --- Audio auto-sync (2026-09-16, per direct request: "if someone shoots
@@ -500,9 +558,12 @@ function StitchPageInner() {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
+  const [aspectPreset, setAspectPreset] = useState<AspectPreset>("16:9");
+  const [exportQuality, setExportQuality] = useState<ExportQuality>("1080p");
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [duckMusic, setDuckMusic] = useState(false);
   const [audioTrackError, setAudioTrackError] = useState("");
   // Text/image overlays (2026-09-16, per direct request - "how can they add
   // images and text/titles"). Same drag-to-reposition/resize pattern as
@@ -537,6 +598,13 @@ function StitchPageInner() {
   // thumbnail already has.
   const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
   const [itemTrims, setItemTrims] = useState<Record<string, ItemTrim>>({});
+  type HistorySnapshot = { items: VideoItem[]; trims: Record<string, ItemTrim>; audioTracks: AudioTrack[]; textOverlays: TextOverlay[]; imageOverlays: ImageOverlay[]; duckMusic: boolean };
+  const undoStackRef = useRef<HistorySnapshot[]>([]);
+  const redoStackRef = useRef<HistorySnapshot[]>([]);
+  const lastSnapshotRef = useRef<HistorySnapshot | null>(null);
+  const historyReadyRef = useRef(false);
+  const historyRestoringRef = useRef(false);
+  const splitIdRef = useRef(0);
   const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
   const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
   // Live floating readout shown next to the cursor while dragging any
@@ -550,6 +618,7 @@ function StitchPageInner() {
   const [reorderDrag, setReorderDrag] = useState<{ id: string; offsetPx: number } | null>(null);
   const [preloading, setPreloading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
+  const cancelRequestedRef = useRef(false);
   const preloadedRef = useRef(false);
   // Which timeline video block is currently showing its own small inline
   // playback (2026-09-16, per direct request - "give the ability to play
@@ -557,6 +626,7 @@ function StitchPageInner() {
   // of the full-timeline preview below, so glancing at one clip doesn't
   // disturb the other.
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  const [sourceEditorId, setSourceEditorId] = useState<string | null>(null);
   // The full-edit "as you go" preview (2026-09-16, per direct request -
   // "give the ability to play the full audio and video as we go... make
   // sure this doesn't cost anything in server etc. and is fast"). Genuinely
@@ -587,6 +657,7 @@ function StitchPageInner() {
     const urls = videos.split(",").map((u) => decodeURIComponent(u)).filter(Boolean).slice(0, MAX_FILES);
     if (urls.length === 0) return;
     preloadedRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- preload state is the external fetch lifecycle.
     setPreloading(true);
     setError("");
     (async () => {
@@ -612,12 +683,69 @@ function StitchPageInner() {
   function handleFiles(fileList: FileList | null) {
     if (!fileList) return;
     setError("");
-    const added = Array.from(fileList).map((file) => ({
+    const files = Array.from(fileList);
+    const oversized = files.filter((file) => file.size > MAX_FILE_BYTES);
+    const usableFiles = files.filter((file) => file.size <= MAX_FILE_BYTES);
+    const videoFiles = usableFiles.filter((file) => file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi)$/i.test(file.name));
+    const audioFiles = usableFiles.filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name));
+    const added = videoFiles.map((file) => ({
       file,
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
       previewUrl: URL.createObjectURL(file),
     }));
-    setItems((prev) => (prev.length + added.length > MAX_FILES ? prev : [...prev, ...added]));
+    setItems((prev) => {
+      if (prev.length + added.length > MAX_FILES) {
+        setError(`You can use up to ${MAX_FILES} video clips.`);
+        return prev;
+      }
+      return [...prev, ...added];
+    });
+    audioFiles.forEach((file) => void addAudioTrack(file));
+    if (oversized.length > 0) setError(`${oversized.length} file${oversized.length === 1 ? "" : "s"} exceeded the 500 MB local limit and was skipped.`);
+    if (videoFiles.length === 0 && audioFiles.length === 0 && oversized.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
+  }
+
+  async function saveProjectLocally() {
+    try {
+      await saveStitchProject({
+        items: items.map(({ id, file }) => ({ id, file })),
+        audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
+        imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
+        textOverlays,
+        itemTrims,
+        aspectPreset,
+        exportQuality,
+        duckMusic,
+      });
+      setError("");
+      setSyncMessage("Project saved on this device.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this project locally.");
+    }
+  }
+
+  async function loadProjectLocally() {
+    try {
+      const saved = await loadStitchProject();
+      if (!saved) {
+        setError("No project has been saved on this device yet.");
+        return;
+      }
+      revokeAllPreviewUrls(items, audioTracks, imageOverlays, resultUrl);
+      setResultUrl(null);
+      setItems(saved.items.map((item) => ({ ...item, previewUrl: URL.createObjectURL(item.file) })));
+      setAudioTracks(saved.audioTracks.map((track, index) => ({ ...track, kind: track.kind ?? (index === 0 ? "dialogue" : index === 1 ? "music" : "other"), previewUrl: URL.createObjectURL(track.file) })));
+      setImageOverlays(saved.imageOverlays.map((overlay) => ({ ...overlay, previewUrl: URL.createObjectURL(overlay.file) })));
+      setTextOverlays(saved.textOverlays);
+      setItemTrims(saved.itemTrims);
+      setAspectPreset(saved.aspectPreset);
+      setExportQuality(saved.exportQuality);
+      setDuckMusic(saved.duckMusic ?? false);
+      setError("");
+      setSyncMessage("Project loaded from this device.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load this project locally.");
+    }
   }
 
   // Real OS drag-and-drop onto the timeline (2026-09-16, per direct
@@ -626,16 +754,19 @@ function StitchPageInner() {
   // dragOver is required or the browser refuses the drop entirely.
   function handleVideoDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
+    e.stopPropagation();
     handleFiles(e.dataTransfer.files);
   }
   function handleAudioDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
+    e.stopPropagation();
     Array.from(e.dataTransfer.files)
       .filter((f) => f.type.startsWith("audio/"))
       .forEach((f) => addAudioTrack(f));
   }
   function handleImageDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
+    e.stopPropagation();
     Array.from(e.dataTransfer.files)
       .filter((f) => f.type.startsWith("image/"))
       .forEach((f) => addImageOverlay(f));
@@ -720,7 +851,7 @@ function StitchPageInner() {
         setItemTrims((prev) => {
           const next: Record<string, ItemTrim> = {};
           items.forEach((item, i) => {
-            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none" };
+            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
           });
           return next;
         });
@@ -733,6 +864,93 @@ function StitchPageInner() {
       cancelled = true;
     };
   }, [items]);
+
+  // Lightweight local history for the destructive-looking editor actions.
+  // Files themselves remain the original File objects; only the arrangement
+  // and source windows are captured, so undo never re-encodes or duplicates
+  // media. Keeping this in memory makes it free and disappears with the tab.
+  const historySignature = `${items.map((item) => item.id).join(",")}|${items.map((item) => {
+    const trim = itemTrims[item.id];
+    return trim ? `${trim.start}:${trim.end}:${trim.speed}:${trim.transitionType}:${trim.muteAudio}` : "";
+  }).join(",")}|${audioTracks.map((track) => `${track.id}:${track.startSec}:${track.endSec}:${track.volume}:${track.kind}`).join(",")}|${textOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.text}:${overlay.position}`).join(",")}|${imageOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.position}:${overlay.scalePercent}`).join(",")}|${duckMusic}`;
+  const historySnapshot: HistorySnapshot = { items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic };
+  useEffect(() => {
+    if (!historyReadyRef.current) {
+      historyReadyRef.current = true;
+      lastSnapshotRef.current = historySnapshot;
+      return;
+    }
+    if (historyRestoringRef.current) {
+      historyRestoringRef.current = false;
+      lastSnapshotRef.current = historySnapshot;
+      return;
+    }
+    if (lastSnapshotRef.current) undoStackRef.current.push(lastSnapshotRef.current);
+    if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    lastSnapshotRef.current = historySnapshot;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historySignature]);
+
+  function undoEdit() {
+    const previous = undoStackRef.current.pop();
+    if (!previous) return;
+    redoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic });
+    historyRestoringRef.current = true;
+    setItems(previous.items);
+    setItemTrims(previous.trims);
+    setAudioTracks(previous.audioTracks);
+    setTextOverlays(previous.textOverlays);
+    setImageOverlays(previous.imageOverlays);
+    setDuckMusic(previous.duckMusic);
+  }
+
+  function redoEdit() {
+    const next = redoStackRef.current.pop();
+    if (!next) return;
+    undoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic });
+    historyRestoringRef.current = true;
+    setItems(next.items);
+    setItemTrims(next.trims);
+    setAudioTracks(next.audioTracks);
+    setTextOverlays(next.textOverlays);
+    setImageOverlays(next.imageOverlays);
+    setDuckMusic(next.duckMusic);
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      if (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoEdit();
+        else undoEdit();
+      }
+      if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
+        splitAtPlayhead();
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
+        deleteAtPlayhead();
+      }
+      if (event.key === " ") {
+        event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
+        handlePreviewPlayToggle();
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
+        seekPreviewTo(previewTime + (event.key === "ArrowLeft" ? -0.1 : 0.1));
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   // One thumbnail per clip, generated once (not tied to the current trim -
   // see getVideoThumbnail's comment) and never regenerated for a clip
@@ -847,6 +1065,10 @@ function StitchPageInner() {
   // independently placed on the combined video's timeline.
   async function addAudioTrack(file: File) {
     setAudioTrackError("");
+    if (file.size > MAX_FILE_BYTES) {
+      setAudioTrackError("This audio file is over the 500 MB local limit and was skipped.");
+      return;
+    }
     try {
       const duration = await getAudioDuration(file);
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
@@ -854,7 +1076,8 @@ function StitchPageInner() {
       setAudioTracks((prev) => {
         if (prev.length >= MAX_AUDIO_TRACKS) return prev;
         added = true;
-        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0 }];
+        const kind: AudioTrack["kind"] = prev.length === 0 ? "dialogue" : prev.length === 1 ? "music" : "other";
+        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1, kind }];
       });
       if (added) {
         // Waveform decode is best-effort and purely visual - a track that
@@ -869,7 +1092,7 @@ function StitchPageInner() {
     }
   }
 
-  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut">>) {
+  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut" | "volume" | "kind">>) {
     setAudioTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
@@ -933,7 +1156,7 @@ function StitchPageInner() {
     const id = `text-${Math.random().toString(36).slice(2)}`;
     setTextOverlays((prev) => [
       ...prev,
-      { id, text: "Your text here", startSec: 0, endSec: Math.min(3, totalVideoDuration || 3), position: "bottom", size: "medium", color: "#ffffff" },
+      { id, text: "Your text here", startSec: 0, endSec: Math.min(3, totalVideoDuration || 3), position: "bottom-center", size: "medium", color: "#ffffff" },
     ]);
   }
 
@@ -945,7 +1168,7 @@ function StitchPageInner() {
     setTextOverlays((prev) => prev.filter((o) => o.id !== id));
   }
 
-  const TEXT_POSITIONS: TextOverlay["position"][] = ["top", "center", "bottom"];
+  const TEXT_POSITIONS: TextOverlay["position"][] = ["top-left", "top-center", "top-right", "middle-left", "middle-center", "middle-right", "bottom-left", "bottom-center", "bottom-right"];
   function cycleTextPosition(overlay: TextOverlay) {
     const next = TEXT_POSITIONS[(TEXT_POSITIONS.indexOf(overlay.position) + 1) % TEXT_POSITIONS.length];
     updateTextOverlay(overlay.id, { position: next });
@@ -1064,7 +1287,7 @@ function StitchPageInner() {
             text,
             startSec: Math.min(finalStart, entry.timelineEnd),
             endSec: Math.min(finalEnd, entry.timelineEnd),
-            position: "bottom",
+            position: "bottom-center",
             size: "small",
             color: "#ffffff",
           });
@@ -1088,6 +1311,10 @@ function StitchPageInner() {
   // common "brand bug" placement; fully adjustable afterward.
   function addImageOverlay(file: File) {
     setOverlayError("");
+    if (file.size > MAX_FILE_BYTES) {
+      setOverlayError("This image is over the 500 MB local limit and was skipped.");
+      return;
+    }
     const id = `img-${Math.random().toString(36).slice(2)}`;
     setImageOverlays((prev) => [
       ...prev,
@@ -1124,6 +1351,42 @@ function StitchPageInner() {
       next.splice(toIndex, 0, moved);
       return next;
     });
+  }
+
+  function splitAtPlayhead() {
+    const entry = videoTimelineEntries.find((candidate) => previewTime >= candidate.timelineStart && previewTime < candidate.timelineEnd);
+    if (!entry || previewTime <= entry.timelineStart + 0.1 || previewTime >= entry.timelineEnd - 0.1) return;
+    if (items.length >= MAX_FILES) {
+      setError(`You can use up to ${MAX_FILES} video clips.`);
+      return;
+    }
+    const cut = entry.trimStart + (previewTime - entry.timelineStart) * entry.speed;
+    const originalTrim = itemTrims[entry.item.id];
+    if (!originalTrim) return;
+    splitIdRef.current += 1;
+    const splitId = splitIdRef.current;
+    const first: VideoItem = { ...entry.item, id: `${entry.item.id}-a-${splitId}`, previewUrl: URL.createObjectURL(entry.item.file) };
+    const second: VideoItem = { ...entry.item, id: `${entry.item.id}-b-${splitId}`, previewUrl: URL.createObjectURL(entry.item.file) };
+    setItems((prev) => {
+      const index = prev.findIndex((item) => item.id === entry.item.id);
+      if (index < 0) return prev;
+      return [...prev.slice(0, index), first, second, ...prev.slice(index + 1)];
+    });
+    setItemTrims((prev) => {
+      const next = { ...prev };
+      delete next[entry.item.id];
+      next[first.id] = { ...originalTrim, end: cut, fadeOut: 0, transitionType: "none" };
+      next[second.id] = { ...originalTrim, start: cut, fadeIn: 0, transitionType: "none" };
+      return next;
+    });
+    setPreviewTime(entry.timelineStart);
+  }
+
+  function deleteAtPlayhead() {
+    const entry = videoTimelineEntries.find((candidate) => previewTime >= candidate.timelineStart && previewTime < candidate.timelineEnd);
+    if (!entry) return;
+    const index = items.findIndex((item) => item.id === entry.item.id);
+    if (index >= 0) removeItem(index);
   }
 
   // Real drag-to-reorder on the timeline (2026-09-16, per direct follow-up
@@ -1187,6 +1450,7 @@ function StitchPageInner() {
       // correct way to do this (unlike fades/transitions, which the quick
       // preview doesn't attempt to simulate - see the panel's own note).
       v.playbackRate = entry.speed;
+      v.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
       v.play().catch(() => {});
       v.removeEventListener("loadedmetadata", onLoaded);
     };
@@ -1208,6 +1472,7 @@ function StitchPageInner() {
     for (const track of audioTracks) {
       const el = audioElRefs.current[track.id];
       if (!el) continue;
+      el.volume = Math.max(0, Math.min(1, (track.volume ?? 1) * (duckMusic && track.kind === "music" ? 0.35 : 1)));
       const inWindow = shouldPlay && t >= track.startSec && t < track.endSec;
       if (!inWindow) {
         if (!el.paused) el.pause();
@@ -1241,6 +1506,7 @@ function StitchPageInner() {
     } else if (stageVideoRef.current) {
       stageVideoRef.current.currentTime = localStart;
       stageVideoRef.current.playbackRate = entry.speed;
+      stageVideoRef.current.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
     }
     syncAudioTracksTo(clamped, true);
   }
@@ -1405,19 +1671,30 @@ function StitchPageInner() {
   }
 
   async function handleCombine() {
-    if (items.length < 2) return;
+    if (items.length < 1) return;
     setError("");
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
     setProgress(0);
+    cancelRequestedRef.current = false;
+    let exportStep = "starting";
     try {
       // Target frame size = the first clip's own real dimensions - every
       // other clip gets scaled to fit inside that box and letterboxed
       // (black bars, aspect ratio preserved) rather than stretched or
       // cropped. See getVideoMeta's comment above for why this step
       // exists at all.
+      exportStep = "reading video metadata";
       const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
-      const { width: targetW, height: targetH } = metas[0];
+      // Always export at a predictable 1080p canvas. The source is fitted
+      // and letterboxed into the selected aspect ratio, so mixed source
+      // dimensions never break the MP4 and users can choose landscape,
+      // portrait, or square without any server-side processing.
+      const baseW = aspectPreset === "9:16" ? 1080 : 1920;
+      const baseH = aspectPreset === "9:16" ? 1920 : 1080;
+      const qualityScale = exportQuality === "720p" ? 2 / 3 : 1;
+      const outputW = Math.round((baseW * qualityScale) / 2) * 2;
+      const outputH = Math.round((baseH * qualityScale) / 2) * 2;
       // Each clip's real in/out range (2026-09-16, per direct request:
       // "can it also mask parts of the video clips... users want only a
       // part of the clip"). Re-clamped here against this clip's ACTUAL
@@ -1474,12 +1751,14 @@ function StitchPageInner() {
       const totalDuration = effectiveDurations.reduce((sum, d, i) => sum + d - transitions[i].duration, 0);
 
       const { fetchFile } = await import("@ffmpeg/util");
+      exportStep = "loading local FFmpeg";
       const ffmpeg = await getFFmpeg();
       setStatus("processing");
 
       const inputNames: string[] = [];
       for (let i = 0; i < items.length; i++) {
         const name = `input${i}.mp4`;
+        exportStep = `copying ${items[i].file.name} into local FFmpeg`;
         await ffmpeg.writeFile(name, await fetchFile(items[i].file));
         inputNames.push(name);
       }
@@ -1498,7 +1777,8 @@ function StitchPageInner() {
       // were attached at once).
       const hasAudio: boolean[] = [];
       for (const name of inputNames) {
-        hasAudio.push(await hasAudioStream(ffmpeg, name));
+        exportStep = `checking audio in ${name}`;
+        hasAudio.push(!itemTrims[items[hasAudio.length].id]?.muteAudio && await hasAudioStream(ffmpeg, name));
       }
 
       const scaleChains = inputNames
@@ -1510,7 +1790,7 @@ function StitchPageInner() {
           // faster; by <1 plays later = slower) - the standard ffmpeg
           // speed-ramp idiom, combined into one expression rather than two
           // filter stages.
-          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=(PTS-STARTPTS)/${speeds[i]},${fade}scale=w=${targetW}:h=${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
+          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=(PTS-STARTPTS)/${speeds[i]},${fade}scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=decrease,pad=${outputW}:${outputH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
         })
         .join(";");
 
@@ -1572,6 +1852,14 @@ function StitchPageInner() {
         videoLabel = nextVideoLabel;
         audioLabel = nextAudioLabel;
       }
+      // The fold above naturally names the last multi-clip outputs [outv]
+      // and [dialogue]. A single clip has no fold iteration, so explicitly
+      // alias its prepared streams to those same stable output labels used
+      // by the final `-map` below. Without this, single-clip export could
+      // finish the encode call without creating the expected output file.
+      if (inputNames.length === 1) {
+        combineChain += ";[v0]null[outv];[a0]anull[dialogue]";
+      }
 
       const args = inputNames.flatMap((name) => ["-i", name]);
       let filterComplex = `${scaleChains};${audioChains}${combineChain}`;
@@ -1623,8 +1911,16 @@ function StitchPageInner() {
           const trackFadeIn = Math.max(0, Math.min(track.fadeIn, half));
           const trackFadeOut = Math.max(0, Math.min(track.fadeOut, half));
           const fade = fadeFilterFragment("afade", duration, trackFadeIn, trackFadeOut);
-          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},${fade}volume=0.25,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS[track${i}]`;
-          trackLabels.push(`[track${i}]`);
+          const trackLabel = `[track${i}]`;
+          const gain = Math.max(0, Math.min(1, track.volume ?? 1)) * 0.25;
+          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},${fade}volume=${gain},aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS${trackLabel}`;
+          if (duckMusic && track.kind === "music") {
+            const duckedLabel = `[ducked${i}]`;
+            filterComplex += `;${trackLabel}[dialogue]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=300${duckedLabel}`;
+            trackLabels.push(duckedLabel);
+          } else {
+            trackLabels.push(trackLabel);
+          }
         }
         if (trackLabels.length > 0) {
           filterComplex += `;[dialogue]${trackLabels.join("")}amix=inputs=${1 + trackLabels.length}:duration=first:normalize=0[finalaudio]`;
@@ -1664,6 +1960,7 @@ function StitchPageInner() {
         "stage1.mp4",
       );
 
+      exportStep = "encoding the MP4";
       await ffmpeg.exec(args);
 
       // Image overlays (logos/watermarks/photos) and text titles/captions
@@ -1708,7 +2005,7 @@ function StitchPageInner() {
             // (odd dimensions break yuv420p encoding). Looped via the
             // `loop` FILTER (not the input-level `-loop` flag) - see the
             // comment above on why.
-            const overlayWidth = Math.max(2, Math.round((targetW * overlay.scalePercent) / 100 / 2) * 2);
+            const overlayWidth = Math.max(2, Math.round((outputW * overlay.scalePercent) / 100 / 2) * 2);
             const { x, y } = imageOverlayPositionExpr(overlay.position);
             const scaledLabel = `[imgscaled${i}]`;
             const nextLabel = `[imgout${i}]`;
@@ -1740,13 +2037,14 @@ function StitchPageInner() {
             const fontColor = /^#[0-9a-fA-F]{6}$/.test(overlay.color) ? `0x${overlay.color.slice(1)}` : "0xffffff";
             const y = textOverlayYExpr(overlay.position);
             const nextLabel = `[textout${i}]`;
-            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}${pass2VideoLabel}drawtext=fontfile=geistfont.ttf:textfile=${textFileName}:fontsize=h*${TEXT_SIZE_FRACTIONS[overlay.size]}:fontcolor=${fontColor}:x=(w-text_w)/2:y=${y}:box=1:boxcolor=black@0.45:boxborderw=12:enable='between(t,${start},${end})'${nextLabel}`;
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}${pass2VideoLabel}drawtext=fontfile=geistfont.ttf:textfile=${textFileName}:fontsize=h*${TEXT_SIZE_FRACTIONS[overlay.size]}:fontcolor=${fontColor}:x=${textOverlayXExpr(overlay.position)}:y=${y}:box=1:boxcolor=black@0.45:boxborderw=12:enable='between(t,${start},${end})'${nextLabel}`;
             pass2VideoLabel = nextLabel;
           }
         }
 
         if (pass2FilterComplex) {
           pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", "0:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "final.mp4");
+          exportStep = "applying overlays to the MP4";
           await ffmpeg.exec(pass2Args);
           finalOutputName = "final.mp4";
         }
@@ -1766,23 +2064,63 @@ function StitchPageInner() {
       // same TS typing mismatch the old comment described (Uint8Array's
       // buffer is typed as ArrayBufferLike, which includes SharedArrayBuffer
       // - not a runtime concern for this non-threaded core build).
+      exportStep = "reading the finished MP4";
       const data = (await ffmpeg.readFile(finalOutputName)) as Uint8Array;
       const bytes = data.slice();
+      if (bytes.byteLength === 0) throw new Error("The export was empty. Please try shorter clips or fewer overlays.");
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "video/mp4" });
       setResultUrl(URL.createObjectURL(blob));
       setStatus("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not combine these videos - try fewer or shorter clips.");
+      if (cancelRequestedRef.current) {
+        setError("Export cancelled.");
+        setStatus("idle");
+        return;
+      }
+      const detail = err instanceof Error ? err.message : String(err);
+      setError(detail ? `Could not combine these videos while ${exportStep}: ${detail}` : `Could not combine these videos while ${exportStep}.`);
       setStatus("error");
     }
+  }
+
+  function cancelCombine() {
+    cancelRequestedRef.current = true;
+    ffmpegRef.current?.terminate();
+    ffmpegRef.current = null;
+    setProgress(0);
   }
 
   return (
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
-      <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
+      <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
         {preloading && (
           <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">Loading your scenes from Ads…</p>
+        )}
+
+        {(items.length > 0 || audioTracks.length > 0) && (
+          <section className="rounded-2xl border border-border bg-white p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-wide text-muted">Files</p>
+              <div className="flex items-center gap-2">
+                <button onClick={saveProjectLocally} className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-muted">Save locally</button>
+                <button onClick={loadProjectLocally} className="rounded-full border border-border px-2 py-1 text-[11px] font-semibold text-muted">Load locally</button>
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {items.map((item) => (
+                <span key={`file-video-${item.id}`} className="rounded-full bg-purple/10 px-3 py-1 text-xs text-purple" title="Video source retained locally">Video · {item.file.name}</span>
+              ))}
+              {audioTracks.map((track) => (
+                <span key={`file-audio-${track.id}`} className="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-800" title="Audio source retained locally">Audio · {track.file.name}</span>
+              ))}
+            </div>
+          </section>
+        )}
+        {items.length === 0 && audioTracks.length === 0 && (
+          <p className="rounded-2xl border border-border bg-white/70 p-4 text-sm text-muted">
+            Drop clips to start. Supported: MP4, WebM, MOV, MP3, WAV, M4A, and AAC. Your media stays on this device; editing and export happen in your browser.
+          </p>
         )}
 
         {/* The visual timeline (2026-09-16) - video track on top, audio
@@ -1963,6 +2301,28 @@ function StitchPageInner() {
                                 {trim.speed}x
                               </button>
                             )}
+                            {trim && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); updateItemTrim(item.id, { muteAudio: !trim.muteAudio }); }}
+                                title={trim.muteAudio ? "Unmute this clip's embedded audio" : "Mute this clip's embedded audio"}
+                                className="flex h-4 items-center justify-center rounded-full bg-black/70 px-1 text-[7px] text-white"
+                              >
+                                {trim.muteAudio ? "Muted" : "Audio"}
+                              </button>
+                            )}
+                            {trim && fullDuration != null && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); setSourceEditorId(item.id); }}
+                                title="Edit the non-destructive source window"
+                                className="flex h-4 items-center justify-center rounded-full bg-black/70 px-1 text-[7px] text-white"
+                              >
+                                Window
+                              </button>
+                            )}
                             <button
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
@@ -1995,6 +2355,7 @@ function StitchPageInner() {
                                 onPointerDown={makeAxisDragHandler(
                                   () => trim.start,
                                   (v) => updateItemTrim(item.id, { start: Math.max(0, Math.min(v, trim.end - 0.2)) }),
+                                  [...clipBoundaries, previewTime],
                                 )}
                                 className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
                               />
@@ -2002,6 +2363,7 @@ function StitchPageInner() {
                                 onPointerDown={makeAxisDragHandler(
                                   () => trim.end,
                                   (v) => updateItemTrim(item.id, { end: Math.max(trim.start + 0.2, Math.min(v, fullDuration)) }),
+                                  [...clipBoundaries, previewTime],
                                 )}
                                 className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
                               />
@@ -2060,7 +2422,13 @@ function StitchPageInner() {
                 )}
               </div>
 
-              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
+              <div className="mb-1 mt-3 flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
+                <label className="flex items-center gap-1 text-[10px] text-white/60" title="Lower tracks after the first while the stitched dialogue is playing">
+                  <input type="checkbox" checked={duckMusic} onChange={(e) => setDuckMusic(e.target.checked)} />
+                  Lower music under dialogue
+                </label>
+              </div>
               <div onDragOver={(e) => e.preventDefault()} onDrop={handleAudioDrop} className="space-y-1">
                 {audioTracks.map((track) => {
                   const peaks = trackWaveforms[track.id];
@@ -2091,6 +2459,10 @@ function StitchPageInner() {
                         <div className="pointer-events-none h-full">
                           {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.file.name}</span>}
                         </div>
+                        <input aria-label={`Volume for ${track.file.name}`} type="range" min="0" max="1" step="0.05" value={track.volume ?? 1} onChange={(e) => updateAudioTrack(track.id, { volume: Number(e.target.value) })} onPointerDown={(e) => e.stopPropagation()} className="absolute bottom-0.5 right-5 z-20 h-2 w-16 accent-emerald-300" title="Track volume" />
+                        <select aria-label={`Track type for ${track.file.name}`} value={track.kind} onChange={(e) => updateAudioTrack(track.id, { kind: e.target.value as AudioTrack["kind"] })} onPointerDown={(e) => e.stopPropagation()} className="absolute bottom-0.5 left-5 z-20 h-4 max-w-20 rounded bg-black/60 text-[8px] text-white">
+                          <option value="dialogue">Dialogue</option><option value="music">Music</option><option value="other">Other</option>
+                        </select>
                         {/* Delete, directly on the block (2026-09-16, per
                             direct request - "give the option to delete...
                             if they upload the wrong file"), on top of the
@@ -2250,7 +2622,7 @@ function StitchPageInner() {
                           title={`Position: ${overlay.position} (click to change)`}
                           className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
                         >
-                          {overlay.position === "top" ? "▲" : overlay.position === "center" ? "●" : "▼"}
+                          {overlay.position.includes("left") ? "◀" : overlay.position.includes("right") ? "▶" : overlay.position.startsWith("top") ? "▲" : overlay.position.startsWith("middle") ? "●" : "▼"}
                         </button>
                         <button
                           type="button"
@@ -2409,10 +2781,35 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a transition button (fade/dissolve/wipe/slide - blends into that clip from the one before it). Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
+            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a simple Off/Fade transition button. Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
+
+        {sourceEditorId && (() => {
+          const sourceItem = items.find((item) => item.id === sourceEditorId);
+          const sourceTrim = sourceItem ? itemTrims[sourceItem.id] : null;
+          const sourceDuration = sourceItem ? itemDurations[sourceItem.id] : null;
+          if (!sourceItem || !sourceTrim || !sourceDuration) return null;
+          return (
+            <div className="space-y-3 rounded-2xl border border-border bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">Edit source window</p>
+                  <p className="text-xs text-muted">The original file stays whole. Choose which section appears in this timeline block.</p>
+                </div>
+                <button onClick={() => setSourceEditorId(null)} className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted">Done</button>
+              </div>
+              <video src={sourceItem.previewUrl} controls className="h-48 w-full rounded-xl bg-black object-contain" />
+              <div className="relative h-8 rounded-lg bg-slate-200">
+                <div className="absolute inset-y-0 rounded-lg bg-purple/30" style={{ left: `${(sourceTrim.start / sourceDuration) * 100}%`, right: `${100 - (sourceTrim.end / sourceDuration) * 100}%` }} />
+                <input aria-label="Source window start" type="range" min="0" max={sourceDuration} step="0.1" value={sourceTrim.start} onChange={(e) => updateItemTrim(sourceItem.id, { start: Math.min(Number(e.target.value), sourceTrim.end - 0.2) })} className="absolute inset-x-0 top-0 h-4 w-full accent-purple" />
+                <input aria-label="Source window end" type="range" min="0" max={sourceDuration} step="0.1" value={sourceTrim.end} onChange={(e) => updateItemTrim(sourceItem.id, { end: Math.max(Number(e.target.value), sourceTrim.start + 0.2) })} className="absolute inset-x-0 bottom-0 h-4 w-full accent-purple" />
+              </div>
+              <div className="flex justify-between text-xs text-muted"><span>In {formatTime(sourceTrim.start)}</span><span>Using {formatTime(sourceTrim.end - sourceTrim.start)} of {formatTime(sourceDuration)}</span><span>Out {formatTime(sourceTrim.end)}</span></div>
+            </div>
+          );
+        })()}
 
         {/* Hidden audio elements powering the preview below - one per
             track, kept in sync via syncAudioTracksTo. Not visible; the
@@ -2456,7 +2853,7 @@ function StitchPageInner() {
                 now the box height never changes, and object-contain
                 letterboxes whatever's playing (any mix of portrait/
                 landscape clips) inside it instead. */}
-            <div className="relative flex h-56 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black sm:h-64">
+            <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
               <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
               {/* Text/image overlays are shown live here too (2026-09-16) -
                   unlike fades, these are purely positional/content-based,
@@ -2482,12 +2879,13 @@ function StitchPageInner() {
               })}
               {textOverlays.map((overlay) => {
                 if (previewTime < overlay.startSec || previewTime >= overlay.endSec || !overlay.text.trim()) return null;
-                const posClass = overlay.position === "top" ? "top-3" : overlay.position === "center" ? "top-1/2 -translate-y-1/2" : "bottom-3";
+                const posClass = overlay.position.startsWith("top") ? "top-3" : overlay.position.startsWith("middle") ? "top-1/2 -translate-y-1/2" : "bottom-3";
+                const xClass = overlay.position.endsWith("left") ? "left-3 text-left" : overlay.position.endsWith("right") ? "right-3 text-right" : "inset-x-2 text-center";
                 const sizeClass = overlay.size === "small" ? "text-sm" : overlay.size === "medium" ? "text-lg" : "text-2xl";
                 return (
                   <div
                     key={overlay.id}
-                    className={`pointer-events-none absolute inset-x-2 ${posClass} truncate rounded bg-black/45 px-3 py-1 text-center font-bold ${sizeClass}`}
+                    className={`pointer-events-none absolute ${xClass} ${posClass} truncate rounded bg-black/45 px-3 py-1 font-bold ${sizeClass}`}
                     style={{ color: overlay.color }}
                   >
                     {overlay.text}
@@ -2498,6 +2896,15 @@ function StitchPageInner() {
             <div className="flex items-center gap-2">
               <button onClick={handlePreviewPlayToggle} className="shrink-0 rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
                 {previewPlaying ? "❚❚ Pause" : "▶ Preview"}
+              </button>
+              <button onClick={splitAtPlayhead} disabled={!videoTimelineEntries.some((entry) => previewTime > entry.timelineStart + 0.1 && previewTime < entry.timelineEnd - 0.1)} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted disabled:opacity-40" title="Split the selected video at the playhead">
+                Split
+              </button>
+              <button onClick={undoEdit} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted" title="Undo (⌘Z)">
+                Undo
+              </button>
+              <button onClick={redoEdit} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted" title="Redo (⇧⌘Z)">
+                Redo
               </button>
               {/* Mute toggle (2026-09-16, per direct request - "preview
                   should have the option to mute or play with sound") -
@@ -2519,7 +2926,7 @@ function StitchPageInner() {
               </div>
             </div>
             <p className="text-[11px] italic text-muted">
-              An approximate preview of your edit as it stands - clips in order with trims and speed applied, your audio track(s) layered in at the position you set. Runs entirely on your device, nothing is uploaded or encoded yet. Fades and transitions aren&apos;t simulated here (this player just plays your raw files) but they are real in the exported file - export below to see them.
+              Live local preview with the same clip order, trims, source windows, speed, audio placement, volume, and selected canvas ratio. Export adds the exact encoded fades and transitions.
             </p>
           </div>
         )}
@@ -2538,13 +2945,35 @@ function StitchPageInner() {
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
 
+        <label className="mr-2 inline-flex items-center gap-2 text-sm text-muted">
+          Format
+          <select value={aspectPreset} onChange={(e) => setAspectPreset(e.target.value as AspectPreset)} className="rounded-full border border-border bg-white px-3 py-2 text-sm text-ink">
+            <option value="16:9">Landscape 16:9</option>
+            <option value="9:16">Portrait 9:16</option>
+            <option value="1:1">Square 1:1</option>
+          </select>
+        </label>
+        <label className="mr-2 inline-flex items-center gap-2 text-sm text-muted">
+          Quality
+          <select value={exportQuality} onChange={(e) => setExportQuality(e.target.value as ExportQuality)} className="rounded-full border border-border bg-white px-3 py-2 text-sm text-ink">
+            <option value="1080p">1080p</option>
+            <option value="720p">720p (faster)</option>
+          </select>
+        </label>
+
         <button
           onClick={handleCombine}
-          disabled={items.length < 2 || status === "loading-ffmpeg" || status === "processing"}
+          disabled={items.length < 1 || status === "loading-ffmpeg" || status === "processing"}
           className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50"
         >
-          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Combining… ${progress}%` : "Download my video"}
+          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Exporting ${exportQuality}… ${progress}%` : `Download ${exportQuality}`}
         </button>
+
+        {status === "processing" && (
+          <button onClick={cancelCombine} className="ml-2 rounded-full border border-border px-4 py-3 text-sm font-semibold text-muted">
+            Cancel export
+          </button>
+        )}
 
         {status === "done" && resultUrl && (
           <div className="space-y-3 rounded-2xl border border-border bg-white p-6">

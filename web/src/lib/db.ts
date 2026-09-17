@@ -3,8 +3,15 @@ import { randomBytes } from "crypto";
 import { PLANS, type PlanId } from "./plans";
 
 // POSTGRES_URL is what Vercel's Postgres (Neon-backed) integration injects
-// automatically once the database is linked to this project.
-const sql = neon(process.env.POSTGRES_URL!);
+// automatically once the database is linked to this project. Keep the
+// client lazy: constructing neon() at module import time makes a local
+// production build crash before initSchema() can return its useful,
+// actionable configuration error.
+const sql = (strings: TemplateStringsArray, ...values: unknown[]) => {
+  const url = process.env.POSTGRES_URL;
+  if (!url) throw new Error("Server misconfiguration: POSTGRES_URL is not set.");
+  return neon(url)(strings, ...values);
+};
 
 export type Subscriber = {
   id: string;
