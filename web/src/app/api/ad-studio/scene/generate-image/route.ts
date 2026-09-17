@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, MAX_SCENE_IMAGE_GENERATIONS, recordAdStudioSceneImageGeneration } from "@/lib/db";
+import {
+  getAdStudioScene,
+  getAdStudioSceneProjectOwner,
+  initSchema,
+  MAX_SCENE_IMAGE_GENERATIONS,
+  claimAdStudioSceneImageSlot,
+  releaseAdStudioSceneImageSlot,
+  recordAdStudioSceneImageGeneration,
+} from "@/lib/db";
 import { generateImageFromPrompt } from "@/lib/fal";
 
 // generateImageFromPrompt polls fal for up to 90s internally - give this
@@ -24,25 +32,29 @@ export async function POST(req: NextRequest) {
 
     const scene = await getAdStudioScene(sceneId);
     if (!scene) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
-    // Real cost-exposure fix (security audit, 2026-09-16): this route had NO
-    // cap at all - checked before spending anything on the (paid) fal call
-    // below, same reasoning as edit-image's own cap check just above it.
-    if (scene.image_generate_count >= MAX_SCENE_IMAGE_GENERATIONS) {
+    // Real fix (follow-up audit, 2026-09-17): reserve the slot atomically
+    // BEFORE spending anything on the paid fal call below - the old
+    // check-then-spend shape could let two concurrent requests both pass a
+    // plain read-based check and both pay for fal, only racing on who
+    // recorded the result afterward. See claimAdStudioSceneImageSlot's own
+    // comment in db.ts for the full before/after reasoning.
+    if (!(await claimAdStudioSceneImageSlot(sceneId))) {
       return NextResponse.json(
         { error: `This scene has already used its ${MAX_SCENE_IMAGE_GENERATIONS} free image generations - edit the current image or start a new project.` },
         { status: 400 },
       );
     }
 
-    const imageUrl = await generateImageFromPrompt(scene.image_prompt);
-    const recorded = await recordAdStudioSceneImageGeneration(sceneId, imageUrl);
-    if (!recorded) {
-      // Lost a race against another generate request for the same scene -
-      // the call already succeeded and cost real money, so still return the
-      // new image rather than discard it, just without crediting past the
-      // cap (same tradeoff edit-image's own race-loss path accepts).
-      return NextResponse.json({ imageUrl, warning: "Generation limit reached" });
+    let imageUrl: string;
+    try {
+      imageUrl = await generateImageFromPrompt(scene.image_prompt);
+    } catch (err) {
+      // The slot was reserved but never spent - give it back so a failed
+      // attempt doesn't cost the user one of their real generations.
+      await releaseAdStudioSceneImageSlot(sceneId);
+      throw err;
     }
+    await recordAdStudioSceneImageGeneration(sceneId, imageUrl);
     return NextResponse.json({ imageUrl });
   } catch (err) {
     console.error("ad-studio scene image generation failed", err);

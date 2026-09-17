@@ -12,6 +12,7 @@ Usage (on a manually-started pod):
     /workspace/sloane/.venv/bin/python scripts/06_inference_server.py
 Then reachable at the pod's RunPod HTTP-proxy URL for port 8000.
 """
+import hmac
 import os
 import uuid
 from pathlib import Path
@@ -58,7 +59,11 @@ if not _DEV_SERVER_TOKEN:
 def require_token(authorization: str | None = Header(default=None)):
     if not _DEV_SERVER_TOKEN:
         return  # opt-in - see comment above
-    if authorization != f"Bearer {_DEV_SERVER_TOKEN}":
+    # Real fix (2026-09-17, follow-up audit): plain `!=` on a secret is a
+    # timing side-channel - see modal_app.py's identical fix. This server
+    # now also backs the Cascade backend's Mac leg (@/lib/inferenceBackend's
+    # generateViaMac), not just Pod mode, so it's worth the same treatment.
+    if authorization is None or not hmac.compare_digest(authorization, f"Bearer {_DEV_SERVER_TOKEN}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

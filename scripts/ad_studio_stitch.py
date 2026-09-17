@@ -37,6 +37,7 @@ modal_app.py's own auth was already set up -
 
 Deploy: modal deploy scripts/ad_studio_stitch.py
 """
+import hmac
 import json
 import os
 import subprocess
@@ -58,7 +59,9 @@ def _require_shared_secret(request: fastapi.Request):
     expected = os.environ.get("MODAL_SHARED_SECRET")
     if not expected:
         raise fastapi.HTTPException(status_code=500, detail="Server misconfigured: MODAL_SHARED_SECRET not set")
-    if request.headers.get("authorization", "") != f"Bearer {expected}":
+    # Real fix (2026-09-17, follow-up audit): see modal_app.py's identical
+    # fix - plain `!=` on a secret is a timing side-channel.
+    if not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {expected}"):
         raise fastapi.HTTPException(status_code=401, detail="Unauthorized")
 
 

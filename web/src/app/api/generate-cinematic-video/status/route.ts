@@ -28,7 +28,10 @@ const VEO_DURATION = "8s";
 // final result the moment it finishes.
 export async function GET(req: NextRequest) {
   const jobId = req.nextUrl.searchParams.get("jobId");
-  const accessToken = req.nextUrl.searchParams.get("access_token");
+  // Real fix (follow-up audit, 2026-09-17): read from a request header, not
+  // the query string - see pollVideoJob's matching fix in page.tsx for why
+  // (server logs/browser history/Referer exposure otherwise).
+  const accessToken = req.headers.get("x-access-token");
   if (!jobId) {
     return NextResponse.json({ error: "jobId is required" }, { status: 400 });
   }
