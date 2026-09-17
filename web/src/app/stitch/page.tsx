@@ -133,11 +133,17 @@ function effectiveClipDuration(trim: Pick<ItemTrim, "start" | "end" | "speed">):
   return Math.max(0, (trim.end - trim.start) / Math.max(0.1, trim.speed));
 }
 
-const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
-const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
+// Real removal (follow-up review, 2026-09-17, direct request "remove all
+// limits on uploads"): video clip count, audio track count, and image
+// overlay count caps (MAX_FILES/MAX_AUDIO_TRACKS/MAX_IMAGE_OVERLAYS) are
+// gone - matches the same reasoning already applied to file size (this tool
+// costs nothing server-side regardless of how much is added; the real
+// ceiling is per-device browser memory, not a number this app should
+// second-guess for the visitor). MAX_TEXT_OVERLAYS/MAX_CAPTION_OVERLAYS_TOTAL
+// are untouched - manually-typed titles and auto-generated captions aren't
+// uploads, so they're outside what was actually asked for here.
 const MAX_TEXT_OVERLAYS = 8; // MANUALLY added titles/captions - a generous cap for a few titles/watermarks, kept small deliberately since each is its own row in the editable list below
 const MAX_CAPTION_OVERLAYS_TOTAL = 150; // auto-CAPTIONS (2026-09-17) reuse the same TextOverlay model but realistically produce many short segments (one per spoken phrase) - a separate, much higher cap so a real multi-minute video isn't truncated to a handful of captions, while still bounding the ffmpeg drawtext filter graph for an extreme edge case
-const MAX_IMAGE_OVERLAYS = 4; // each is a real extra ffmpeg input held in browser memory, same reasoning as audio tracks
 // A soft (dismissible, non-blocking) warning threshold, not a hard cap - per
 // direct discussion (2026-09-17, "why have the cap at all"): this tool costs
 // nothing server-side regardless of file size, and a fixed byte limit would
@@ -684,6 +690,17 @@ function StitchPageInner() {
   const stageVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const currentStageItemIdRef = useRef<string | null>(null); // which item's file is currently loaded into the stage <video>, so we only reassign .src on an actual clip change
+  // Real fade/transition preview simulation (follow-up review, 2026-09-17,
+  // direct request "simulate everything"). A second, overlaid <video>
+  // plays the INCOMING clip during a transition window while the primary
+  // keeps playing the OUTGOING clip's tail - see getActiveTransition/
+  // syncTransitionVideoTo below for the actual blending. Muted: this
+  // preview blends VIDEO for real, but not audio (a true audio crossfade
+  // would need Web Audio gain-node mixing between two playing elements,
+  // real work beyond what a quick preview needs) - audio still switches at
+  // the same moment it always did, same as before this feature existed.
+  const transitionVideoRef = useRef<HTMLVideoElement | null>(null);
+  const currentTransitionItemIdRef = useRef<string | null>(null);
 
   // Picks up scenes handed off from /ads (2026-09-14, per direct request -
   // "at the end they have an option to click create full ad where we
@@ -701,8 +718,7 @@ function StitchPageInner() {
       .split(",")
       .map((u) => decodeURIComponent(u))
       .filter(Boolean)
-      .filter(isAllowedPreloadUrl)
-      .slice(0, MAX_FILES);
+      .filter(isAllowedPreloadUrl);
     if (urls.length === 0) return;
     preloadedRef.current = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- preload state is the external fetch lifecycle.
@@ -742,13 +758,7 @@ function StitchPageInner() {
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
       previewUrl: URL.createObjectURL(file),
     }));
-    setItems((prev) => {
-      if (prev.length + added.length > MAX_FILES) {
-        setError(`You can use up to ${MAX_FILES} video clips.`);
-        return prev;
-      }
-      return [...prev, ...added];
-    });
+    setItems((prev) => [...prev, ...added]);
     audioFiles.forEach((file) => void addAudioTrack(file));
     if (videoFiles.length === 0 && audioFiles.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
   }
@@ -1088,6 +1098,49 @@ function StitchPageInner() {
   // param and applyBoundarySnap.
   const clipBoundaries: number[] = [0, ...videoTimelineEntries.map((e) => e.timelineEnd)];
 
+  // Real transition simulation (2026-09-17, "simulate everything"): finds
+  // whether final-timeline second `t` falls inside a clip-to-clip
+  // transition's real overlap window - by construction (see
+  // videoTimelineEntries above) that window is exactly `to`'s own
+  // [timelineStart, timelineStart + transitionDuration), which always
+  // equals the outgoing clip's own last `transitionDuration` seconds. Blend
+  // is 0 at the very start of the window (fully the outgoing clip) and
+  // approaches 1 at the end (fully the incoming clip) - the same 0..1 curve
+  // ffmpeg's own xfade/acrossfade progress through.
+  function getActiveTransition(t: number): { from: TimelineVideoEntry; to: TimelineVideoEntry; blend: number } | null {
+    for (let i = 1; i < videoTimelineEntries.length; i++) {
+      const to = videoTimelineEntries[i];
+      if (to.transitionDuration <= 0) continue;
+      const start = to.timelineStart;
+      const end = start + to.transitionDuration;
+      if (t >= start && t < end) {
+        return { from: videoTimelineEntries[i - 1], to, blend: (t - start) / to.transitionDuration };
+      }
+    }
+    return null;
+  }
+
+  // Real per-clip fade-to-black simulation (2026-09-17, same request). Both
+  // fadeIn/fadeOut are stored in TIMELINE seconds (post-speed) - see
+  // fadeFilterFragment's own export-side comment for why that's the right
+  // unit - so this only needs the clip's own timeline window, not any
+  // speed/source-time conversion. Layered ABOVE the video but BELOW image/
+  // text overlays in the JSX below to match the real export's own layering
+  // (pass 1 fades the raw video; pass 2 draws overlays on top of the
+  // already-faded frames afterward, so overlay content stays legible
+  // through a fade rather than fading out itself).
+  function getFadeOpacityAt(t: number): number {
+    const entry = videoTimelineEntries.find((e) => t >= e.timelineStart && t < e.timelineEnd);
+    if (!entry) return 0;
+    const trim = itemTrims[entry.item.id];
+    if (!trim) return 0;
+    const localT = t - entry.timelineStart;
+    const duration = entry.timelineEnd - entry.timelineStart;
+    if (trim.fadeIn > 0 && localT < trim.fadeIn) return 1 - localT / trim.fadeIn;
+    if (trim.fadeOut > 0 && localT > duration - trim.fadeOut) return (localT - (duration - trim.fadeOut)) / trim.fadeOut;
+    return 0;
+  }
+
   function updateItemTrim(id: string, patch: Partial<ItemTrim>) {
     setItemTrims((prev) => {
       const current = prev[id];
@@ -1122,21 +1175,16 @@ function StitchPageInner() {
     try {
       const duration = await getAudioDuration(file);
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
-      let added = false;
       setAudioTracks((prev) => {
-        if (prev.length >= MAX_AUDIO_TRACKS) return prev;
-        added = true;
         const kind: AudioTrack["kind"] = prev.length === 0 ? "dialogue" : prev.length === 1 ? "music" : "other";
         return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1, kind }];
       });
-      if (added) {
-        // Waveform decode is best-effort and purely visual - a track that
-        // fails to decode (unusual format) still works, its timeline block
-        // just shows a plain block with no waveform instead.
-        getAudioPeaks(file)
-          .then((peaks) => setTrackWaveforms((prev) => ({ ...prev, [id]: peaks })))
-          .catch(() => {});
-      }
+      // Waveform decode is best-effort and purely visual - a track that
+      // fails to decode (unusual format) still works, its timeline block
+      // just shows a plain block with no waveform instead.
+      getAudioPeaks(file)
+        .then((peaks) => setTrackWaveforms((prev) => ({ ...prev, [id]: peaks })))
+        .catch(() => {});
     } catch (err) {
       setAudioTrackError(err instanceof Error ? err.message : "Could not read this audio file");
     }
@@ -1402,10 +1450,6 @@ function StitchPageInner() {
   function splitAtPlayhead() {
     const entry = videoTimelineEntries.find((candidate) => previewTime >= candidate.timelineStart && previewTime < candidate.timelineEnd);
     if (!entry || previewTime <= entry.timelineStart + 0.1 || previewTime >= entry.timelineEnd - 0.1) return;
-    if (items.length >= MAX_FILES) {
-      setError(`You can use up to ${MAX_FILES} video clips.`);
-      return;
-    }
     const cut = entry.trimStart + (previewTime - entry.timelineStart) * entry.speed;
     const originalTrim = itemTrims[entry.item.id];
     if (!originalTrim) return;
@@ -1486,23 +1530,55 @@ function StitchPageInner() {
   // site), since reassigning `.src` always forces a real reload.
   // `currentTime` can only be set once the browser has metadata for the
   // new src, hence the one-shot `loadedmetadata` listener.
-  function loadAndPlayEntry(entry: TimelineVideoEntry, localStart: number) {
+  function loadAndPlayEntry(entry: TimelineVideoEntry, localStart: number, shouldPlay = true) {
     const v = stageVideoRef.current;
     if (!v) return;
     const onLoaded = () => {
       v.currentTime = localStart;
       // Real speed ramping (2026-09-17) simulated live in the preview too,
       // not just the export - native <video> playbackRate is a genuine,
-      // correct way to do this (unlike fades/transitions, which the quick
-      // preview doesn't attempt to simulate - see the panel's own note).
+      // correct way to do this.
       v.playbackRate = entry.speed;
       v.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
-      v.play().catch(() => {});
+      if (shouldPlay) v.play().catch(() => {});
       v.removeEventListener("loadedmetadata", onLoaded);
     };
     v.addEventListener("loadedmetadata", onLoaded);
     v.src = entry.item.previewUrl;
     v.load();
+  }
+
+  // Drives the secondary (transition) <video> during a real transition
+  // window - see getActiveTransition above for the window math. Only
+  // reloads `.src` when the incoming clip actually changes (scrubbing
+  // within the same window shouldn't reload/restart it), otherwise just
+  // corrects drift the same way syncAudioTracksTo does.
+  function syncTransitionVideoTo(toEntry: TimelineVideoEntry, t: number, shouldPlay: boolean) {
+    const sv = transitionVideoRef.current;
+    if (!sv) return;
+    const localStart = toEntry.trimStart + (t - toEntry.timelineStart) * toEntry.speed;
+    if (currentTransitionItemIdRef.current !== toEntry.item.id) {
+      currentTransitionItemIdRef.current = toEntry.item.id;
+      const onLoaded = () => {
+        sv.currentTime = localStart;
+        sv.playbackRate = toEntry.speed;
+        if (shouldPlay) sv.play().catch(() => {});
+        sv.removeEventListener("loadedmetadata", onLoaded);
+      };
+      sv.addEventListener("loadedmetadata", onLoaded);
+      sv.src = toEntry.item.previewUrl;
+      sv.load();
+    } else {
+      if (Math.abs(sv.currentTime - localStart) > 0.3) sv.currentTime = localStart;
+      if (shouldPlay && sv.paused) sv.play().catch(() => {});
+      if (!shouldPlay && !sv.paused) sv.pause();
+    }
+  }
+
+  function clearTransitionVideo() {
+    const sv = transitionVideoRef.current;
+    if (sv && !sv.paused) sv.pause();
+    currentTransitionItemIdRef.current = null;
   }
 
   // Keeps every audio track's own <audio> element in sync with the
@@ -1537,7 +1613,13 @@ function StitchPageInner() {
   function seekPreviewTo(t: number) {
     const clamped = Math.max(0, Math.min(t, totalVideoDuration));
     setPreviewTime(clamped);
-    if (!previewPlaying) return;
+    // Real fix (follow-up review, 2026-09-17, "simulate everything"): this
+    // used to bail out entirely while paused, so dragging the scrubber with
+    // playback stopped moved the readout but never actually updated the
+    // visible frame - especially confusing now that fades/transitions
+    // render live from `previewTime`, since the CSS blend would move but
+    // the video underneath wouldn't. Now always syncs the actual frame;
+    // only whether it PLAYS afterward depends on previewPlaying.
     const entry = videoTimelineEntries.find((e) => clamped < e.timelineEnd) ?? videoTimelineEntries[videoTimelineEntries.length - 1];
     if (!entry) return;
     // Final-timeline seconds -> this clip's own SOURCE-file seconds: at
@@ -1548,13 +1630,17 @@ function StitchPageInner() {
     const localStart = entry.trimStart + (clamped - entry.timelineStart) * entry.speed;
     if (currentStageItemIdRef.current !== entry.item.id) {
       currentStageItemIdRef.current = entry.item.id;
-      loadAndPlayEntry(entry, localStart);
+      loadAndPlayEntry(entry, localStart, previewPlaying);
     } else if (stageVideoRef.current) {
       stageVideoRef.current.currentTime = localStart;
       stageVideoRef.current.playbackRate = entry.speed;
       stageVideoRef.current.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
+      if (!previewPlaying && !stageVideoRef.current.paused) stageVideoRef.current.pause();
     }
-    syncAudioTracksTo(clamped, true);
+    syncAudioTracksTo(clamped, previewPlaying);
+    const transition = getActiveTransition(clamped);
+    if (transition) syncTransitionVideoTo(transition.to, clamped, previewPlaying);
+    else clearTransitionVideo();
   }
 
   function handleScrubberClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -1574,6 +1660,7 @@ function StitchPageInner() {
     if (!v) return;
     if (previewPlaying) {
       v.pause();
+      transitionVideoRef.current?.pause();
       for (const el of Object.values(audioElRefs.current)) el?.pause();
       setPreviewPlaying(false);
       return;
@@ -1592,6 +1679,9 @@ function StitchPageInner() {
       v.play().catch(() => {});
     }
     syncAudioTracksTo(startAt, true);
+    const transitionOnPlay = getActiveTransition(startAt);
+    if (transitionOnPlay) syncTransitionVideoTo(transitionOnPlay.to, startAt, true);
+    else clearTransitionVideo();
     setPreviewTime(startAt);
     setPreviewPlaying(true);
   }
@@ -1620,16 +1710,26 @@ function StitchPageInner() {
     const t = entry.timelineStart + (v.currentTime - entry.trimStart) / entry.speed;
     setPreviewTime(t);
     syncAudioTracksTo(t, true);
+    // Real transition simulation (2026-09-17) - while the primary video
+    // plays out the last `transitionDuration` seconds of its own window,
+    // also drive the secondary video through the incoming clip's own head
+    // so the two can cross-blend in the JSX below.
+    const transition = getActiveTransition(t);
+    if (transition) syncTransitionVideoTo(transition.to, t, true);
+    else clearTransitionVideo();
     if (v.currentTime >= entry.trimEnd - 0.05) {
       const idx = videoTimelineEntries.indexOf(entry);
       const next = videoTimelineEntries[idx + 1];
       if (next) {
         currentStageItemIdRef.current = next.item.id;
         loadAndPlayEntry(next, next.trimStart);
+        clearTransitionVideo();
       } else {
         v.pause();
+        transitionVideoRef.current?.pause();
         for (const el of Object.values(audioElRefs.current)) el?.pause();
         currentStageItemIdRef.current = null;
+        clearTransitionVideo();
         setPreviewPlaying(false);
         setPreviewTime(0);
       }
@@ -2296,7 +2396,7 @@ function StitchPageInner() {
                 {items.length === 0 ? (
                   <label className="flex h-16 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-white/25 text-xs text-white/50">
                     <input className="sr-only" type="file" accept="video/*" multiple onChange={(e) => handleFiles(e.target.files)} />
-                    Drag video clips here, or click to choose (up to {MAX_FILES})
+                    Drag video clips here, or click to choose
                   </label>
                 ) : (
                   <div className="flex gap-1">
@@ -2682,12 +2782,10 @@ function StitchPageInner() {
                     </div>
                   );
                 })}
-                {audioTracks.length < MAX_AUDIO_TRACKS && (
-                  <label className="mt-1 flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
-                    <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
-                    {audioTracks.length === 0 ? "Drag audio files here, or click to add a track" : "+ Add another audio track"}
-                  </label>
-                )}
+                <label className="mt-1 flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
+                  <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
+                  {audioTracks.length === 0 ? "Drag audio files here, or click to add a track" : "+ Add another audio track"}
+                </label>
               </div>
 
               {/* Text titles/captions (2026-09-16, per direct request -
@@ -2888,12 +2986,10 @@ function StitchPageInner() {
                     </div>
                   </div>
                 ))}
-                {imageOverlays.length < MAX_IMAGE_OVERLAYS && (
-                  <label className="mt-1 flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
-                    <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && addImageOverlay(e.target.files[0])} />
-                    {imageOverlays.length === 0 ? "Drag an image here, or click to add" : "+ Add another image"}
-                  </label>
-                )}
+                <label className="mt-1 flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-white/25 text-[11px] text-white/50">
+                  <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && addImageOverlay(e.target.files[0])} />
+                  {imageOverlays.length === 0 ? "Drag an image here, or click to add" : "+ Add another image"}
+                </label>
               </div>
             </div>
           </div>
@@ -2972,6 +3068,51 @@ function StitchPageInner() {
                 landscape clips) inside it instead. */}
             <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
               <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
+              {/* Real transition simulation (2026-09-17, "simulate
+                  everything"): a second <video> overlaid on the primary,
+                  playing the INCOMING clip's own head while the primary
+                  plays the OUTGOING clip's tail - see getActiveTransition/
+                  syncTransitionVideoTo above. The CSS per transition type
+                  is a genuine visual approximation (opacity cross-fade for
+                  fade/dissolve, a clip-path reveal for wipes, a transform
+                  slide for slides) matched to each button's own arrow
+                  direction - not pixel-identical to ffmpeg's own xfade
+                  curves, but a real, moving preview of the actual chosen
+                  transition rather than a hard cut. Always mounted (so its
+                  ref is stable for the sync functions above) but only
+                  visually shown during an active transition window. */}
+              {(() => {
+                const transition = getActiveTransition(previewTime);
+                const blend = transition?.blend ?? 0;
+                const type = transition?.to.transitionType ?? "none";
+                const style: React.CSSProperties =
+                  type === "wipeleft"
+                    ? { clipPath: `inset(0 0 0 ${(1 - blend) * 100}%)` }
+                    : type === "wiperight"
+                      ? { clipPath: `inset(0 ${(1 - blend) * 100}% 0 0)` }
+                      : type === "slideleft"
+                        ? { transform: `translateX(${(1 - blend) * 100}%)` }
+                        : type === "slideright"
+                          ? { transform: `translateX(${-(1 - blend) * 100}%)` }
+                          : { opacity: blend }; // fade/dissolve/none
+                return (
+                  <video
+                    ref={transitionVideoRef}
+                    muted
+                    playsInline
+                    className="absolute inset-0 h-full w-full object-contain"
+                    style={{ ...style, visibility: transition ? "visible" : "hidden" }}
+                  />
+                );
+              })()}
+              {/* Real per-clip fade-to-black simulation (2026-09-17, same
+                  request) - see getFadeOpacityAt above. Deliberately layered
+                  below the image/text overlays further down, matching the
+                  real export's own order (pass 1 fades the raw video; pass
+                  2 draws overlays on top of the already-faded frames
+                  afterward), so overlay content stays legible through a
+                  fade instead of fading out itself. */}
+              <div className="pointer-events-none absolute inset-0 bg-black" style={{ opacity: getFadeOpacityAt(previewTime) }} />
               {/* Text/image overlays are shown live here too (2026-09-16) -
                   unlike fades, these are purely positional/content-based,
                   so a plain absolutely-positioned DOM layer synced to
@@ -3039,7 +3180,7 @@ function StitchPageInner() {
               </div>
             </div>
             <p className="text-[11px] italic text-muted">
-              Live local preview with the same clip order, trims, source windows, speed, audio placement, volume, and selected canvas ratio. Export adds the exact encoded fades and transitions.
+              Live local preview with the same clip order, trims, source windows, speed, audio placement, volume, selected canvas ratio, and now fades/transitions too - a real visual approximation, not pixel-identical to the exact encoded result you get from Export.
             </p>
           </div>
         )}
