@@ -238,6 +238,7 @@ type SavedStitchProject = {
   itemTrims: Record<string, ItemTrim>;
   aspectPreset: AspectPreset;
   exportQuality: ExportQuality;
+  duckMusic?: boolean;
 };
 
 function openStitchProjectDb(): Promise<IDBDatabase> {
@@ -657,6 +658,7 @@ function StitchPageInner() {
     const urls = videos.split(",").map((u) => decodeURIComponent(u)).filter(Boolean).slice(0, MAX_FILES);
     if (urls.length === 0) return;
     preloadedRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- preload state is the external fetch lifecycle.
     setPreloading(true);
     setError("");
     (async () => {
@@ -714,6 +716,7 @@ function StitchPageInner() {
         itemTrims,
         aspectPreset,
         exportQuality,
+        duckMusic,
       });
       setError("");
       setSyncMessage("Project saved on this device.");
@@ -738,6 +741,7 @@ function StitchPageInner() {
       setItemTrims(saved.itemTrims);
       setAspectPreset(saved.aspectPreset);
       setExportQuality(saved.exportQuality);
+      setDuckMusic(saved.duckMusic ?? false);
       setError("");
       setSyncMessage("Project loaded from this device.");
     } catch (err) {
@@ -918,18 +922,22 @@ function StitchPageInner() {
       }
       if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
         splitAtPlayhead();
       }
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
         deleteAtPlayhead();
       }
       if (event.key === " ") {
         event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
         handlePreviewPlayToggle();
       }
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
+        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
         seekPreviewTo(previewTime + (event.key === "ArrowLeft" ? -0.1 : 0.1));
       }
     }
