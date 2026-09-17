@@ -39,6 +39,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 type VideoItem = { file: File; id: string; previewUrl: string };
 type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
 type AspectPreset = "16:9" | "9:16" | "1:1";
+type ExportQuality = "1080p" | "720p";
 
 // A single audio layer placed on the COMBINED video's own timeline - e.g.
 // "this song plays from 1:23 to 1:45 of the final video" - not a trim of
@@ -503,6 +504,7 @@ function StitchPageInner() {
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
   const [aspectPreset, setAspectPreset] = useState<AspectPreset>("16:9");
+  const [exportQuality, setExportQuality] = useState<ExportQuality>("1080p");
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
@@ -546,6 +548,7 @@ function StitchPageInner() {
   const lastSnapshotRef = useRef<{ items: VideoItem[]; trims: Record<string, ItemTrim> } | null>(null);
   const historyReadyRef = useRef(false);
   const historyRestoringRef = useRef(false);
+  const splitIdRef = useRef(0);
   const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
   const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
   // Live floating readout shown next to the cursor while dragging any
@@ -1204,8 +1207,10 @@ function StitchPageInner() {
     const cut = entry.trimStart + (previewTime - entry.timelineStart) * entry.speed;
     const originalTrim = itemTrims[entry.item.id];
     if (!originalTrim) return;
-    const first: VideoItem = { ...entry.item, id: `${entry.item.id}-a-${Math.random().toString(36).slice(2)}`, previewUrl: URL.createObjectURL(entry.item.file) };
-    const second: VideoItem = { ...entry.item, id: `${entry.item.id}-b-${Math.random().toString(36).slice(2)}`, previewUrl: URL.createObjectURL(entry.item.file) };
+    splitIdRef.current += 1;
+    const splitId = splitIdRef.current;
+    const first: VideoItem = { ...entry.item, id: `${entry.item.id}-a-${splitId}`, previewUrl: URL.createObjectURL(entry.item.file) };
+    const second: VideoItem = { ...entry.item, id: `${entry.item.id}-b-${splitId}`, previewUrl: URL.createObjectURL(entry.item.file) };
     setItems((prev) => {
       const index = prev.findIndex((item) => item.id === entry.item.id);
       if (index < 0) return prev;
@@ -1518,8 +1523,11 @@ function StitchPageInner() {
       // and letterboxed into the selected aspect ratio, so mixed source
       // dimensions never break the MP4 and users can choose landscape,
       // portrait, or square without any server-side processing.
-      const outputW = aspectPreset === "9:16" ? 1080 : 1920;
-      const outputH = aspectPreset === "9:16" ? 1920 : 1080;
+      const baseW = aspectPreset === "9:16" ? 1080 : 1920;
+      const baseH = aspectPreset === "9:16" ? 1920 : 1080;
+      const qualityScale = exportQuality === "720p" ? 2 / 3 : 1;
+      const outputW = Math.round((baseW * qualityScale) / 2) * 2;
+      const outputH = Math.round((baseH * qualityScale) / 2) * 2;
       // Each clip's real in/out range (2026-09-16, per direct request:
       // "can it also mask parts of the video clips... users want only a
       // part of the clip"). Re-clamped here against this clip's ACTUAL
@@ -2685,13 +2693,20 @@ function StitchPageInner() {
             <option value="1:1">Square 1:1</option>
           </select>
         </label>
+        <label className="mr-2 inline-flex items-center gap-2 text-sm text-muted">
+          Quality
+          <select value={exportQuality} onChange={(e) => setExportQuality(e.target.value as ExportQuality)} className="rounded-full border border-border bg-white px-3 py-2 text-sm text-ink">
+            <option value="1080p">1080p</option>
+            <option value="720p">720p (faster)</option>
+          </select>
+        </label>
 
         <button
           onClick={handleCombine}
           disabled={items.length < 1 || status === "loading-ffmpeg" || status === "processing"}
           className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50"
         >
-          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Exporting 1080p… ${progress}%` : "Download 1080p"}
+          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Exporting ${exportQuality}… ${progress}%` : `Download ${exportQuality}`}
         </button>
 
         {status === "processing" && (
