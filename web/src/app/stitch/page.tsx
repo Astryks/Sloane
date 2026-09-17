@@ -600,9 +600,10 @@ function StitchPageInner() {
   // thumbnail already has.
   const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
   const [itemTrims, setItemTrims] = useState<Record<string, ItemTrim>>({});
-  const undoStackRef = useRef<Array<{ items: VideoItem[]; trims: Record<string, ItemTrim> }>>([]);
-  const redoStackRef = useRef<Array<{ items: VideoItem[]; trims: Record<string, ItemTrim> }>>([]);
-  const lastSnapshotRef = useRef<{ items: VideoItem[]; trims: Record<string, ItemTrim> } | null>(null);
+  type HistorySnapshot = { items: VideoItem[]; trims: Record<string, ItemTrim>; audioTracks: AudioTrack[]; textOverlays: TextOverlay[]; imageOverlays: ImageOverlay[]; duckMusic: boolean };
+  const undoStackRef = useRef<HistorySnapshot[]>([]);
+  const redoStackRef = useRef<HistorySnapshot[]>([]);
+  const lastSnapshotRef = useRef<HistorySnapshot | null>(null);
   const historyReadyRef = useRef(false);
   const historyRestoringRef = useRef(false);
   const splitIdRef = useRef(0);
@@ -873,8 +874,8 @@ function StitchPageInner() {
   const historySignature = `${items.map((item) => item.id).join(",")}|${items.map((item) => {
     const trim = itemTrims[item.id];
     return trim ? `${trim.start}:${trim.end}:${trim.speed}:${trim.transitionType}:${trim.muteAudio}` : "";
-  }).join(",")}`;
-  const historySnapshot = { items, trims: itemTrims };
+  }).join(",")}|${audioTracks.map((track) => `${track.id}:${track.startSec}:${track.endSec}:${track.volume}:${track.kind}`).join(",")}|${textOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.text}:${overlay.position}`).join(",")}|${imageOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.position}:${overlay.scalePercent}`).join(",")}|${duckMusic}`;
+  const historySnapshot: HistorySnapshot = { items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic };
   useEffect(() => {
     if (!historyReadyRef.current) {
       historyReadyRef.current = true;
@@ -896,19 +897,27 @@ function StitchPageInner() {
   function undoEdit() {
     const previous = undoStackRef.current.pop();
     if (!previous) return;
-    redoStackRef.current.push({ items, trims: itemTrims });
+    redoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic });
     historyRestoringRef.current = true;
     setItems(previous.items);
     setItemTrims(previous.trims);
+    setAudioTracks(previous.audioTracks);
+    setTextOverlays(previous.textOverlays);
+    setImageOverlays(previous.imageOverlays);
+    setDuckMusic(previous.duckMusic);
   }
 
   function redoEdit() {
     const next = redoStackRef.current.pop();
     if (!next) return;
-    undoStackRef.current.push({ items, trims: itemTrims });
+    undoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic });
     historyRestoringRef.current = true;
     setItems(next.items);
     setItemTrims(next.trims);
+    setAudioTracks(next.audioTracks);
+    setTextOverlays(next.textOverlays);
+    setImageOverlays(next.imageOverlays);
+    setDuckMusic(next.duckMusic);
   }
 
   useEffect(() => {
