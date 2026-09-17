@@ -92,6 +92,23 @@ export async function initSchema() {
       processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Real fix (follow-up audit, 2026-09-17, stronger version): the webhook's
+  // creditsCommitted flag (see billing/webhook/route.ts) already stops an
+  // unclaim from happening once a grant has landed, but that only guards
+  // THIS call of the handler - it doesn't stop a genuinely new delivery of
+  // the same event (a second webhook attempt Stripe fires for reasons
+  // outside our control) from granting again. A ledger keyed on the Stripe
+  // event id itself, checked with an atomic INSERT ... ON CONFLICT DO
+  // NOTHING, makes the grant idempotent no matter how many times or in what
+  // order this event is ever delivered - see claimVideoCreditGrant below.
+  await sql`
+    CREATE TABLE IF NOT EXISTS stripe_credit_grants (
+      event_id TEXT PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      credits INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
   // Real cross-tenant leak partially fixed here (security audit,
   // 2026-09-16): /api/job-status has no auth/ownership check at all (by
   // design - it serves both anonymous free-tier and logged-in requests with
@@ -1084,6 +1101,21 @@ export async function addVideoCredits(userId: string, amount: number) {
     VALUES (${userId}, ${amount})
     ON CONFLICT (user_id) DO UPDATE SET balance = video_credits.balance + ${amount}, updated_at = now()
   `;
+}
+
+// Call this BEFORE addVideoCredits in the Stripe webhook's video-credit-pack
+// branch, and only actually grant if it returns true - see
+// stripe_credit_grants' own comment in initSchema for why this exists.
+// Atomic (INSERT ... ON CONFLICT DO NOTHING), so no number of concurrent or
+// repeated deliveries of the same Stripe event can ever grant twice.
+export async function claimVideoCreditGrant(eventId: string, userId: string, credits: number): Promise<boolean> {
+  const rows = await sql`
+    INSERT INTO stripe_credit_grants (event_id, user_id, credits)
+    VALUES (${eventId}, ${userId}, ${credits})
+    ON CONFLICT (event_id) DO NOTHING
+    RETURNING event_id
+  `;
+  return rows.length > 0;
 }
 
 // Atomic decrement guarded by the balance check in the same statement -

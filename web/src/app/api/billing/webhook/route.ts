@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
-import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, addVideoCredits, claimStripeEvent, unclaimStripeEvent } from "@/lib/db";
+import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, addVideoCredits, claimVideoCreditGrant, claimStripeEvent, unclaimStripeEvent } from "@/lib/db";
 import { planFromStripePriceId, PLANS } from "@/lib/plans";
 import { videoCreditPackFromStripePriceId } from "@/lib/videoPaygo";
 import { sendAccessCodeEmail, sendPaymentFailedEmail, sendVideoCreditReceiptEmail } from "@/lib/email";
@@ -86,8 +86,19 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
         const pack = priceId ? videoCreditPackFromStripePriceId(priceId) : null;
         const userId = session.client_reference_id;
         if (pack && userId) {
-          await addVideoCredits(userId, pack.credits);
-          ctx.creditsCommitted = true;
+          // Real fix (follow-up audit, 2026-09-17, stronger version): a
+          // ledger keyed on this exact Stripe event id makes the grant
+          // idempotent regardless of how many times or in what order this
+          // event is ever delivered - see claimVideoCreditGrant's own
+          // comment in db.ts. ctx.creditsCommitted (below) still guards
+          // THIS call from unclaiming after a grant, but this is what
+          // actually stops a genuinely separate redelivery from granting
+          // twice.
+          const granted = await claimVideoCreditGrant(event.id, userId, pack.credits);
+          if (granted) {
+            await addVideoCredits(userId, pack.credits);
+            ctx.creditsCommitted = true;
+          }
           const email = session.customer_details?.email;
           if (email) await sendVideoCreditReceiptEmail(email, pack, session.amount_total ?? pack.priceUsdCents);
         } else {
