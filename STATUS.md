@@ -1,3 +1,6 @@
+- **Roadmap continuation (current pass):** added client-side split-at-playhead, in-memory undo/redo (including Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z), per-track volume, and a simple local “Lower music under dialogue” ducking switch. Export ducking uses FFmpeg `sidechaincompress`; preview volume/ducking follows the same setting. No media leaves the browser.
+- Added the requested aspect presets and single-clip export in the preceding pass; all edits remain non-destructive against the original `File` objects.
+
 **Latest update, 2026-09-17 - `/stitch` roadmap pass: local export controls and single-clip support.**
 - Added a cancellable local FFmpeg export with a visible progress percentage; cancelling terminates the browser FFmpeg instance and returns the editor to an idle state without uploading media.
 - Added empty-output validation so a broken/zero-byte local render cannot be presented as a successful MP4 download.

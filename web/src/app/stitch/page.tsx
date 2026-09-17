@@ -54,6 +54,7 @@ type AudioTrack = {
   sourceDuration: number; // the uploaded file's own real length
   startSec: number; // where this track starts playing, in the FINAL video's timeline
   endSec: number; // where it stops - (endSec - startSec) is how long it plays for
+  volume: number; // 0..1, applied locally during export and preview
   fadeIn: number; // seconds, ramps up from silence at the start of its own play window
   fadeOut: number; // seconds, ramps down to silence at the end of its own play window
 };
@@ -505,6 +506,7 @@ function StitchPageInner() {
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [duckMusic, setDuckMusic] = useState(false);
   const [audioTrackError, setAudioTrackError] = useState("");
   // Text/image overlays (2026-09-16, per direct request - "how can they add
   // images and text/titles"). Same drag-to-reposition/resize pattern as
@@ -539,6 +541,11 @@ function StitchPageInner() {
   // thumbnail already has.
   const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
   const [itemTrims, setItemTrims] = useState<Record<string, ItemTrim>>({});
+  const undoStackRef = useRef<Array<{ items: VideoItem[]; trims: Record<string, ItemTrim> }>>([]);
+  const redoStackRef = useRef<Array<{ items: VideoItem[]; trims: Record<string, ItemTrim> }>>([]);
+  const lastSnapshotRef = useRef<{ items: VideoItem[]; trims: Record<string, ItemTrim> } | null>(null);
+  const historyReadyRef = useRef(false);
+  const historyRestoringRef = useRef(false);
   const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
   const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
   // Live floating readout shown next to the cursor while dragging any
@@ -737,6 +744,64 @@ function StitchPageInner() {
     };
   }, [items]);
 
+  // Lightweight local history for the destructive-looking editor actions.
+  // Files themselves remain the original File objects; only the arrangement
+  // and source windows are captured, so undo never re-encodes or duplicates
+  // media. Keeping this in memory makes it free and disappears with the tab.
+  const historySignature = `${items.map((item) => item.id).join(",")}|${items.map((item) => {
+    const trim = itemTrims[item.id];
+    return trim ? `${trim.start}:${trim.end}:${trim.speed}:${trim.transitionType}` : "";
+  }).join(",")}`;
+  const historySnapshot = { items, trims: itemTrims };
+  useEffect(() => {
+    if (!historyReadyRef.current) {
+      historyReadyRef.current = true;
+      lastSnapshotRef.current = historySnapshot;
+      return;
+    }
+    if (historyRestoringRef.current) {
+      historyRestoringRef.current = false;
+      lastSnapshotRef.current = historySnapshot;
+      return;
+    }
+    if (lastSnapshotRef.current) undoStackRef.current.push(lastSnapshotRef.current);
+    if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    lastSnapshotRef.current = historySnapshot;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historySignature]);
+
+  function undoEdit() {
+    const previous = undoStackRef.current.pop();
+    if (!previous) return;
+    redoStackRef.current.push({ items, trims: itemTrims });
+    historyRestoringRef.current = true;
+    setItems(previous.items);
+    setItemTrims(previous.trims);
+  }
+
+  function redoEdit() {
+    const next = redoStackRef.current.pop();
+    if (!next) return;
+    undoStackRef.current.push({ items, trims: itemTrims });
+    historyRestoringRef.current = true;
+    setItems(next.items);
+    setItemTrims(next.trims);
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      if (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        event.shiftKey ? redoEdit() : undoEdit();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   // One thumbnail per clip, generated once (not tied to the current trim -
   // see getVideoThumbnail's comment) and never regenerated for a clip
   // already in itemThumbnails, even across re-runs from reordering/adding
@@ -857,7 +922,7 @@ function StitchPageInner() {
       setAudioTracks((prev) => {
         if (prev.length >= MAX_AUDIO_TRACKS) return prev;
         added = true;
-        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0 }];
+        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1 }];
       });
       if (added) {
         // Waveform decode is best-effort and purely visual - a track that
@@ -872,7 +937,7 @@ function StitchPageInner() {
     }
   }
 
-  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut">>) {
+  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut" | "volume">>) {
     setAudioTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
@@ -1129,6 +1194,33 @@ function StitchPageInner() {
     });
   }
 
+  function splitAtPlayhead() {
+    const entry = videoTimelineEntries.find((candidate) => previewTime >= candidate.timelineStart && previewTime < candidate.timelineEnd);
+    if (!entry || previewTime <= entry.timelineStart + 0.1 || previewTime >= entry.timelineEnd - 0.1) return;
+    if (items.length >= MAX_FILES) {
+      setError(`You can use up to ${MAX_FILES} video clips.`);
+      return;
+    }
+    const cut = entry.trimStart + (previewTime - entry.timelineStart) * entry.speed;
+    const originalTrim = itemTrims[entry.item.id];
+    if (!originalTrim) return;
+    const first: VideoItem = { ...entry.item, id: `${entry.item.id}-a-${Math.random().toString(36).slice(2)}`, previewUrl: URL.createObjectURL(entry.item.file) };
+    const second: VideoItem = { ...entry.item, id: `${entry.item.id}-b-${Math.random().toString(36).slice(2)}`, previewUrl: URL.createObjectURL(entry.item.file) };
+    setItems((prev) => {
+      const index = prev.findIndex((item) => item.id === entry.item.id);
+      if (index < 0) return prev;
+      return [...prev.slice(0, index), first, second, ...prev.slice(index + 1)];
+    });
+    setItemTrims((prev) => {
+      const next = { ...prev };
+      delete next[entry.item.id];
+      next[first.id] = { ...originalTrim, end: cut, fadeOut: 0, transitionType: "none" };
+      next[second.id] = { ...originalTrim, start: cut, fadeIn: 0, transitionType: "none" };
+      return next;
+    });
+    setPreviewTime(entry.timelineStart);
+  }
+
   // Real drag-to-reorder on the timeline (2026-09-16, per direct follow-up
   // - previously only the ↑/↓ buttons could reorder clips). Deliberately
   // NOT the same drag mechanism as the trim handles: this only needs to
@@ -1208,9 +1300,10 @@ function StitchPageInner() {
   // instant, un-encoded preview, not a frame-accurate guarantee of what the
   // real exported file will sound like.
   function syncAudioTracksTo(t: number, shouldPlay: boolean) {
-    for (const track of audioTracks) {
+    for (const [trackIndex, track] of audioTracks.entries()) {
       const el = audioElRefs.current[track.id];
       if (!el) continue;
+      el.volume = Math.max(0, Math.min(1, (track.volume ?? 1) * (duckMusic && trackIndex > 0 ? 0.35 : 1)));
       const inWindow = shouldPlay && t >= track.startSec && t < track.endSec;
       if (!inWindow) {
         if (!el.paused) el.pause();
@@ -1632,8 +1725,16 @@ function StitchPageInner() {
           const trackFadeIn = Math.max(0, Math.min(track.fadeIn, half));
           const trackFadeOut = Math.max(0, Math.min(track.fadeOut, half));
           const fade = fadeFilterFragment("afade", duration, trackFadeIn, trackFadeOut);
-          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},${fade}volume=0.25,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS[track${i}]`;
-          trackLabels.push(`[track${i}]`);
+          const trackLabel = `[track${i}]`;
+          const gain = Math.max(0, Math.min(1, track.volume ?? 1)) * 0.25;
+          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},${fade}volume=${gain},aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS${trackLabel}`;
+          if (duckMusic && i > 0) {
+            const duckedLabel = `[ducked${i}]`;
+            filterComplex += `;${trackLabel}[dialogue]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=300${duckedLabel}`;
+            trackLabels.push(duckedLabel);
+          } else {
+            trackLabels.push(trackLabel);
+          }
         }
         if (trackLabels.length > 0) {
           filterComplex += `;[dialogue]${trackLabels.join("")}amix=inputs=${1 + trackLabels.length}:duration=first:normalize=0[finalaudio]`;
@@ -2082,7 +2183,13 @@ function StitchPageInner() {
                 )}
               </div>
 
-              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
+              <div className="mb-1 mt-3 flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
+                <label className="flex items-center gap-1 text-[10px] text-white/60" title="Lower tracks after the first while the stitched dialogue is playing">
+                  <input type="checkbox" checked={duckMusic} onChange={(e) => setDuckMusic(e.target.checked)} />
+                  Lower music under dialogue
+                </label>
+              </div>
               <div onDragOver={(e) => e.preventDefault()} onDrop={handleAudioDrop} className="space-y-1">
                 {audioTracks.map((track) => {
                   const peaks = trackWaveforms[track.id];
@@ -2113,6 +2220,7 @@ function StitchPageInner() {
                         <div className="pointer-events-none h-full">
                           {shownPeaks ? <WaveformBars peaks={shownPeaks} /> : <span className="text-[9px] text-white/70">{track.file.name}</span>}
                         </div>
+                        <input aria-label={`Volume for ${track.file.name}`} type="range" min="0" max="1" step="0.05" value={track.volume ?? 1} onChange={(e) => updateAudioTrack(track.id, { volume: Number(e.target.value) })} onPointerDown={(e) => e.stopPropagation()} className="absolute bottom-0.5 right-5 z-20 h-2 w-16 accent-emerald-300" title="Track volume" />
                         {/* Delete, directly on the block (2026-09-16, per
                             direct request - "give the option to delete...
                             if they upload the wrong file"), on top of the
@@ -2520,6 +2628,15 @@ function StitchPageInner() {
             <div className="flex items-center gap-2">
               <button onClick={handlePreviewPlayToggle} className="shrink-0 rounded-full bg-purple px-4 py-2 text-xs font-semibold text-white">
                 {previewPlaying ? "❚❚ Pause" : "▶ Preview"}
+              </button>
+              <button onClick={splitAtPlayhead} disabled={!videoTimelineEntries.some((entry) => previewTime > entry.timelineStart + 0.1 && previewTime < entry.timelineEnd - 0.1)} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted disabled:opacity-40" title="Split the selected video at the playhead">
+                Split
+              </button>
+              <button onClick={undoEdit} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted" title="Undo (⌘Z)">
+                Undo
+              </button>
+              <button onClick={redoEdit} className="shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold text-muted" title="Redo (⇧⌘Z)">
+                Redo
               </button>
               {/* Mute toggle (2026-09-16, per direct request - "preview
                   should have the option to mute or play with sound") -
