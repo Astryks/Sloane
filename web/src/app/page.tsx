@@ -1904,12 +1904,21 @@ function VideoOptionCard({
   description,
   href,
   cta,
+  imageSrc,
 }: {
   icon: string;
   title: string;
   description: string;
   href: string;
   cta: string;
+  // Optional small illustration shown under the title/description
+  // (2026-09-17, per direct request for the "Free video editor" card).
+  // Framed in its own soft rounded/tinted box rather than dropped in raw -
+  // this card's own art (a black-and-white vintage engraving) would clash
+  // with the site's clean white-card/purple-accent look otherwise; grayscale
+  // + a slight sepia/purple tint and a small fixed size (an accent, not a
+  // photo) is what keeps it feeling like part of the same design system.
+  imageSrc?: string;
 }) {
   return (
     <a href={href} className="block rounded-2xl border border-border bg-white p-5 shadow-soft transition hover:shadow-lg">
@@ -1918,6 +1927,16 @@ function VideoOptionCard({
         <div className="min-w-0 flex-1">
           <p className="text-base font-bold text-foreground">{title}</p>
           <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>
+          {imageSrc && (
+            <div className="mt-3 inline-block rounded-xl border border-border bg-purple-wash p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element -- a small static decorative asset, not worth next/image's overhead here */}
+              <img
+                src={imageSrc}
+                alt=""
+                className="h-14 w-auto rounded-md opacity-80 grayscale [filter:sepia(0.4)_saturate(1.4)_hue-rotate(220deg)]"
+              />
+            </div>
+          )}
           <span className="mt-3 inline-block text-sm font-semibold text-purple underline">{cta} →</span>
         </div>
       </div>
@@ -1983,6 +2002,7 @@ export default function Home() {
           description="Stitch different scenes together to create one video here for free. Combine your generated clips (from any section above, or your storyboard) in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
           href="/stitch"
           cta="Combine my videos"
+          imageSrc="/vintage-camera.jpg"
         />
 
         <Footer />
