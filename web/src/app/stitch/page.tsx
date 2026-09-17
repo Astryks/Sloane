@@ -745,16 +745,19 @@ function StitchPageInner() {
   // dragOver is required or the browser refuses the drop entirely.
   function handleVideoDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
+    e.stopPropagation();
     handleFiles(e.dataTransfer.files);
   }
   function handleAudioDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
+    e.stopPropagation();
     Array.from(e.dataTransfer.files)
       .filter((f) => f.type.startsWith("audio/"))
       .forEach((f) => addAudioTrack(f));
   }
   function handleImageDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
+    e.stopPropagation();
     Array.from(e.dataTransfer.files)
       .filter((f) => f.type.startsWith("image/"))
       .forEach((f) => addImageOverlay(f));
@@ -2044,7 +2047,7 @@ function StitchPageInner() {
   return (
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
-      <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
+      <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
         {preloading && (
           <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">Loading your scenes from Ads…</p>
         )}
