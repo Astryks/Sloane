@@ -126,7 +126,8 @@ function effectiveClipDuration(trim: Pick<ItemTrim, "start" | "end" | "speed">):
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
 const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
-const MAX_TEXT_OVERLAYS = 8; // titles/captions are cheap (no ffmpeg input each), a generous cap just to keep the timeline usable
+const MAX_TEXT_OVERLAYS = 8; // MANUALLY added titles/captions - a generous cap for a few titles/watermarks, kept small deliberately since each is its own row in the editable list below
+const MAX_CAPTION_OVERLAYS_TOTAL = 150; // auto-CAPTIONS (2026-09-17) reuse the same TextOverlay model but realistically produce many short segments (one per spoken phrase) - a separate, much higher cap so a real multi-minute video isn't truncated to a handful of captions, while still bounding the ffmpeg drawtext filter graph for an extreme edge case
 const MAX_IMAGE_OVERLAYS = 4; // each is a real extra ffmpeg input held in browser memory, same reasoning as audio tracks
 // Shared time scale for the visual timeline below - both the video track
 // (a plain flex row, its blocks' widths summing to the real total) and
@@ -509,6 +510,17 @@ function StitchPageInner() {
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [imageOverlays, setImageOverlays] = useState<ImageOverlay[]>([]);
   const [overlayError, setOverlayError] = useState("");
+  // Auto-captions (2026-09-17, per direct request - "auto captions would be
+  // good too"). `captionsBusy` covers both the one-time Whisper model
+  // download and the actual per-clip transcription so the button can't be
+  // double-clicked mid-run; `captionsMessage` surfaces real progress/errors
+  // rather than a silent spinner. The worker itself is created lazily (only
+  // once a user actually asks for captions) and kept for the rest of the
+  // session so the model isn't re-downloaded on a second run.
+  const [captionsBusy, setCaptionsBusy] = useState(false);
+  const [captionsMessage, setCaptionsMessage] = useState("");
+  const captionsWorkerRef = useRef<Worker | null>(null);
+  const captionsRunIdRef = useRef(0); // a plain counter (not Math.random/Date.now) so generated ids stay unique across runs without an impure call
   // Auto-sync (2026-09-16, per direct request - "if someone shoots with a
   // camera and a mic, is there a way to sync the 2... can you build that").
   // `syncingTrackId` drives a small per-track loading state; `syncMessage`
@@ -943,6 +955,132 @@ function StitchPageInner() {
   function cycleTextSize(overlay: TextOverlay) {
     const next = TEXT_SIZES[(TEXT_SIZES.indexOf(overlay.size) + 1) % TEXT_SIZES.length];
     updateTextOverlay(overlay.id, { size: next });
+  }
+
+  // Decodes a clip's own audio and renders just its trimmed [start, end)
+  // range down to mono 16kHz - the exact format Whisper expects - using an
+  // OfflineAudioContext so the downmix/resample happens in one pass with no
+  // manual sample-rate math. Returns null (not a thrown error) for a clip
+  // with no real audio stream at all (a silent render) or a trivially short
+  // range, since "nothing to caption here" is an expected, common case, not
+  // a failure.
+  async function extractClipAudioForCaptions(file: File, trimStart: number, trimEnd: number): Promise<Float32Array | null> {
+    const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const decodeCtx = new AudioContextCtor();
+    let decoded: AudioBuffer;
+    try {
+      decoded = await decodeCtx.decodeAudioData(await file.arrayBuffer());
+    } catch {
+      return null; // no decodable audio track on this clip
+    } finally {
+      await decodeCtx.close();
+    }
+    const start = Math.max(0, Math.min(trimStart, decoded.duration));
+    const end = Math.max(start, Math.min(trimEnd, decoded.duration));
+    const clipDuration = end - start;
+    if (clipDuration <= 0.15) return null; // nothing meaningful to transcribe
+    const WHISPER_SAMPLE_RATE = 16000;
+    const offlineCtx = new OfflineAudioContext(1, Math.ceil(clipDuration * WHISPER_SAMPLE_RATE), WHISPER_SAMPLE_RATE);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offlineCtx.destination);
+    source.start(0, start, clipDuration);
+    const rendered = await offlineCtx.startRendering();
+    return rendered.getChannelData(0).slice();
+  }
+
+  function getCaptionsWorker(): Worker {
+    if (!captionsWorkerRef.current) {
+      captionsWorkerRef.current = new Worker(new URL("./captionsWorker.ts", import.meta.url), { type: "module" });
+    }
+    return captionsWorkerRef.current;
+  }
+
+  type WhisperChunk = { text: string; timestamp: [number, number | null] };
+
+  // One request/response round-trip with the captions worker - the worker
+  // may also emit "progress" messages while the (one-time, cached
+  // afterward) model download is in flight, surfaced via onProgress rather
+  // than resolving/rejecting the promise early.
+  function transcribeOnWorker(worker: Worker, audio: Float32Array, onProgress: () => void): Promise<WhisperChunk[]> {
+    return new Promise((resolve, reject) => {
+      const handleMessage = (e: MessageEvent) => {
+        const data = e.data as { type: string; chunks?: WhisperChunk[]; message?: string };
+        if (data.type === "progress") {
+          onProgress();
+          return;
+        }
+        worker.removeEventListener("message", handleMessage);
+        if (data.type === "result") resolve(data.chunks ?? []);
+        else reject(new Error(data.message || "Transcription failed"));
+      };
+      worker.addEventListener("message", handleMessage);
+      worker.postMessage({ type: "transcribe", audio }, [audio.buffer]);
+    });
+  }
+
+  // Auto-captions: transcribes every clip's own audio (in its ORIGINAL,
+  // pre-speed form - transcribing already-sped-up audio would skew
+  // Whisper's timing/accuracy for no benefit) via a client-side Whisper
+  // model running in a Worker, then converts each returned {text, start,
+  // end} segment from "seconds into that clip's own source file" into
+  // "seconds on the FINAL combined timeline" using the exact same
+  // `timelineStart + localOffset / speed` conversion already established
+  // for the live preview player (see handleStageTimeUpdate) - so a caption
+  // stays correctly aligned even on a sped-up or transitioned clip. Results
+  // become regular TextOverlay entries, reusing the export pipeline built
+  // for manual titles/captions with no changes needed there.
+  async function generateCaptions() {
+    if (captionsBusy || videoTimelineEntries.length === 0) return;
+    setCaptionsBusy(true);
+    setCaptionsMessage("Loading caption model (one-time download, ~75MB, cached after)…");
+    let modelLoadedOnce = false;
+    captionsRunIdRef.current += 1;
+    const runId = captionsRunIdRef.current; // disambiguates ids across repeated caption-generation runs
+    try {
+      const worker = getCaptionsWorker();
+      const newOverlays: TextOverlay[] = [];
+      for (let i = 0; i < videoTimelineEntries.length; i++) {
+        const entry = videoTimelineEntries[i];
+        if (modelLoadedOnce) {
+          setCaptionsMessage(`Transcribing clip ${i + 1} of ${videoTimelineEntries.length}…`);
+        }
+        const audio = await extractClipAudioForCaptions(entry.item.file, entry.trimStart, entry.trimEnd);
+        if (!audio) continue; // this clip has no real audio to caption
+        const chunks = await transcribeOnWorker(worker, audio, () => {
+          modelLoadedOnce = true;
+        });
+        modelLoadedOnce = true;
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+          const chunk = chunks[chunkIndex];
+          const text = (chunk.text ?? "").trim();
+          if (!text) continue;
+          const [rawStart, rawEndMaybe] = chunk.timestamp ?? [0, null];
+          const rawEnd = rawEndMaybe ?? entry.trimEnd - entry.trimStart;
+          const finalStart = entry.timelineStart + Math.max(0, rawStart) / entry.speed;
+          const finalEnd = entry.timelineStart + Math.max(rawStart + 0.3, rawEnd) / entry.speed;
+          newOverlays.push({
+            id: `caption-${runId}-${i}-${chunkIndex}`,
+            text,
+            startSec: Math.min(finalStart, entry.timelineEnd),
+            endSec: Math.min(finalEnd, entry.timelineEnd),
+            position: "bottom",
+            size: "small",
+            color: "#ffffff",
+          });
+        }
+      }
+      setTextOverlays((prev) => [...prev, ...newOverlays].slice(-MAX_CAPTION_OVERLAYS_TOTAL));
+      setCaptionsMessage(
+        newOverlays.length > 0
+          ? `Added ${newOverlays.length} caption${newOverlays.length === 1 ? "" : "s"} - edit or delete any of them below like any other text.`
+          : "No speech detected in these clips to caption.",
+      );
+    } catch (err) {
+      setCaptionsMessage(err instanceof Error ? err.message : "Caption generation failed");
+    } finally {
+      setCaptionsBusy(false);
+    }
   }
 
   // Adds an image (logo/watermark/photo) defaulted to the top-right corner
@@ -2068,7 +2206,20 @@ function StitchPageInner() {
                   reposition/resize as audio tracks, but with an actual
                   editable text input in the block itself since content
                   can't be set by dragging. */}
-              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-white/40">Text</p>
+              <div className="mb-1 mt-3 flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">Text</p>
+                {items.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={generateCaptions}
+                    disabled={captionsBusy}
+                    className="rounded-md bg-sky-600/80 px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-50"
+                  >
+                    {captionsBusy ? "Generating…" : "✨ Generate captions"}
+                  </button>
+                )}
+              </div>
+              {captionsMessage && <p className="mb-1 text-[10px] text-white/50">{captionsMessage}</p>}
               <div className="space-y-1">
                 {textOverlays.map((overlay) => (
                   <div key={overlay.id} className="relative h-12 rounded-lg bg-white/5">
