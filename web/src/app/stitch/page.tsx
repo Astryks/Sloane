@@ -695,7 +695,9 @@ function StitchPageInner() {
   // gesture) can still honor mute preferences and recover from autoplay blocks.
   const previewWantPlayRef = useRef(false);
   const previewMutedRef = useRef(previewMuted);
-  previewMutedRef.current = previewMuted;
+  useEffect(() => {
+    previewMutedRef.current = previewMuted;
+  }, [previewMuted]);
   // Real fade/transition preview simulation (follow-up review, 2026-09-17,
   // direct request "simulate everything"). A second, overlaid <video>
   // plays the INCOMING clip during a transition window while the primary
@@ -1544,14 +1546,21 @@ function StitchPageInner() {
         try {
           await el.play();
           if (preferSound) {
-            // Try restoring sound after playback has started.
+            // Some Chrome versions pause immediately when an element that
+            // was allowed to start muted is unmuted from this async path.
+            // Only keep sound if the element demonstrably keeps playing;
+            // otherwise remain muted so Preview visibly moves and let the
+            // user turn sound on with the speaker control.
             el.muted = false;
-            setPreviewMuted(false);
+            if (el.paused) {
+              el.muted = true;
+              setPreviewMuted(true);
+              setPreviewError("Preview is playing muted — tap the speaker icon to turn sound on.");
+            } else {
+              setPreviewMuted(false);
+            }
           } else {
             setPreviewMuted(true);
-          }
-          if (preferSound && el.muted) {
-            setPreviewError("Browser blocked sound on Preview — tap the speaker icon to unmute.");
           }
           return true;
         } catch {
