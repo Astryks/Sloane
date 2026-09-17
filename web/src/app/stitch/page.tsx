@@ -811,6 +811,14 @@ function StitchPageInner() {
         event.preventDefault();
         deleteAtPlayhead();
       }
+      if (event.key === " ") {
+        event.preventDefault();
+        handlePreviewPlayToggle();
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        seekPreviewTo(previewTime + (event.key === "ArrowLeft" ? -0.1 : 0.1));
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
