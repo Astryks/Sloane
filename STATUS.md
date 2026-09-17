@@ -853,6 +853,7 @@ Ran a systematic review across web, mobile, and the inference engine before a pl
 - Added Save locally/Load locally using browser IndexedDB. Saved projects retain the original video/audio/image File blobs plus trims, overlays, aspect preset, and export quality without accounts or server storage.
 - Loading a saved project now revokes the previous project’s preview/result object URLs first, preventing browser-memory leaks when users switch projects repeatedly.
 - Preview canvas now follows the selected 16:9, 9:16, or 1:1 export ratio while remaining height-capped for comfortable editing; helper copy describes the local WYSIWYG scope accurately.
+- Applied the same 500 MB local safety limit to audio-lane and image-overlay imports, closing the bypass through dedicated lane drop zones.
 - Added explicit audio roles (Dialogue/Music/Other). New tracks default sensibly, saved projects migrate older tracks, and ducking now lowers only tracks labelled Music instead of depending on track order.
 - Added page-level drag/drop import with event isolation: files dropped anywhere route automatically by type, while Video/Audio/Image lanes handle their own drops without duplicates.
 - Added a client-side 500 MB per-file safety limit with a clear skipped-file message to protect weak devices from exhausting browser/FFmpeg memory.

@@ -1050,6 +1050,10 @@ function StitchPageInner() {
   // independently placed on the combined video's timeline.
   async function addAudioTrack(file: File) {
     setAudioTrackError("");
+    if (file.size > MAX_FILE_BYTES) {
+      setAudioTrackError("This audio file is over the 500 MB local limit and was skipped.");
+      return;
+    }
     try {
       const duration = await getAudioDuration(file);
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
@@ -1292,6 +1296,10 @@ function StitchPageInner() {
   // common "brand bug" placement; fully adjustable afterward.
   function addImageOverlay(file: File) {
     setOverlayError("");
+    if (file.size > MAX_FILE_BYTES) {
+      setOverlayError("This image is over the 500 MB local limit and was skipped.");
+      return;
+    }
     const id = `img-${Math.random().toString(36).slice(2)}`;
     setImageOverlays((prev) => [
       ...prev,
