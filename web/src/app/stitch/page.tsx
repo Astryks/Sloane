@@ -570,6 +570,7 @@ function StitchPageInner() {
   // of the full-timeline preview below, so glancing at one clip doesn't
   // disturb the other.
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  const [sourceEditorId, setSourceEditorId] = useState<string | null>(null);
   // The full-edit "as you go" preview (2026-09-16, per direct request -
   // "give the ability to play the full audio and video as we go... make
   // sure this doesn't cost anything in server etc. and is fast"). Genuinely
@@ -2095,6 +2096,17 @@ function StitchPageInner() {
                                 {trim.speed}x
                               </button>
                             )}
+                            {trim && fullDuration != null && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); setSourceEditorId(item.id); }}
+                                title="Edit the non-destructive source window"
+                                className="flex h-4 items-center justify-center rounded-full bg-black/70 px-1 text-[7px] text-white"
+                              >
+                                Window
+                              </button>
+                            )}
                             <button
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
@@ -2552,6 +2564,31 @@ function StitchPageInner() {
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
+
+        {sourceEditorId && (() => {
+          const sourceItem = items.find((item) => item.id === sourceEditorId);
+          const sourceTrim = sourceItem ? itemTrims[sourceItem.id] : null;
+          const sourceDuration = sourceItem ? itemDurations[sourceItem.id] : null;
+          if (!sourceItem || !sourceTrim || !sourceDuration) return null;
+          return (
+            <div className="space-y-3 rounded-2xl border border-border bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">Edit source window</p>
+                  <p className="text-xs text-muted">The original file stays whole. Choose which section appears in this timeline block.</p>
+                </div>
+                <button onClick={() => setSourceEditorId(null)} className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted">Done</button>
+              </div>
+              <video src={sourceItem.previewUrl} controls className="h-48 w-full rounded-xl bg-black object-contain" />
+              <div className="relative h-8 rounded-lg bg-slate-200">
+                <div className="absolute inset-y-0 rounded-lg bg-purple/30" style={{ left: `${(sourceTrim.start / sourceDuration) * 100}%`, right: `${100 - (sourceTrim.end / sourceDuration) * 100}%` }} />
+                <input aria-label="Source window start" type="range" min="0" max={sourceDuration} step="0.1" value={sourceTrim.start} onChange={(e) => updateItemTrim(sourceItem.id, { start: Math.min(Number(e.target.value), sourceTrim.end - 0.2) })} className="absolute inset-x-0 top-0 h-4 w-full accent-purple" />
+                <input aria-label="Source window end" type="range" min="0" max={sourceDuration} step="0.1" value={sourceTrim.end} onChange={(e) => updateItemTrim(sourceItem.id, { end: Math.max(Number(e.target.value), sourceTrim.start + 0.2) })} className="absolute inset-x-0 bottom-0 h-4 w-full accent-purple" />
+              </div>
+              <div className="flex justify-between text-xs text-muted"><span>In {formatTime(sourceTrim.start)}</span><span>Using {formatTime(sourceTrim.end - sourceTrim.start)} of {formatTime(sourceDuration)}</span><span>Out {formatTime(sourceTrim.end)}</span></div>
+            </div>
+          );
+        })()}
 
         {/* Hidden audio elements powering the preview below - one per
             track, kept in sync via syncAudioTracksTo. Not visible; the
