@@ -134,6 +134,7 @@ function effectiveClipDuration(trim: Pick<ItemTrim, "start" | "end" | "speed">):
 }
 
 const MAX_FILES = 30; // generous ceiling on top of "8, 10, 20, or any number" - a real, honest limit given ffmpeg.wasm loads every file fully into browser memory (see the module docstring above)
+const MAX_FILE_BYTES = 500 * 1024 * 1024; // local-only guard for weak devices; avoids loading an unexpectedly huge source into ffmpeg.wasm memory
 const MAX_AUDIO_TRACKS = 6; // same reasoning - each track is a full extra ffmpeg input held in browser memory
 const MAX_TEXT_OVERLAYS = 8; // MANUALLY added titles/captions - a generous cap for a few titles/watermarks, kept small deliberately since each is its own row in the editable list below
 const MAX_CAPTION_OVERLAYS_TOTAL = 150; // auto-CAPTIONS (2026-09-17) reuse the same TextOverlay model but realistically produce many short segments (one per spoken phrase) - a separate, much higher cap so a real multi-minute video isn't truncated to a handful of captions, while still bounding the ffmpeg drawtext filter graph for an extreme edge case
@@ -682,8 +683,10 @@ function StitchPageInner() {
     if (!fileList) return;
     setError("");
     const files = Array.from(fileList);
-    const videoFiles = files.filter((file) => file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi)$/i.test(file.name));
-    const audioFiles = files.filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name));
+    const oversized = files.filter((file) => file.size > MAX_FILE_BYTES);
+    const usableFiles = files.filter((file) => file.size <= MAX_FILE_BYTES);
+    const videoFiles = usableFiles.filter((file) => file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi)$/i.test(file.name));
+    const audioFiles = usableFiles.filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name));
     const added = videoFiles.map((file) => ({
       file,
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
@@ -697,7 +700,8 @@ function StitchPageInner() {
       return [...prev, ...added];
     });
     audioFiles.forEach((file) => void addAudioTrack(file));
-    if (videoFiles.length === 0 && audioFiles.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
+    if (oversized.length > 0) setError(`${oversized.length} file${oversized.length === 1 ? "" : "s"} exceeded the 500 MB local limit and was skipped.`);
+    if (videoFiles.length === 0 && audioFiles.length === 0 && oversized.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
   }
 
   async function saveProjectLocally() {
