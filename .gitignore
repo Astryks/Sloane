@@ -1,0 +1,49 @@
+# Python
+.venv/
+.venv-mac/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+.next/
+out/
+
+# Audio/video data (large, not for git)
+raw_audio/
+clean_audio/
+training_data/
+zeroshot_test_output/
+*.wav
+*.mp4
+*.mov
+# Exception: these are production static assets Vercel must actually deploy
+# (click-to-preview voice samples), not source training data like the rest
+# of this section - the blanket *.wav rule above would otherwise silently
+# 404 the whole feature in production despite working locally.
+!web/public/voice-samples/*.wav
+# Same reasoning: Harper's fixed zero-shot reference clip is a production
+# asset the Modal deploy bundles into the image (see modal_app.py's
+# add_local_file), not source training data.
+!scripts/voice_references/*.wav
+# Same reasoning, for the character click-to-preview clips.
+!web/public/character-samples/*.mp4
+# Different reasoning, same fix: these are archived research/investigation
+# media (deliberately kept, not source training data) - see
+# docs/fal-video-research/assets/README.md for what's here and why.
+!docs/fal-video-research/assets/**/*.mp4
+# Same reasoning: the on-page model-comparison clips (same prompt/photo run
+# through each video engine) for the model showcase section.
+!web/public/model-showcase/*.mp4
+# Same reasoning: the "just for fun" product-ad showcase clips (our own
+# Lucy Labs cup image run through each engine) below the model showcase.
+!web/public/product-showcase/*.mp4
+
+# Env/secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+.secrets/

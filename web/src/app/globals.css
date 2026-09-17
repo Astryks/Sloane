@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fdf6f0;
+  --surface: #fffbf7;
+  --foreground: #3d3330;
+  --muted: #9a8b83;
+  --border: #f0e2d4;
+  --coral: #e8846b;
+  --coral-dark: #d66f55;
+  --rose: #e8a0a0;
+  --sage: #93b48c;
+  --lavender: #b3a6d6;
+  --butter: #e8c26b;
+
+  /* Section accents - warm-leaning, not icy/neon */
+  --pink: #dd7c9c;
+  --pink-wash: #fbeef2;
+  --blue: #6f97bd;
+  --blue-wash: #eaf1f6;
+  --purple: #9b7dc0;
+  --purple-wash: #f3edf9;
+
+  /* `cream`/`mint` were used across page.tsx, ads/page.tsx, and
+     stitch/page.tsx (bg-cream, bg-mint, border-mint) without ever being
+     added here - Tailwind v4 silently generates no rule for an
+     unrecognized color name, so every one of those was a real, invisible
+     no-op (confirmed via getComputedStyle: backgroundColor came back
+     transparent) - found 2026-09-14 while fixing a direct report that
+     panels were hard to read. `cream` matches the page's own
+     `--background` (it was standing in for the page bg, so make it real);
+     `mint` is a new, deliberately deeper green (#3f8068) chosen for a
+     real >=4.5:1 contrast ratio against white button text, not just
+     "any green" - the existing `--sage` is too light for that (2.3:1). */
+  --cream: #fdf6f0;
+  --mint: #3f8068;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-coral: var(--coral);
+  --color-coral-dark: var(--coral-dark);
+  --color-rose: var(--rose);
+  --color-sage: var(--sage);
+  --color-lavender: var(--lavender);
+  --color-butter: var(--butter);
+  --color-pink: var(--pink);
+  --color-pink-wash: var(--pink-wash);
+  --color-blue: var(--blue);
+  --color-blue-wash: var(--blue-wash);
+  --color-purple: var(--purple);
+  --color-purple-wash: var(--purple-wash);
+  --color-cream: var(--cream);
+  --color-mint: var(--mint);
+  --font-sans: var(--font-nunito);
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+}
+
+.art-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+}
+
+.page-content {
+  position: relative;
+  z-index: 1;
+}
+
+.art-backdrop > div {
+  flex: 1;
+  /* "cover" alone crops very differently depending on viewport aspect
+     ratio (which dimension overflows changes with shape), so a single
+     size/position doesn't frame well on both mobile and desktop -
+     tuned separately per breakpoint below. Mobile default avoids a
+     harsh hard-edged color-block seam in the source painting; desktop
+     zooms in on the doorway/balcony and keeps the red plant on the
+     right out of frame. */
+  background-size: cover;
+  background-position: 60% 15%;
+}
+
+@media (min-width: 768px) {
+  .art-backdrop > div {
+    background-size: 150%;
+    background-position: 15% 30%;
+  }
+}
+
+.art-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(253, 246, 240, 0.5);
+}
+
+.shadow-soft {
+  box-shadow:
+    0 1px 2px rgba(61, 51, 48, 0.04),
+    0 8px 24px -8px rgba(61, 51, 48, 0.1);
+}
+
+.shadow-soft-lg {
+  box-shadow:
+    0 2px 4px rgba(61, 51, 48, 0.04),
+    0 16px 40px -12px rgba(61, 51, 48, 0.14);
+}

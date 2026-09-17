@@ -1,0 +1,279 @@
+"use client";
+
+import { useEffect, useState, Suspense } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useAccessToken } from "@/lib/useAccessToken";
+import { SiteHeader } from "@/components/SiteHeader";
+
+type Generation = {
+  id: string;
+  kind: "preset" | "clone";
+  voiceLabel: string | null;
+  textPreview: string;
+  audioUrl: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+type AccountData = {
+  email: string;
+  accessToken: string | null;
+  subscriber: { plan: string; status: string; charactersUsed: number; periodEnd: string } | null;
+  generations: Generation[];
+};
+
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_token: "That link is missing its code — try requesting a new one.",
+  expired_link: "That sign-in link expired or was already used — request a new one below.",
+  google_state_mismatch: "That Google sign-in link expired — please try again.",
+  google_not_configured: "Google sign-in isn't set up yet — use email instead.",
+  google_failed: "Google sign-in didn't work — please try again or use email.",
+  google_email_unverified: "That Google account's email isn't verified — please verify it with Google first, or sign in with email instead.",
+};
+
+function daysLeft(expiresAt: string): number {
+  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+}
+
+function AccountPageInner() {
+  const { setToken } = useAccessToken();
+  const searchParams = useSearchParams();
+  const [data, setData] = useState<AccountData | null>(null);
+  const [checkedAuth, setCheckedAuth] = useState(false);
+  const [email, setEmail] = useState("");
+  const [linkSent, setLinkSent] = useState(false);
+  const [error, setError] = useState<string | null>(
+    ERROR_MESSAGES[searchParams.get("error") ?? ""] ?? null
+  );
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/account")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: AccountData | null) => {
+        setData(json);
+        if (json?.accessToken) setToken(json.accessToken);
+      })
+      .finally(() => setCheckedAuth(true));
+    // Only run once on mount - setToken identity isn't stable across renders
+    // and re-fetching on every render would be wasteful.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function requestLink(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/request-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Couldn't send that link");
+      setLinkSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send that link");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openBillingPortal() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Couldn't open billing portal");
+      window.location.href = json.url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't open billing portal");
+      setBusy(false);
+    }
+  }
+
+  async function signOut() {
+    setBusy(true);
+    await fetch("/api/auth/logout", { method: "POST" });
+    setToken(null);
+    window.location.reload();
+  }
+
+  if (!checkedAuth) {
+    return (
+      <div className="min-h-screen px-6 py-16">
+        <main className="mx-auto max-w-md">
+          <div className="rounded-[28px] border border-white/60 bg-surface/90 px-8 py-10 text-center text-sm text-muted shadow-soft-lg backdrop-blur-xl">
+            Loading…
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="min-h-screen px-6 py-16">
+        <main className="mx-auto flex max-w-md flex-col gap-6">
+          <SiteHeader
+            title="Sign in"
+            subtitle="No passwords here — we'll email you a link, or you can continue with Google."
+            current="account"
+          />
+
+          <div className="flex flex-col gap-4 rounded-[28px] border border-white/60 bg-surface/90 p-8 shadow-soft backdrop-blur-xl">
+            {error && <p className="rounded-xl bg-coral/10 px-4 py-3 text-sm text-coral-dark">{error}</p>}
+
+            {linkSent ? (
+              <p className="rounded-xl border border-border bg-white px-4 py-3 text-sm text-foreground">
+                Check your inbox — we sent a sign-in link to <strong>{email}</strong>. It works once and expires
+                in 15 minutes.
+              </p>
+            ) : (
+              <form onSubmit={requestLink} className="flex flex-col gap-3">
+                <input
+                  type="email"
+                  required
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="rounded-full border border-border bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-coral"
+                />
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="shadow-soft rounded-full bg-coral px-4 py-2 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-50"
+                >
+                  Email me a sign-in link
+                </button>
+              </form>
+            )}
+
+            <div className="flex items-center gap-3 text-xs text-muted">
+              <div className="h-px flex-1 bg-border" />
+              or
+              <div className="h-px flex-1 bg-border" />
+            </div>
+
+            <a
+              href="/api/auth/google/start"
+              className="flex w-full items-center justify-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold text-foreground shadow-soft transition hover:brightness-95"
+            >
+              Continue with Google
+            </a>
+
+            <a href="/billing" className="block text-center text-xs font-semibold text-coral-dark underline">
+              See plans →
+            </a>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen px-6 py-16">
+      <main className="mx-auto flex max-w-md flex-col gap-6">
+        <SiteHeader title="Your account" subtitle={data.email} current="account" />
+
+        <div className="rounded-[28px] border border-white/60 bg-surface/90 p-6 text-sm shadow-soft backdrop-blur-xl">
+          {data.subscriber ? (
+            data.subscriber.status === "canceled" ? (
+              <>
+                <p className="font-semibold text-foreground">Your {data.subscriber.plan} plan was canceled</p>
+                <p className="mt-1 text-muted">You can resubscribe any time - it only takes a minute.</p>
+                <a
+                  href="/billing"
+                  className="shadow-soft mt-4 inline-block rounded-full bg-coral px-4 py-2 text-xs font-bold text-white transition hover:brightness-105"
+                >
+                  Resubscribe
+                </a>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-foreground">
+                  {data.subscriber.plan} plan · {data.subscriber.status === "past_due" ? "payment needs updating" : "active"}
+                </p>
+                <p className="mt-1 text-muted">
+                  {data.subscriber.charactersUsed.toLocaleString()} characters used this period
+                </p>
+                <button
+                  onClick={openBillingPortal}
+                  disabled={busy}
+                  className="shadow-soft mt-4 rounded-full bg-coral px-4 py-2 text-xs font-bold text-white transition hover:brightness-105 disabled:opacity-50"
+                >
+                  Manage billing / cancel
+                </button>
+              </>
+            )
+          ) : (
+            <>
+              <p className="text-muted">You&apos;re on the free tier — no active plan yet.</p>
+              <a href="/billing" className="mt-2 inline-block text-xs font-semibold text-coral-dark underline">
+                See plans →
+              </a>
+            </>
+          )}
+        </div>
+
+        <div className="rounded-[28px] border border-white/60 bg-surface/90 p-6 shadow-soft backdrop-blur-xl">
+          <h2 className="mb-3 text-sm font-bold text-foreground">Recent generations</h2>
+          {data.generations.length === 0 ? (
+            <p className="text-sm text-muted">
+              Nothing yet — anything you generate while signed in will show up here for a couple of weeks.
+              Head to{" "}
+              <Link href="/" className="font-semibold text-coral-dark underline">
+                the generator
+              </Link>{" "}
+              to make your first one.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {data.generations.map((g) => (
+                <li key={g.id} className="rounded-xl border border-border bg-white px-4 py-3 text-sm">
+                  <p className="truncate text-foreground">
+                    {g.voiceLabel ? `${g.voiceLabel} — ` : ""}
+                    {g.textPreview}
+                  </p>
+                  <audio controls src={g.audioUrl} className="mt-2 w-full" />
+                  <div className="mt-1 flex items-center justify-between text-xs text-muted">
+                    <a href={g.audioUrl} download className="font-semibold text-coral-dark underline">
+                      Download
+                    </a>
+                    <span>expires in {daysLeft(g.expiresAt)}d</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <button
+          onClick={signOut}
+          disabled={busy}
+          className="mx-auto rounded-full border border-border bg-white/80 px-4 py-2 text-xs font-semibold text-foreground shadow-soft transition hover:bg-white disabled:opacity-50"
+        >
+          Sign out
+        </button>
+      </main>
+    </div>
+  );
+}
+
+export default function AccountPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen px-6 py-16">
+          <main className="mx-auto max-w-md rounded-[28px] border border-white/60 bg-surface/90 px-8 py-10 text-center text-sm text-muted shadow-soft-lg backdrop-blur-xl">
+            Loading…
+          </main>
+        </div>
+      }
+    >
+      <AccountPageInner />
+    </Suspense>
+  );
+}

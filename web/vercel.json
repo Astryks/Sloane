@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/cleanup-generations",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/check-fal-balance",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}

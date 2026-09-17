@@ -1,0 +1,38 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@huggingface/transformers": "^4.3.0",
+    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/blob": "^2.8.0",
+    "music-metadata": "^11.15.0",
+    "next": "16.3.4",
+    "node-wav": "^0.0.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "resend": "^6.26.0",
+    "stripe": "^22.6.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/node-wav": "^0.0.4",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

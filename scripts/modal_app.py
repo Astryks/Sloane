@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""Modal Serverless deployment for Lucy Labs' audio generation.
+
+Replaces RunPod Serverless as the production inference backend (see
+STATUS.md "Modal migration") because RunPod's real-world cold starts turned
+out to be 2-3 minutes - far worse than the 20-60s the original Serverless
+migration was designed around - almost certainly because loading the model
+off RunPod's network-attached volume on every cold start is disk-I/O bound.
+Modal's Volume is a different (faster) storage layer built specifically for
+this, so the fix is a platform swap, not more tuning on RunPod.
+
+Uses the exact same scripts/lucy_tts_engine.py as RunPod - zero logic
+changes, only the deploy target differs. See that file's MODEL_ROOT env var:
+this app sets it to /models (this Volume's mount point) instead of RunPod's
+/workspace/sloane default.
+
+RunPod Serverless is deliberately left running and untouched (see
+web/src/lib/inferenceBackend.ts "modal" branch) - there's remaining prepaid
+RunPod credit worth using, and it's a same-day fallback if anything about
+this migration needs to be rolled back.
+
+One-time setup (see STATUS.md for exact commands):
+    modal volume create lucy-tts-models
+    modal volume put lucy-tts-models <local staging dir> /
+Deploy:
+    modal deploy scripts/modal_app.py
+Local smoke test (runs the function directly, no deploy):
+    modal run scripts/modal_app.py
+"""
+import base64
+import io
+import os
+
+import fastapi
+import modal
+
+app = modal.App("lucy-tts")
+
+# Resolved relative to this file, not the CWD `modal deploy` is run from -
+# add_local_file needs an exact path either way.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODEL_ROOT = "/models"
+
+# Pinned to the exact versions already proven working on RunPod's venv
+# (checked via `pip list` there 2026-09-09) - avoids any silent behavior
+# drift in generated audio from picking up newer library versions.
+image = (
+    modal.Image.from_registry("nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.12")
+    # build-essential: pyworld has no prebuilt wheel for this platform/Python
+    # combo and compiles its C++ extension from source at install time.
+    .apt_install("libsndfile1", "ffmpeg", "git", "build-essential")
+    .pip_install(
+        "torch==2.6.0",
+        "torchaudio==2.6.0",
+        extra_index_url="https://download.pytorch.org/whl/cu124",
+    )
+    .pip_install(
+        "transformers==4.46.3",
+        "tokenizers==0.20.3",
+        "huggingface_hub==0.36.2",
+        "peft==0.17.1",
+        "faster-whisper==1.2.1",
+        "pyworld==0.3.5",
+        "librosa==0.11.0",
+        # WSOLA time-stretch for apply_speed() (lucy_tts_engine.py) - replaced
+        # librosa.effects.time_stretch's phase vocoder 2026-09-14, see that
+        # function's docstring. Pure-Python/numpy, no native binary.
+        "audiotsm==0.1.2",
+        "soundfile==0.13.1",
+        "scipy==1.17.1",
+        "numpy==1.26.4",
+        "fastapi[standard]",
+        # The rest of this list is every top-level import actually reached
+        # by vendor/chatterbox-finetuning-upstream/src/ and lucy_tts_engine.py
+        # at inference time (checked by grepping the source directly, after
+        # the first deploy crashed on a missing "perth" import that wasn't
+        # obvious from a `pip list` skim alone) - excludes pykakasi/
+        # dicta_onnx/spacy_pkuseg/russian_text_stresser, which the tokenizer
+        # only imports lazily inside try/except ImportError for Japanese/
+        # Hebrew/Chinese/Russian text, none of which this product uses.
+        "conformer==0.3.2",
+        "diffusers==0.29.0",
+        "einops==0.8.2",
+        "omegaconf==2.3.1",
+        "resemble-perth==1.0.1",
+        "pyloudnorm==0.2.0",
+        "s3tokenizer==0.3.0",
+        # pyworld has no prebuilt wheel for this image and compiles its C++
+        # extension at install time - this base image's Python was built
+        # expecting clang++ (not present, only g++ from build-essential is),
+        # so distutils picks clang++ by default and fails. Force gcc/g++.
+        env={"CXX": "g++", "CC": "gcc"},
+    )
+    # Only the shared engine module - the actual model weights and the
+    # chatterbox-ft-art/src package live on the Volume (see module docstring),
+    # matching how RunPod's own image only carries the handler code too.
+    .add_local_file(os.path.join(_SCRIPT_DIR, "lucy_tts_engine.py"), "/app/lucy_tts_engine.py")
+    # Harper (2026-09-11) - a "preset" voice backed by zero-shot cloning
+    # instead of a LoRA adapter (no real fine-tuning data exists for her -
+    # source is a single 6s clip from a Veo-generated demo, looped to clear
+    # the 8s zero-shot floor). Small enough to bundle directly into the
+    # image rather than uploading to the Volume - see
+    # lucy_tts_engine.py's ZERO_SHOT_PRESET_VOICES for how this gets used.
+    .add_local_file(os.path.join(_SCRIPT_DIR, "voice_references", "harper.wav"), "/app/voice_references/harper.wav")
+    # 2026-09-11: same pattern for 4 more zero-shot voices - see
+    # lucy_tts_engine.py's ZERO_SHOT_PRESET_VOICES for the full story.
+    .add_local_file(os.path.join(_SCRIPT_DIR, "voice_references", "jess.wav"), "/app/voice_references/jess.wav")
+    .add_local_file(os.path.join(_SCRIPT_DIR, "voice_references", "liam.wav"), "/app/voice_references/liam.wav")
+    .add_local_file(os.path.join(_SCRIPT_DIR, "voice_references", "ryan.wav"), "/app/voice_references/ryan.wav")
+    .add_local_file(os.path.join(_SCRIPT_DIR, "voice_references", "tyler.wav"), "/app/voice_references/tyler.wav")
+)
+
+model_volume = modal.Volume.from_name("lucy-tts-models", create_if_missing=True)
+
+
+def _encode_wav(audio, sr) -> str:
+    buf = io.BytesIO()
+    import soundfile as sf
+
+    sf.write(buf, audio, sr, format="WAV")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+@app.cls(
+    image=image,
+    # Was "L4" ($0.80/hr) - measured 2026-09-10 at only ~13-15 tokens/sec
+    # sampling throughput, roughly half the ~25-29 tokens/sec seen testing
+    # directly on the RTX 4090 RunPod used previously. L40S ($1.95/hr) is
+    # the same Ada Lovelace generation as that 4090 - closest real match,
+    # not just a guess. Per-request cost doesn't scale 2.4x with the
+    # hourly-rate difference since it finishes proportionally faster.
+    gpu="L40S",
+    volumes={MODEL_ROOT: model_volume},
+    # Container stays warm 5 minutes after its last request before scaling
+    # back to zero - covers someone generating a couple of clips back to
+    # back without paying for a second cold start, while still scaling to
+    # $0 well within an idle hour. Tune from real usage once live.
+    scaledown_window=300,
+    # Deliberately NOT capping max_containers - tried max_containers=1 on
+    # 2026-09-10 to make the pre-warm trick (web/src/lib/modal.ts's
+    # warmModal()) actually share one container instead of racing a second
+    # one, and it worked for that narrow case, but it means every
+    # concurrent real user queues behind whoever's already generating -
+    # rejected per direct user feedback ("i dont like the modal plan of
+    # users queuing for one gpu it will not be a good result"). Left
+    # uncapped (Modal's normal autoscaling) so real concurrent traffic
+    # scales properly; see STATUS.md "Inference backend" for the full
+    # pre-warm trade-off writeup and why there's no config that gives both
+    # "pre-warm reliably shares a container" and "no queuing under load."
+    # Was 300 (5min) - a real, confirmed hard-failure bug for long-form text
+    # (e.g. a multi-hundred-word meditation/story script): with ~40-word
+    # chunks each taking roughly 10-20s including retries, anything past
+    # ~15-20 chunks (~600-800 words) could exceed 300s mid-generation and
+    # get hard-killed by Modal with zero partial output - reproduced as
+    # "none of them are able to read it" 2026-09-10 for a long story text.
+    # Raised to a real ceiling for long-form narration rather than the
+    # short-clip-only budget this originally assumed.
+    timeout=1800,
+    env={"LUCY_MODEL_ROOT": MODEL_ROOT},
+    # Tried enable_memory_snapshot=True + @modal.enter(snap=True) on
+    # 2026-09-10 - made things WORSE, not better: cold start went from
+    # ~85-141s to 194s, AND the restored container generated at ~3
+    # tokens/sec instead of the normal ~13-14 (visible in `modal app logs`
+    # sampling progress bars) - the GPU/CUDA state clearly didn't restore
+    # cleanly from the snapshot. Reverted same day. Do not re-enable without
+    # a real fix for the post-restore GPU slowdown, not just a retry.
+    #
+    # LOAD-BEARING SAFETY ASSUMPTION, found during a 2026-09-11 code audit -
+    # do not add @modal.concurrent()/allow_concurrent_inputs to this class
+    # without first fixing lucy_tts_engine.py's generate_preset/
+    # generate_clone: both mutate the single module-level `base_engine.t3`
+    # in place per-request rather than using a per-request copy. With no
+    # concurrency directive here, Modal serializes requests to one input at
+    # a time per container (today's real, verified behavior), which is the
+    # only reason two different voices' requests can never interleave and
+    # cross-contaminate each other's output mid-generation. Opting into
+    # concurrency here is one line away from a real cross-customer voice
+    # bug with no code-level guard currently protecting against it.
+)
+class LucyTTS:
+    @modal.enter()
+    def load(self):
+        # Runs once per container start (the actual "cold start" cost) and
+        # is cached for every request that container handles afterward -
+        # this is the whole reason Modal's Volume matters here: it's the
+        # fast path this load() reads from.
+        import sys
+
+        sys.path.insert(0, "/app")
+        global generate_preset, generate_clone, UnknownVoiceError, ReferenceAudioTooShortError, UnsupportedReferenceAudioError
+        from lucy_tts_engine import (
+            ReferenceAudioTooShortError as _RATSE,
+            UnknownVoiceError as _UVE,
+            UnsupportedReferenceAudioError as _URAE,
+            generate_clone as _gc,
+            generate_preset as _gp,
+            warm_all_preset_voices,
+        )
+
+        generate_preset, generate_clone = _gp, _gc
+        UnknownVoiceError, ReferenceAudioTooShortError = _UVE, _RATSE
+        UnsupportedReferenceAudioError = _URAE
+        # Preload every preset voice's LoRA now, not on each voice's first
+        # request - see lucy_tts_engine.py's MAX_CACHED_VOICES comment for
+        # why a "warm" container was still slow the first time it saw a
+        # given voice. Adds some seconds to cold start; removes a
+        # per-voice tax from every request afterward, cold or warm.
+        print("[modal] preloading all preset voices...")
+        warm_all_preset_voices()
+        print("[modal] all preset voices preloaded")
+
+    @modal.method()
+    def run_generate_preset(self, text: str, voice_id: str, exaggeration=None, cfg_weight=None, pitch_semitones=None, speed=None):
+        try:
+            audio, sr = generate_preset(
+                text, voice_id,
+                exaggeration=exaggeration, cfg_weight=cfg_weight,
+                pitch_semitones=pitch_semitones, speed=speed,
+            )
+        except (UnknownVoiceError, ReferenceAudioTooShortError) as exc:
+            return {"error": str(exc)}
+        if audio is None:
+            return {"error": "no audio generated"}
+        return {"audio_base64": _encode_wav(audio, sr), "sample_rate": sr, "voice_id": voice_id}
+
+    @modal.method()
+    def run_generate_clone(self, text: str, reference_audio_base64: str, exaggeration=None, cfg_weight=None, speed=None):
+        try:
+            reference_audio_bytes = base64.b64decode(reference_audio_base64)
+            audio, sr = generate_clone(
+                text, reference_audio_bytes,
+                exaggeration=exaggeration, cfg_weight=cfg_weight, speed=speed,
+            )
+        except (UnknownVoiceError, ReferenceAudioTooShortError, UnsupportedReferenceAudioError) as exc:
+            return {"error": str(exc)}
+        if audio is None:
+            return {"error": "no audio generated"}
+        return {"audio_base64": _encode_wav(audio, sr), "sample_rate": sr}
+
+    @modal.method()
+    def warmup(self):
+        # Deliberately synthesizes nothing - the point is to pay for the
+        # container boot + shared-engine load (which @modal.enter()/load()
+        # already triggers just by being called, since importing
+        # lucy_tts_engine eagerly loads the base T3/vocoder/voice-encoder
+        # onto the GPU) without also burning GPU time generating audio
+        # nobody asked for. Called from the web app the moment someone
+        # opens the generation page, well before they've finished typing
+        # and hit Generate for real - see web/src/lib/modal.ts's warmModal().
+        return {"status": "warm"}
+
+
+# --- HTTP surface for the Next.js app -----------------------------------
+#
+# Mirrors RunPod's submit-then-poll contract (web/src/lib/runpod.ts) so
+# job-status/route.ts needs only a small backend-dispatch branch, not a
+# rewrite: POST /submit spawns the GPU function and returns a call_id
+# immediately (well under Vercel's timeout even on a cold start); GET
+# /status?call_id=... does a non-blocking check and returns RunPod-shaped
+# status strings so the rest of the polling logic reads identically.
+#
+# These run on cheap CPU containers, not the GPU - they only submit/check
+# function calls, they never load the model themselves.
+#
+# Real bug fixed here (security audit, 2026-09-16): these were public HTTP
+# endpoints with NO auth of any kind - anyone who obtained (or brute-forced/
+# leaked-via-proxy-log) these Modal URLs could submit unlimited billed GPU
+# jobs directly, completely bypassing every quota/credit check in the
+# Next.js layer (generate-preset/clone-voice/video-paygo all call through
+# here). A shared secret, stored as a Modal Secret and never in this source
+# file, closes that - the Next.js side sends it as a bearer token (see
+# web/src/lib/modal.ts). One-time setup (see STATUS.md):
+#   modal secret create lucy-inference-auth MODAL_SHARED_SECRET=<a long random value>
+# and set the SAME value as MODAL_SHARED_SECRET in Vercel's env vars.
+inference_auth_secret = modal.Secret.from_name("lucy-inference-auth")
+
+
+def _require_shared_secret(request: fastapi.Request):
+    expected = os.environ.get("MODAL_SHARED_SECRET")
+    if not expected:
+        # Fail closed, not open - a missing secret must never be treated as
+        # "no auth required".
+        raise fastapi.HTTPException(status_code=500, detail="Server misconfigured: MODAL_SHARED_SECRET not set")
+    provided = request.headers.get("authorization", "")
+    if provided != f"Bearer {expected}":
+        raise fastapi.HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.function(image=image, secrets=[inference_auth_secret])
+@modal.fastapi_endpoint(method="POST")
+async def submit(request: fastapi.Request):
+    _require_shared_secret(request)
+    body = await request.json()
+    action = body.get("action", "generate-preset")
+    lucy = LucyTTS()
+    if action == "generate-preset":
+        call = await lucy.run_generate_preset.spawn.aio(
+            body.get("text", ""),
+            body["voice_id"],
+            exaggeration=body.get("exaggeration"),
+            cfg_weight=body.get("cfg_weight"),
+            pitch_semitones=body.get("pitch_semitones"),
+            speed=body.get("speed"),
+        )
+    elif action == "clone-voice":
+        call = await lucy.run_generate_clone.spawn.aio(
+            body.get("text", ""),
+            body["reference_audio_base64"],
+            exaggeration=body.get("exaggeration"),
+            cfg_weight=body.get("cfg_weight"),
+            speed=body.get("speed"),
+        )
+    elif action == "warmup":
+        call = await lucy.warmup.spawn.aio()
+    else:
+        return {"error": f"unknown action '{action}'"}
+    return {"call_id": call.object_id}
+
+
+@app.function(image=image, secrets=[inference_auth_secret])
+@modal.fastapi_endpoint(method="GET")
+def status(call_id: str, request: fastapi.Request):
+    _require_shared_secret(request)
+    function_call = modal.FunctionCall.from_id(call_id)
+    try:
+        result = function_call.get(timeout=0)
+    except TimeoutError:
+        return {"status": "IN_PROGRESS"}
+    except Exception as exc:
+        return {"status": "FAILED", "error": str(exc)}
+    if isinstance(result, dict) and result.get("error"):
+        return {"status": "FAILED", "error": result["error"]}
+    return {"status": "COMPLETED", "output": result}
