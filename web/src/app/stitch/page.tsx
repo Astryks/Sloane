@@ -398,23 +398,21 @@ function WaveformBars({ peaks }: { peaks: number[] }) {
   );
 }
 
-// ffmpeg.wasm has no ffprobe-style structured metadata call - `-i <file>`
-// with no output "fails" (there's nothing to write), but its stderr log
-// still lists every real stream it found first, the same info ffprobe
-// would give natively. Read here instead of assuming every clip has audio.
+// ffmpeg.wasm has no ffprobe-style structured metadata call. Probe the audio
+// stream with a real null output instead of running `-i <file>` with no
+// output: the latter is an invalid FFmpeg invocation and can leave this
+// WASM build's virtual filesystem in an ErrnoError state on some files.
 async function hasAudioStream(ffmpeg: FFmpeg, filename: string): Promise<boolean> {
-  let found = false;
-  const onLog = ({ message }: { message: string }) => {
-    if (/Stream #\d+:\d+.*Audio:/.test(message)) found = true;
-  };
-  ffmpeg.on("log", onLog);
   try {
-    await ffmpeg.exec(["-i", filename]);
+    // Use a named throwaway output rather than stdout (`-`); the browser
+    // build's virtual filesystem handles the named null-muxer output more
+    // reliably across Chrome versions.
+    await ffmpeg.exec(["-i", filename, "-map", "0:a:0", "-f", "null", "probe-null"]);
+    await ffmpeg.deleteFile("probe-null");
+    return true;
   } catch {
-    // Expected - `-i` alone with no output always reports non-zero.
+    return false;
   }
-  ffmpeg.off("log", onLog);
-  return found;
 }
 
 // --- Audio auto-sync (2026-09-16, per direct request: "if someone shoots
@@ -1679,12 +1677,14 @@ function StitchPageInner() {
     setResultUrl(null);
     setProgress(0);
     cancelRequestedRef.current = false;
+    let exportStep = "starting";
     try {
       // Target frame size = the first clip's own real dimensions - every
       // other clip gets scaled to fit inside that box and letterboxed
       // (black bars, aspect ratio preserved) rather than stretched or
       // cropped. See getVideoMeta's comment above for why this step
       // exists at all.
+      exportStep = "reading video metadata";
       const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
       // Always export at a predictable 1080p canvas. The source is fitted
       // and letterboxed into the selected aspect ratio, so mixed source
@@ -1751,12 +1751,14 @@ function StitchPageInner() {
       const totalDuration = effectiveDurations.reduce((sum, d, i) => sum + d - transitions[i].duration, 0);
 
       const { fetchFile } = await import("@ffmpeg/util");
+      exportStep = "loading local FFmpeg";
       const ffmpeg = await getFFmpeg();
       setStatus("processing");
 
       const inputNames: string[] = [];
       for (let i = 0; i < items.length; i++) {
         const name = `input${i}.mp4`;
+        exportStep = `copying ${items[i].file.name} into local FFmpeg`;
         await ffmpeg.writeFile(name, await fetchFile(items[i].file));
         inputNames.push(name);
       }
@@ -1775,6 +1777,7 @@ function StitchPageInner() {
       // were attached at once).
       const hasAudio: boolean[] = [];
       for (const name of inputNames) {
+        exportStep = `checking audio in ${name}`;
         hasAudio.push(!itemTrims[items[hasAudio.length].id]?.muteAudio && await hasAudioStream(ffmpeg, name));
       }
 
@@ -1848,6 +1851,14 @@ function StitchPageInner() {
         }
         videoLabel = nextVideoLabel;
         audioLabel = nextAudioLabel;
+      }
+      // The fold above naturally names the last multi-clip outputs [outv]
+      // and [dialogue]. A single clip has no fold iteration, so explicitly
+      // alias its prepared streams to those same stable output labels used
+      // by the final `-map` below. Without this, single-clip export could
+      // finish the encode call without creating the expected output file.
+      if (inputNames.length === 1) {
+        combineChain += ";[v0]null[outv];[a0]anull[dialogue]";
       }
 
       const args = inputNames.flatMap((name) => ["-i", name]);
@@ -1949,6 +1960,7 @@ function StitchPageInner() {
         "stage1.mp4",
       );
 
+      exportStep = "encoding the MP4";
       await ffmpeg.exec(args);
 
       // Image overlays (logos/watermarks/photos) and text titles/captions
@@ -2032,6 +2044,7 @@ function StitchPageInner() {
 
         if (pass2FilterComplex) {
           pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", "0:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "final.mp4");
+          exportStep = "applying overlays to the MP4";
           await ffmpeg.exec(pass2Args);
           finalOutputName = "final.mp4";
         }
@@ -2051,6 +2064,7 @@ function StitchPageInner() {
       // same TS typing mismatch the old comment described (Uint8Array's
       // buffer is typed as ArrayBufferLike, which includes SharedArrayBuffer
       // - not a runtime concern for this non-threaded core build).
+      exportStep = "reading the finished MP4";
       const data = (await ffmpeg.readFile(finalOutputName)) as Uint8Array;
       const bytes = data.slice();
       if (bytes.byteLength === 0) throw new Error("The export was empty. Please try shorter clips or fewer overlays.");
@@ -2063,7 +2077,8 @@ function StitchPageInner() {
         setStatus("idle");
         return;
       }
-      setError(err instanceof Error ? err.message : "Could not combine these videos - try fewer or shorter clips.");
+      const detail = err instanceof Error ? err.message : String(err);
+      setError(detail ? `Could not combine these videos while ${exportStep}: ${detail}` : `Could not combine these videos while ${exportStep}.`);
       setStatus("error");
     }
   }
