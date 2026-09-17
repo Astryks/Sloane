@@ -1,3 +1,10 @@
+**Latest update, 2026-09-17 - `/stitch` roadmap pass: local export controls and single-clip support.**
+- Added a cancellable local FFmpeg export with a visible progress percentage; cancelling terminates the browser FFmpeg instance and returns the editor to an idle state without uploading media.
+- Added empty-output validation so a broken/zero-byte local render cannot be presented as a successful MP4 download.
+- Single-video projects now export successfully; the primary action is labelled **Download 1080p**.
+- Added client-side output aspect presets: Landscape 16:9 (1920x1080), Portrait 9:16 (1080x1920), and Square 1:1 (1080x1080). Mixed source dimensions are fitted and letterboxed into the selected canvas.
+- Verified the new code with `tsc --noEmit` and `git diff --check`. A full Next build remains environment-blocked when Turbopack tries to spawn a pooled Node process; this is recorded as a verification limitation, not treated as a passing build.
+
 **Latest update, 2026-09-17 - local Mac text-to-speech setup installed and verified.**
 - Added `requirements-mac.txt` for Apple Silicon local inference: PyTorch, torchaudio, Chatterbox, audio tooling, Faster-Whisper, and PEFT.
 - Added automatic device selection: CUDA first, then Apple Metal/MPS, then CPU. MPS was confirmed working on this Mac with a real tensor operation.

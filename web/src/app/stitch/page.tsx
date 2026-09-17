@@ -1425,10 +1425,8 @@ function StitchPageInner() {
       // and letterboxed into the selected aspect ratio, so mixed source
       // dimensions never break the MP4 and users can choose landscape,
       // portrait, or square without any server-side processing.
-      const targetW = aspectPreset === "9:16" ? 608 : 1920;
-      const targetH = aspectPreset === "9:16" ? 1080 : aspectPreset === "1:1" ? 1080 : 1080;
-      const outputW = aspectPreset === "1:1" ? 1080 : targetW;
-      const outputH = aspectPreset === "1:1" ? 1080 : targetH;
+      const outputW = aspectPreset === "9:16" ? 1080 : 1920;
+      const outputH = aspectPreset === "9:16" ? 1920 : 1080;
       // Each clip's real in/out range (2026-09-16, per direct request:
       // "can it also mask parts of the video clips... users want only a
       // part of the clip"). Re-clamped here against this clip's ACTUAL
