@@ -15,11 +15,39 @@ footage this way has been confirmed by the project owner.
 
 ## Why local vs. cloud is split this way
 
-This Mac has ~11GB free disk, no Homebrew/ffmpeg, and only system Python 3.9 —
-not a place to install torch/demucs/RVC. Audio extraction is cheap (ffmpeg via
-a self-contained `imageio-ffmpeg` pip package, no system changes) so it runs
-locally. Everything GPU-heavy (source separation, transcription, training)
-should run on a rented CUDA GPU pod instead.
+The local path now supports Apple Silicon through PyTorch's MPS backend. Audio
+extraction, Chatterbox zero-shot text-to-speech, and (where supported by the
+installed libraries) Demucs can run locally. Faster-Whisper remains on CPU on
+Apple Silicon because CTranslate2 does not provide an MPS backend. RVC
+fine-tuning and the full multi-voice production model still use the CUDA/cloud
+path by default and may be substantially faster on an NVIDIA GPU.
+
+## Local Mac setup
+
+Use Python 3.10–3.12 in a virtual environment:
+
+```bash
+python3 -m venv .venv-mac
+source .venv-mac/bin/activate
+pip install -r requirements-mac.txt
+pip install -e vendor/chatterbox-upstream
+```
+
+Run the zero-shot local test with the bundled reference clip:
+
+```bash
+python scripts/04_zeroshot_test.py
+```
+
+Or use your own WAV reference and text:
+
+```bash
+python scripts/04_zeroshot_test.py --reference /path/to/reference.wav \
+  --text "Hello from Lucy running locally on this Mac."
+```
+
+Set `LUCY_DEVICE=cpu` if an MPS operation is unsupported, or
+`LUCY_DEVICE=mps` to require Apple Metal for the shared inference engine.
 
 ## What's been done
 

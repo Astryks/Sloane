@@ -1,0 +1,20 @@
+# Apple Silicon local inference (MPS when available; CPU fallback).
+# Install in a dedicated virtual environment with Python 3.10-3.12.
+torch>=2.5
+torchaudio>=2.5
+numpy>=1.26
+scipy
+librosa
+soundfile
+# Optional: pyworld enables high-quality pitch DSP but currently requires a
+# local C++ toolchain on some Python/Mac combinations. The engine falls back
+# gracefully when it is unavailable.
+faster-whisper
+peft
+imageio-ffmpeg
+
+# The project vendors the Chatterbox source used by the local scripts.
+# Install it after this file with:
+#   pip install -e vendor/chatterbox-upstream
+# For fine-tuned voices, also install:
+#   pip install -e vendor/chatterbox-finetuning-upstream

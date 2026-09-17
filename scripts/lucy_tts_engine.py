@@ -23,7 +23,10 @@ from pathlib import Path
 
 import librosa
 import numpy as np
-import pyworld as pw
+try:
+    import pyworld as pw
+except ImportError:  # Optional on Mac when no C++ build toolchain is present.
+    pw = None
 import soundfile as sf
 import torch
 from faster_whisper import WhisperModel
@@ -46,7 +49,16 @@ from src.chatterbox_.tts import ChatterboxTTS  # noqa: E402
 from src.chatterbox_.models.t3.t3 import T3  # noqa: E402
 
 BASE_MODEL_DIR = f"{MODEL_ROOT}/chatterbox-finetuning/pretrained_models"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+def select_device() -> str:
+    """Prefer NVIDIA CUDA, then Apple Metal, then CPU."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+DEVICE = os.environ.get("LUCY_DEVICE", select_device())
 NEW_VOCAB_SIZE = 2454  # matches TrainConfig.new_vocab_size for is_turbo=False
 
 PRESET_VOICES = {
@@ -485,7 +497,8 @@ def get_preset_t3(voice_id: str):
     if len(preset_t3_cache) >= MAX_CACHED_VOICES:
         evicted_id, evicted_t3 = preset_t3_cache.popitem(last=False)
         del evicted_t3
-        torch.cuda.empty_cache()
+        if DEVICE == "cuda":
+            torch.cuda.empty_cache()
         print(f"[engine] evicted '{evicted_id}' from GPU cache to make room for '{voice_id}'")
 
     print(f"[engine] loading fine-tuned T3 for '{voice_id}' (cache miss)...")
@@ -495,7 +508,10 @@ def get_preset_t3(voice_id: str):
 
 
 print("[engine] loading whisper for output content verification...")
-verifier_model = WhisperModel("small", device=DEVICE, compute_type="float16" if DEVICE == "cuda" else "int8")
+# faster-whisper/CTranslate2 does not support Apple's MPS backend. Keep the
+# verifier on CPU while the Chatterbox torch models use Metal.
+WHISPER_DEVICE = "cuda" if DEVICE == "cuda" else "cpu"
+verifier_model = WhisperModel("small", device=WHISPER_DEVICE, compute_type="float16" if DEVICE == "cuda" else "int8")
 
 print("[engine] shared engine loaded - preset voices load lazily on first use")
 
@@ -1288,6 +1304,9 @@ def apply_pitch_jitter(audio: np.ndarray, sr: int, jitter_semitones: float, seed
 
 
 def apply_pitch_shift_clean(audio: np.ndarray, sr: int, semitones: float) -> np.ndarray:
+    if pw is None:
+        print("[engine] pyworld unavailable; skipping pitch DSP")
+        return audio
     """Static per-voice pitch shift via pyworld's harvest/cheaptrick/d4c/
     synthesize - the same real parametric-vocoder approach apply_pitch_jitter
     and apply_terminal_fall/rise already use, instead of
