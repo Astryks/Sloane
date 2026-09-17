@@ -117,6 +117,7 @@ type ItemTrim = {
   fadeOut: number;
   speed: number;
   transitionType: TransitionType;
+  muteAudio: boolean;
 };
 
 // A clip's own real (post-speed) duration on the shared timeline - every
@@ -734,7 +735,7 @@ function StitchPageInner() {
         setItemTrims((prev) => {
           const next: Record<string, ItemTrim> = {};
           items.forEach((item, i) => {
-            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none" };
+            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
           });
           return next;
         });
@@ -754,7 +755,7 @@ function StitchPageInner() {
   // media. Keeping this in memory makes it free and disappears with the tab.
   const historySignature = `${items.map((item) => item.id).join(",")}|${items.map((item) => {
     const trim = itemTrims[item.id];
-    return trim ? `${trim.start}:${trim.end}:${trim.speed}:${trim.transitionType}` : "";
+    return trim ? `${trim.start}:${trim.end}:${trim.speed}:${trim.transitionType}:${trim.muteAudio}` : "";
   }).join(",")}`;
   const historySnapshot = { items, trims: itemTrims };
   useEffect(() => {
@@ -1304,6 +1305,7 @@ function StitchPageInner() {
       // correct way to do this (unlike fades/transitions, which the quick
       // preview doesn't attempt to simulate - see the panel's own note).
       v.playbackRate = entry.speed;
+      v.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
       v.play().catch(() => {});
       v.removeEventListener("loadedmetadata", onLoaded);
     };
@@ -1359,6 +1361,7 @@ function StitchPageInner() {
     } else if (stageVideoRef.current) {
       stageVideoRef.current.currentTime = localStart;
       stageVideoRef.current.playbackRate = entry.speed;
+      stageVideoRef.current.muted = previewMuted || Boolean(itemTrims[entry.item.id]?.muteAudio);
     }
     syncAudioTracksTo(clamped, true);
   }
@@ -1625,7 +1628,7 @@ function StitchPageInner() {
       // were attached at once).
       const hasAudio: boolean[] = [];
       for (const name of inputNames) {
-        hasAudio.push(await hasAudioStream(ffmpeg, name));
+        hasAudio.push(!itemTrims[items[hasAudio.length].id]?.muteAudio && await hasAudioStream(ffmpeg, name));
       }
 
       const scaleChains = inputNames
@@ -2109,6 +2112,17 @@ function StitchPageInner() {
                                 className="flex h-4 items-center justify-center rounded-full bg-black/70 px-1 text-[7px] font-bold text-white"
                               >
                                 {trim.speed}x
+                              </button>
+                            )}
+                            {trim && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); updateItemTrim(item.id, { muteAudio: !trim.muteAudio }); }}
+                                title={trim.muteAudio ? "Unmute this clip's embedded audio" : "Mute this clip's embedded audio"}
+                                className="flex h-4 items-center justify-center rounded-full bg-black/70 px-1 text-[7px] text-white"
+                              >
+                                {trim.muteAudio ? "Muted" : "Audio"}
                               </button>
                             )}
                             {trim && fullDuration != null && (
