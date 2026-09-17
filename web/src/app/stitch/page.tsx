@@ -2813,7 +2813,7 @@ function StitchPageInner() {
                 now the box height never changes, and object-contain
                 letterboxes whatever's playing (any mix of portrait/
                 landscape clips) inside it instead. */}
-            <div className="relative flex h-56 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black sm:h-64">
+            <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
               <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
               {/* Text/image overlays are shown live here too (2026-09-16) -
                   unlike fades, these are purely positional/content-based,
@@ -2886,7 +2886,7 @@ function StitchPageInner() {
               </div>
             </div>
             <p className="text-[11px] italic text-muted">
-              An approximate preview of your edit as it stands - clips in order with trims and speed applied, your audio track(s) layered in at the position you set. Runs entirely on your device, nothing is uploaded or encoded yet. Fades and transitions aren&apos;t simulated here (this player just plays your raw files) but they are real in the exported file - export below to see them.
+              Live local preview with the same clip order, trims, source windows, speed, audio placement, volume, and selected canvas ratio. Export adds the exact encoded fades and transitions.
             </p>
           </div>
         )}
