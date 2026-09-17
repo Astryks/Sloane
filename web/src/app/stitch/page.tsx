@@ -802,6 +802,14 @@ function StitchPageInner() {
         if (event.shiftKey) redoEdit();
         else undoEdit();
       }
+      if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        splitAtPlayhead();
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        deleteAtPlayhead();
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -1226,6 +1234,13 @@ function StitchPageInner() {
       return next;
     });
     setPreviewTime(entry.timelineStart);
+  }
+
+  function deleteAtPlayhead() {
+    const entry = videoTimelineEntries.find((candidate) => previewTime >= candidate.timelineStart && previewTime < candidate.timelineEnd);
+    if (!entry) return;
+    const index = items.findIndex((item) => item.id === entry.item.id);
+    if (index >= 0) removeItem(index);
   }
 
   // Real drag-to-reorder on the timeline (2026-09-16, per direct follow-up
