@@ -92,6 +92,20 @@ type ImageOverlay = {
   scalePercent: number;
 };
 
+// A muted video layer displayed over the main sequential video. The base
+// timeline remains the audio source by default; this layer is for cutaways
+// and picture-in-picture without disturbing that mix.
+type VideoOverlay = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  sourceDuration: number;
+  startSec: number;
+  endSec: number;
+  position: ImageOverlay["position"];
+  scalePercent: number;
+};
+
 // Speed ramping and clip-to-clip transitions (2026-09-17, per direct
 // request after reviewing what CapCut users say they love most - see
 // STATUS.md). `speed` changes a clip's own playback rate (0.5x-2x, the
@@ -615,6 +629,7 @@ function StitchPageInner() {
   // audio tracks, laid out as their own lanes on the shared timeline.
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [imageOverlays, setImageOverlays] = useState<ImageOverlay[]>([]);
+  const [videoOverlays, setVideoOverlays] = useState<VideoOverlay[]>([]);
   const [overlayError, setOverlayError] = useState("");
   // Soft large-project warning (2026-09-17, see LARGE_PROJECT_WARNING_BYTES'
   // own comment for why this is a dismissible warning, not a hard cap).
@@ -696,6 +711,7 @@ function StitchPageInner() {
   const [timelineDragScale, setTimelineDragScale] = useState<number | null>(null);
   const stageVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
+  const videoOverlayElRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const currentStageItemIdRef = useRef<string | null>(null); // which item's file is currently loaded into the stage <video>, so we only reassign .src on an actual clip change
   // Intent flags so async loadedmetadata play() (which is outside the click
   // gesture) can still honor mute preferences and recover from autoplay blocks.
@@ -705,6 +721,20 @@ function StitchPageInner() {
   useEffect(() => {
     previewMutedRef.current = previewMuted;
   }, [previewMuted]);
+  useEffect(() => {
+    for (const overlay of videoOverlays) {
+      const element = videoOverlayElRefs.current[overlay.id];
+      if (!element) continue;
+      const active = previewTime >= overlay.startSec && previewTime < overlay.endSec;
+      if (!active) { if (!element.paused) element.pause(); continue; }
+      const localTime = previewTime - overlay.startSec;
+      if (Math.abs(element.currentTime - localTime) > 0.35) {
+        try { element.currentTime = localTime; } catch { /* metadata pending */ }
+      }
+      if (previewPlaying && element.paused) void element.play().catch(() => {});
+      if (!previewPlaying && !element.paused) element.pause();
+    }
+  }, [previewTime, previewPlaying, videoOverlays]);
   // Real fade/transition preview simulation (follow-up review, 2026-09-17,
   // direct request "simulate everything"). A second, overlaid <video>
   // plays the INCOMING clip during a transition window while the primary
@@ -1473,6 +1503,34 @@ function StitchPageInner() {
     ]);
   }
 
+  async function addVideoOverlay(file: File) {
+    const meta = await getVideoMeta(file);
+    const id = `video-overlay-${Math.random().toString(36).slice(2)}`;
+    setVideoOverlays((previous) => [...previous, {
+      id, file, previewUrl: URL.createObjectURL(file), sourceDuration: meta.duration,
+      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 45,
+    }]);
+  }
+
+  function addItemAsVideoOverlay(item: VideoItem) {
+    const trim = itemTrims[item.id];
+    const sourceDuration = itemDurations[item.id] ?? 10;
+    const duration = trim ? effectiveClipDuration(trim) : Math.min(10, sourceDuration);
+    setVideoOverlays((previous) => [...previous, { id: `video-overlay-${Math.random().toString(36).slice(2)}`, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec: 0, endSec: Math.min(duration, totalVideoDuration || duration), position: "center", scalePercent: 45 }]);
+  }
+
+  function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
+    setVideoOverlays((previous) => previous.map((overlay) => overlay.id === id ? { ...overlay, ...patch } : overlay));
+  }
+
+  function removeVideoOverlay(id: string) {
+    setVideoOverlays((previous) => {
+      const target = previous.find((overlay) => overlay.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return previous.filter((overlay) => overlay.id !== id);
+    });
+  }
+
   function updateImageOverlay(id: string, patch: Partial<Omit<ImageOverlay, "id" | "file" | "previewUrl">>) {
     setImageOverlays((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   }
@@ -1569,6 +1627,12 @@ function StitchPageInner() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       setReorderDrag(null);
+      // A normal click deliberately creates an overlay copy. A meaningful
+      // horizontal movement remains the magnetic reordering gesture.
+      if (Math.abs(ev.clientX - startX) < 6) {
+        addItemAsVideoOverlay(item);
+        return;
+      }
       const newCenter = centers[index] + (ev.clientX - startX);
       let targetIndex = 0;
       for (let i = 0; i < centers.length; i++) {
@@ -2345,15 +2409,37 @@ function StitchPageInner() {
       // carries stage 1's already-final audio through untouched, so this
       // costs no extra audio work).
       const hasRealImageOverlay = imageOverlays.some((o) => Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
+      const hasRealVideoOverlay = videoOverlays.some((o) => Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
       const hasRealTextOverlay = textOverlays.some((o) => o.text.trim() && Math.min(o.endSec, totalDuration) - Math.max(0, o.startSec) > 0);
       let finalOutputName = "stage1.mp4";
       writtenFiles.push("stage1.mp4");
 
-      if (hasRealImageOverlay || hasRealTextOverlay) {
+      if (hasRealVideoOverlay || hasRealImageOverlay || hasRealTextOverlay) {
         const pass2Args = ["-i", "stage1.mp4"];
         let pass2NextInputIndex = 1;
         let pass2FilterComplex = "";
         let pass2VideoLabel = "[0:v]";
+
+        if (hasRealVideoOverlay) {
+          for (let i = 0; i < videoOverlays.length; i++) {
+            const overlay = videoOverlays[i];
+            const start = Math.max(0, Math.min(overlay.startSec, totalDuration));
+            const end = Math.max(start, Math.min(overlay.endSec, totalDuration));
+            if (end - start <= 0) continue;
+            const name = `videooverlay${i}.mp4`;
+            await ffmpeg.writeFile(name, await fetchFile(overlay.file));
+            writtenFiles.push(name);
+            pass2Args.push("-stream_loop", "-1", "-i", name);
+            const inputIndex = pass2NextInputIndex++;
+            const overlayWidth = Math.max(2, Math.round((outputW * overlay.scalePercent) / 100 / 2) * 2);
+            const { x, y } = imageOverlayPositionExpr(overlay.position);
+            const scaledLabel = `[vidscaled${i}]`;
+            const nextLabel = `[vidout${i}]`;
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]setpts=PTS-STARTPTS,scale=w=${overlayWidth}:h=-2${scaledLabel}`;
+            pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=${x}:y=${y}:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
+            pass2VideoLabel = nextLabel;
+          }
+        }
 
         if (hasRealImageOverlay) {
           for (let i = 0; i < imageOverlays.length; i++) {
@@ -2571,6 +2657,20 @@ function StitchPageInner() {
                 landscape clips) inside it instead. */}
             <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
               <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
+              {videoOverlays.map((overlay) => {
+                const active = previewTime >= overlay.startSec && previewTime < overlay.endSec;
+                const posClass = { "top-left": "left-2 top-2", "top-right": "right-2 top-2", "bottom-left": "bottom-2 left-2", "bottom-right": "bottom-2 right-2", center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" }[overlay.position];
+                return (
+                  <video
+                    key={overlay.id}
+                    ref={(element) => { videoOverlayElRefs.current[overlay.id] = element; }}
+                    src={overlay.previewUrl}
+                    muted playsInline
+                    className={`absolute ${posClass} border-2 border-fuchsia-300 object-contain shadow-lg ${active ? "block" : "hidden"}`}
+                    style={{ width: `${overlay.scalePercent}%`, maxHeight: "90%" }}
+                  />
+                );
+              })}
               {/* Real transition simulation (2026-09-17, "simulate
                   everything"): a second <video> overlaid on the primary,
                   playing the INCOMING clip's own head while the primary
@@ -2918,6 +3018,15 @@ function StitchPageInner() {
                             <button
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); addItemAsVideoOverlay(item); }}
+                              title="Place a muted copy of this video over the main sequence"
+                              className="flex h-4 items-center justify-center rounded-full bg-fuchsia-700/90 px-1 text-[7px] font-bold text-white"
+                            >
+                              Overlay
+                            </button>
+                            <button
+                              type="button"
+                              onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setPreviewItemId((cur) => (cur === item.id ? null : item.id));
@@ -3016,6 +3125,22 @@ function StitchPageInner() {
                     </label>
                   </div>
                 )}
+              </div>
+
+              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-fuchsia-200">Video overlay · muted</p>
+              <div className="space-y-1">
+                {videoOverlays.map((overlay) => (
+                  <div key={overlay.id} className="relative h-10 rounded-lg bg-fuchsia-500/10">
+                    <div style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }} className="group absolute inset-y-0 overflow-hidden rounded-lg border-2 border-fuchsia-300 bg-fuchsia-700/80">
+                      <div onPointerDown={makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)} className="absolute inset-0 cursor-grab" />
+                      <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · muted</span>
+                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => updateVideoOverlay(overlay.id, { startSec: Math.max(0, Math.min(v, overlay.endSec - 0.2)) }), clipBoundaries)(e); }} className="absolute inset-y-0 left-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => updateVideoOverlay(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, v) }), clipBoundaries)(e); }} className="absolute inset-y-0 right-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
+                    </div>
+                  </div>
+                ))}
+                <label className="flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-fuchsia-300/40 text-[11px] text-fuchsia-100"><input className="sr-only" type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && void addVideoOverlay(e.target.files[0])} />Drag a video here to overlap it over the main video</label>
               </div>
 
               <div className="mb-1 mt-3 flex items-center justify-between">
