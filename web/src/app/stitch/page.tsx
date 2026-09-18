@@ -1769,6 +1769,26 @@ function StitchPageInner() {
     seekPreviewTo(fraction * totalVideoDuration);
   }
 
+  function handleTimelinePlayheadPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    const timeline = e.currentTarget.parentElement;
+    if (!timeline || totalVideoDuration <= 0) return;
+    const updateFromPointer = (clientX: number) => {
+      const rect = timeline.getBoundingClientRect();
+      const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      seekPreviewTo(fraction * totalVideoDuration);
+    };
+    updateFromPointer(e.clientX);
+    const onMove = (event: PointerEvent) => updateFromPointer(event.clientX);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
   // The free "as you go" preview's play/pause button (2026-09-16, per
   // direct request). Deliberately zero server cost and fast: this only
   // ever plays the visitor's own already-downloaded files through native
@@ -2678,9 +2698,14 @@ function StitchPageInner() {
                   lanes, all sharing this same timelinePixelsPerSecond axis. */}
               {totalVideoDuration > 0 && (previewPlaying || previewTime > 0) && (
                 <div
-                  className="pointer-events-none absolute top-0 z-30 h-full w-px bg-emerald-400"
-                  style={{ left: Math.min(previewTime, totalVideoDuration) * timelinePixelsPerSecond }}
-                />
+                  onPointerDown={handleTimelinePlayheadPointerDown}
+                  title="Drag to rewind or fast-forward preview"
+                  style={{ left: Math.min(previewTime, totalVideoDuration) * timelinePixelsPerSecond, touchAction: "none" }}
+                  className="absolute top-0 z-40 h-full w-5 -translate-x-1/2 cursor-ew-resize border-x border-emerald-300/40 bg-emerald-400/10"
+                >
+                  <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-emerald-400" />
+                  <div className="pointer-events-none absolute -top-1 left-1/2 h-3 w-3 -translate-x-1/2 rounded-full bg-emerald-300 shadow-[0_0_0_2px_rgba(52,211,153,0.25)]" />
+                </div>
               )}
               {/* Time ruler (2026-09-16, per direct follow-up) - tick
                   spacing adapts to the real total length so a short clip
