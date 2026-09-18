@@ -161,7 +161,7 @@ const LARGE_PROJECT_WARNING_BYTES = 1024 * 1024 * 1024; // 1GB total across all 
 // every audio lane (each block absolutely positioned by real start/end
 // seconds) use this SAME px-per-second value, which is what keeps them
 // visually aligned to one shared time axis.
-const PIXELS_PER_SECOND = 30;
+const TIMELINE_DETAIL_PIXELS_PER_SECOND = 30;
 
 // Builds a `fade=`/`afade=` filter fragment (comma-terminated, or "" if
 // neither fade is set) for one clip/track's own local 0-based timeline -
@@ -688,6 +688,8 @@ function StitchPageInner() {
   const [previewMuted, setPreviewMuted] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewTime, setPreviewTime] = useState(0); // position on the FINAL combined timeline, in seconds
+  const [timelineView, setTimelineView] = useState<"fit" | "detail">("fit");
+  const [timelineZoom, setTimelineZoom] = useState(TIMELINE_DETAIL_PIXELS_PER_SECOND);
   const stageVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const currentStageItemIdRef = useRef<string | null>(null); // which item's file is currently loaded into the stage <video>, so we only reassign .src on an actual clip change
@@ -872,7 +874,7 @@ function StitchPageInner() {
       const startX = e.clientX;
       const startValue = getStartValue();
       function onMove(ev: PointerEvent) {
-        const deltaSeconds = (ev.clientX - startX) / PIXELS_PER_SECOND;
+        const deltaSeconds = (ev.clientX - startX) / timelinePixelsPerSecond;
         let snapped = Math.round((startValue + deltaSeconds) * 10) / 10;
         if (boundaries && boundaries.length > 0) snapped = applyBoundarySnap(snapped, boundaries);
         onChange(snapped);
@@ -1091,6 +1093,12 @@ function StitchPageInner() {
   // "your video is currently ~1:47 long" line in the audio-tracks section
   // below. A plain derived value, not its own effect/state.
   const totalVideoDuration = videoTimelineEntries.length > 0 ? videoTimelineEntries[videoTimelineEntries.length - 1].timelineEnd : 0;
+  // Fit keeps the entire project visible, even for a 30-minute source. Detail
+  // restores a precise pixels-per-second view for close editing. The source
+  // window editor below remains full-width and is independent of this view.
+  const timelinePixelsPerSecond = timelineView === "fit"
+    ? Math.max(0.35, Math.min(TIMELINE_DETAIL_PIXELS_PER_SECOND, 720 / Math.max(totalVideoDuration, 1)))
+    : timelineZoom;
 
   // Sum of every added clip's own real file size - just the video clips
   // (by far the dominant contributor; audio tracks/images are typically
@@ -1504,7 +1512,7 @@ function StitchPageInner() {
     const widths = items.map((it) => {
       const trim = itemTrims[it.id];
       const duration = trim ? Math.max(0.2, effectiveClipDuration(trim)) : (itemDurations[it.id] ?? 1);
-      return Math.max(48, duration * PIXELS_PER_SECOND) + 4; // +4px for the row's gap-1
+      return Math.max(48, duration * timelinePixelsPerSecond) + 4; // +4px for the row's gap-1
     });
     const centers: number[] = [];
     let cumulative = 0;
@@ -2617,37 +2625,63 @@ function StitchPageInner() {
             request ("on top will be video files drag and drop, bottom
             audio files drag and drop"). One shared horizontal scroll
             wraps both halves so they always stay aligned to the same time
-            axis (PIXELS_PER_SECOND) even when the arrangement is wider
+            axis (timelinePixelsPerSecond) even when the arrangement is wider
             than the panel. The detailed lists below (exact start/end
             numbers) are still the real editing controls - this is the
             "see it" layer on top of them, always reflecting the same
             state. */}
         <div className="space-y-3 rounded-2xl bg-[#1c1c24] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/65">
+            <span className="font-bold uppercase tracking-wide text-white/45">Timeline view</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTimelineView("fit")}
+                className={`rounded-full border px-2.5 py-1 font-semibold ${timelineView === "fit" ? "border-purple bg-purple text-white" : "border-white/20 text-white/65"}`}
+              >
+                Fit entire project
+              </button>
+              <button
+                type="button"
+                onClick={() => setTimelineView("detail")}
+                className={`rounded-full border px-2.5 py-1 font-semibold ${timelineView === "detail" ? "border-purple bg-purple text-white" : "border-white/20 text-white/65"}`}
+              >
+                Detail
+              </button>
+              {timelineView === "detail" && (
+                <label className="flex items-center gap-1">
+                  Zoom
+                  <input aria-label="Timeline zoom" type="range" min="4" max={TIMELINE_DETAIL_PIXELS_PER_SECOND} step="1" value={timelineZoom} onChange={(e) => setTimelineZoom(Number(e.target.value))} className="w-24 accent-purple" />
+                  <span className="w-12 text-right">{timelineZoom}px/s</span>
+                </label>
+              )}
+            </div>
+          </div>
           <div className="overflow-x-auto">
-            <div className="relative" style={{ minWidth: Math.max(240, totalVideoDuration * PIXELS_PER_SECOND) }}>
+            <div className="relative" style={{ minWidth: Math.max(240, totalVideoDuration * timelinePixelsPerSecond) }}>
               {/* Live playhead (2026-09-16) - tracks the "as you go" preview
                   player across the ruler, video track, and audio
-                  lanes, all sharing this same PIXELS_PER_SECOND axis. */}
+                  lanes, all sharing this same timelinePixelsPerSecond axis. */}
               {totalVideoDuration > 0 && (previewPlaying || previewTime > 0) && (
                 <div
                   className="pointer-events-none absolute top-0 z-30 h-full w-px bg-emerald-400"
-                  style={{ left: Math.min(previewTime, totalVideoDuration) * PIXELS_PER_SECOND }}
+                  style={{ left: Math.min(previewTime, totalVideoDuration) * timelinePixelsPerSecond }}
                 />
               )}
               {/* Time ruler (2026-09-16, per direct follow-up) - tick
                   spacing adapts to the real total length so a short clip
                   isn't crowded with 1s ticks and a long one isn't left with
-                  only 2-3 marks. Same PIXELS_PER_SECOND axis as everything
+                  only 2-3 marks. Same timelinePixelsPerSecond axis as everything
                   below it, so a tick's position always lines up with the
                   content under it. */}
               {totalVideoDuration > 0 && (
-                <div className="relative mb-1 h-4" style={{ width: totalVideoDuration * PIXELS_PER_SECOND }}>
+                <div className="relative mb-1 h-4" style={{ width: totalVideoDuration * timelinePixelsPerSecond }}>
                   {(() => {
                     const tickInterval = totalVideoDuration > 90 ? 15 : totalVideoDuration > 40 ? 10 : totalVideoDuration > 15 ? 5 : 1;
                     const ticks: number[] = [];
                     for (let t = 0; t <= totalVideoDuration + 0.001; t += tickInterval) ticks.push(t);
                     return ticks.map((t) => (
-                      <div key={t} className="absolute top-0 flex flex-col items-start" style={{ left: t * PIXELS_PER_SECOND }}>
+                      <div key={t} className="absolute top-0 flex flex-col items-start" style={{ left: t * timelinePixelsPerSecond }}>
                         <div className="h-1.5 w-px bg-white/25" />
                         <span className="text-[8px] text-white/35">{formatTime(t)}</span>
                       </div>
@@ -2698,7 +2732,7 @@ function StitchPageInner() {
                         <div
                           key={item.id}
                           style={{
-                            width: Math.max(48, duration * PIXELS_PER_SECOND),
+                            width: Math.max(48, duration * timelinePixelsPerSecond),
                             transform: isDragging ? `translateX(${reorderDrag!.offsetPx}px)` : undefined,
                             zIndex: isDragging ? 20 : undefined,
                           }}
@@ -2884,13 +2918,13 @@ function StitchPageInner() {
                               {trim.fadeIn > 0 && (
                                 <div
                                   className="pointer-events-none absolute inset-y-0 left-0"
-                                  style={{ width: trim.fadeIn * PIXELS_PER_SECOND, background: "linear-gradient(to right, rgba(0,0,0,0.85), transparent)" }}
+                                  style={{ width: trim.fadeIn * timelinePixelsPerSecond, background: "linear-gradient(to right, rgba(0,0,0,0.85), transparent)" }}
                                 />
                               )}
                               {trim.fadeOut > 0 && (
                                 <div
                                   className="pointer-events-none absolute inset-y-0 right-0"
-                                  style={{ width: trim.fadeOut * PIXELS_PER_SECOND, background: "linear-gradient(to left, rgba(0,0,0,0.85), transparent)" }}
+                                  style={{ width: trim.fadeOut * timelinePixelsPerSecond, background: "linear-gradient(to left, rgba(0,0,0,0.85), transparent)" }}
                                 />
                               )}
                               <div
@@ -2942,7 +2976,7 @@ function StitchPageInner() {
                   return (
                     <div key={track.id} className="relative h-9 rounded-lg bg-white/5">
                       <div
-                        style={{ marginLeft: track.startSec * PIXELS_PER_SECOND, width: Math.max(24, (track.endSec - track.startSec) * PIXELS_PER_SECOND) }}
+                        style={{ marginLeft: track.startSec * timelinePixelsPerSecond, width: Math.max(24, (track.endSec - track.startSec) * timelinePixelsPerSecond) }}
                         className="group absolute inset-y-0 overflow-hidden rounded-lg border border-emerald-300/40 bg-emerald-700/70 px-1"
                       >
                         {/* Body drag = reposition (both start/end shift together,
@@ -3035,13 +3069,13 @@ function StitchPageInner() {
                         {track.fadeIn > 0 && (
                           <div
                             className="pointer-events-none absolute inset-y-0 left-0"
-                            style={{ width: track.fadeIn * PIXELS_PER_SECOND, background: "linear-gradient(to right, rgba(0,0,0,0.6), transparent)" }}
+                            style={{ width: track.fadeIn * timelinePixelsPerSecond, background: "linear-gradient(to right, rgba(0,0,0,0.6), transparent)" }}
                           />
                         )}
                         {track.fadeOut > 0 && (
                           <div
                             className="pointer-events-none absolute inset-y-0 right-0"
-                            style={{ width: track.fadeOut * PIXELS_PER_SECOND, background: "linear-gradient(to left, rgba(0,0,0,0.6), transparent)" }}
+                            style={{ width: track.fadeOut * timelinePixelsPerSecond, background: "linear-gradient(to left, rgba(0,0,0,0.6), transparent)" }}
                           />
                         )}
                         <div
@@ -3099,7 +3133,7 @@ function StitchPageInner() {
                 {textOverlays.map((overlay) => (
                   <div key={overlay.id} className="relative h-12 rounded-lg bg-white/5">
                     <div
-                      style={{ marginLeft: overlay.startSec * PIXELS_PER_SECOND, width: Math.max(70, (overlay.endSec - overlay.startSec) * PIXELS_PER_SECOND) }}
+                      style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }}
                       className="group absolute inset-y-0 overflow-hidden rounded-lg border border-sky-300/40 bg-sky-700/70"
                     >
                       <div
@@ -3203,7 +3237,7 @@ function StitchPageInner() {
                 {imageOverlays.map((overlay) => (
                   <div key={overlay.id} className="relative h-12 rounded-lg bg-white/5">
                     <div
-                      style={{ marginLeft: overlay.startSec * PIXELS_PER_SECOND, width: Math.max(70, (overlay.endSec - overlay.startSec) * PIXELS_PER_SECOND) }}
+                      style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }}
                       className="group absolute inset-y-0 overflow-hidden rounded-lg border border-fuchsia-300/40 bg-fuchsia-700/70"
                     >
                       <div
@@ -3307,7 +3341,18 @@ function StitchPageInner() {
                 <input aria-label="Source window start" type="range" min="0" max={sourceDuration} step="0.1" value={sourceTrim.start} onChange={(e) => updateItemTrim(sourceItem.id, { start: Math.min(Number(e.target.value), sourceTrim.end - 0.2) })} className="absolute inset-x-0 top-0 h-4 w-full accent-purple" />
                 <input aria-label="Source window end" type="range" min="0" max={sourceDuration} step="0.1" value={sourceTrim.end} onChange={(e) => updateItemTrim(sourceItem.id, { end: Math.max(Number(e.target.value), sourceTrim.start + 0.2) })} className="absolute inset-x-0 bottom-0 h-4 w-full accent-purple" />
               </div>
-              <div className="flex justify-between text-xs text-muted"><span>In {formatTime(sourceTrim.start)}</span><span>Using {formatTime(sourceTrim.end - sourceTrim.start)} of {formatTime(sourceDuration)}</span><span>Out {formatTime(sourceTrim.end)}</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+                <span>In {formatTime(sourceTrim.start)}</span>
+                <span>Using {formatTime(sourceTrim.end - sourceTrim.start)} of {formatTime(sourceDuration)}</span>
+                <span>Out {formatTime(sourceTrim.end)}</span>
+                <button
+                  type="button"
+                  onClick={() => updateItemTrim(sourceItem.id, { start: 0, end: Math.min(10, sourceDuration) })}
+                  className="rounded-full border border-purple/30 px-2 py-1 font-semibold text-purple hover:bg-purple-wash"
+                >
+                  Use first 10 seconds
+                </button>
+              </div>
             </div>
           );
         })()}
