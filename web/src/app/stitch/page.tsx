@@ -99,6 +99,8 @@ type VideoOverlay = {
   file: File;
   previewUrl: string;
   sourceDuration: number;
+  sourceStart: number;
+  sourceEnd: number;
   startSec: number;
   endSec: number;
   position: ImageOverlay["position"];
@@ -730,7 +732,7 @@ function StitchPageInner() {
       if (!element) continue;
       const active = previewTime >= overlay.startSec && previewTime < overlay.endSec;
       if (!active) { if (!element.paused) element.pause(); continue; }
-      const localTime = previewTime - overlay.startSec;
+      const localTime = overlay.sourceStart + previewTime - overlay.startSec;
       if (Math.abs(element.currentTime - localTime) > 0.35) {
         try { element.currentTime = localTime; } catch { /* metadata pending */ }
       }
@@ -1522,7 +1524,7 @@ function StitchPageInner() {
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
     setVideoOverlays((previous) => [...previous, {
       id, file, previewUrl: URL.createObjectURL(file), sourceDuration: meta.duration,
-      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
+      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), sourceStart: 0, sourceEnd: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
     }]);
     setSelectedVideoOverlayId(id);
   }
@@ -1530,11 +1532,13 @@ function StitchPageInner() {
   function addItemAsVideoOverlay(item: VideoItem, startSec = 0, maxDuration?: number) {
     const trim = itemTrims[item.id];
     const sourceDuration = itemDurations[item.id] ?? 10;
+    const sourceStart = trim?.start ?? 0;
+    const sourceEnd = trim?.end ?? Math.min(10, sourceDuration);
     const duration = trim ? effectiveClipDuration(trim) : Math.min(10, sourceDuration);
     const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
     const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
-    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100, muted: false }]);
+    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100, muted: false }]);
     setSelectedVideoOverlayId(id);
   }
 
@@ -2478,7 +2482,7 @@ function StitchPageInner() {
             // A video overlay is a full-canvas cutaway, not picture-in-picture.
             // `increase` fills every edge; crop then removes the overflow so the
             // browser preview and exported MP4 both use the same cover behavior.
-            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]setpts=PTS-STARTPTS,scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=increase,crop=${outputW}:${outputH}${scaledLabel}`;
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]trim=start=${overlay.sourceStart}:end=${overlay.sourceEnd},setpts=PTS-STARTPTS,scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=increase,crop=${outputW}:${outputH}${scaledLabel}`;
             pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=0:y=0:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
             pass2VideoLabel = nextLabel;
             // Overlay sound is opt-in by the user muting it, not silently
@@ -2488,7 +2492,7 @@ function StitchPageInner() {
             if (!overlay.muted && await hasAudioStream(ffmpeg, name)) {
               const audioLabel = `[vidaudio${i}]`;
               const delayMs = Math.round(start * 1000);
-              pass2FilterComplex += `;[${inputIndex}:a]atrim=duration=${end - start},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100${audioLabel}`;
+              pass2FilterComplex += `;[${inputIndex}:a]atrim=start=${overlay.sourceStart}:end=${overlay.sourceEnd},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100${audioLabel}`;
               pass2AudioLabels.push(audioLabel);
             }
           }
@@ -3202,8 +3206,8 @@ function StitchPageInner() {
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
-                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => updateVideoOverlay(overlay.id, { startSec: Math.max(0, Math.min(v, overlay.endSec - 0.2)) }), clipBoundaries)(e); }} className="absolute inset-y-0 left-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
-                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => updateVideoOverlay(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, v) }), clipBoundaries)(e); }} className="absolute inset-y-0 right-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag right to cut off the beginning" className="absolute inset-y-0 left-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => { const nextEnd = Math.max(overlay.startSec + 0.2, v); const cut = overlay.endSec - nextEnd; updateVideoOverlay(overlay.id, { endSec: nextEnd, sourceEnd: Math.max(overlay.sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - cut)) }); }, clipBoundaries)(e); }} title="Drag left to cut off the end" className="absolute inset-y-0 right-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
                     </div>
                   </div>
                 ))}
