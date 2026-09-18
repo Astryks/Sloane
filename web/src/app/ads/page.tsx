@@ -64,6 +64,32 @@ const IMAGE_ENGINES: { id: "nanobanana" | "gpt"; label: string }[] = [
   { id: "gpt", label: "GPT Image" },
 ];
 
+const DIRECTOR_SHOT_TEMPLATE = `[REFERENCE LOCK]
+Keep the character, product, wardrobe, lighting, and location consistent throughout.
+
+[SHOT 1 — 0:00-0:03]
+Framing: medium shot. Camera: fixed phone camera, eye level. Action: establish the subject and let them look into lens.
+
+[SHOT 2 — 0:03-0:06]
+Framing: medium close-up. Camera: slow push-in, one continuous move. Action: bring the product into the foreground and hold the label clearly toward camera.
+
+[SHOT 3 — 0:06-0:10]
+Framing: close-up, then hold. Camera: no new movement. Action: complete the gesture or line; preserve the product shape, label, and screen direction.
+
+[AUDIO]
+Dialogue: "Write the exact spoken line here." Natural delivery, room ambience, no extra voices.`;
+
+const CAMERA_MOVEMENT_GUIDE = [
+  ["Fixed / locked", "The phone stays still. Best for clear dialogue, product demos, and continuity."],
+  ["Slow push-in", "Move gradually closer to reveal emotion or a product detail; say when the move starts and ends."],
+  ["Pull-back", "Begin close, then reveal the room or context; keep the subject centered while the background opens up."],
+  ["Pan left / right", "Rotate horizontally to reveal a person or object. Name the start and end subject so the model knows what to find."],
+  ["Tilt up / down", "Rotate vertically from one detail to another, such as shoes to face or product to speaker."],
+  ["Tracking / dolly", "The camera travels beside or toward a moving subject at a stated pace; keep one direction and screen side."],
+  ["Orbit / arc", "Move around the subject only when the reference can support it; state the angle and keep the product visible."],
+  ["Handheld", "Small natural phone movement, not random shaking. Use only when the casual UGC feel is intentional."],
+] as const;
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -569,6 +595,35 @@ function SlotCard({
               </button>
             ))}
           </div>
+          <details className="rounded-xl border border-purple/20 bg-purple-wash/50 p-2 text-[10px] text-muted">
+            <summary className="cursor-pointer font-semibold text-purple">Director&apos;s guide: make every second count</summary>
+            <div className="mt-2 space-y-2 leading-relaxed">
+              <p>
+                Treat a generated clip like a real shot list. Give each beat a time range, choose one camera move,
+                then describe exactly what the subject does during that range. Don&apos;t stack a pan, zoom, orbit, and
+                cut into one sentence—the model follows one clear movement more reliably.
+              </p>
+              <div className="grid gap-1 sm:grid-cols-2">
+                {CAMERA_MOVEMENT_GUIDE.map(([name, detail]) => (
+                  <div key={name} className="rounded-lg bg-white/70 p-1.5">
+                    <strong className="text-foreground">{name}:</strong> {detail}
+                  </div>
+                ))}
+              </div>
+              <p>
+                Always state what must not change: face, hair, wardrobe, product shape/label, lighting, location,
+                screen direction, and whether the camera is allowed to cut. For dialogue, write the exact words and
+                add pauses, emphasis, ambience, or sound effects as separate notes.
+              </p>
+              <button
+                type="button"
+                onClick={() => setPrompt((p) => (p.trim() ? `${p.trim()}\n\n${DIRECTOR_SHOT_TEMPLATE}` : DIRECTOR_SHOT_TEMPLATE))}
+                className="rounded-full border border-purple/30 bg-white px-2 py-1 font-semibold text-purple hover:bg-purple-wash"
+              >
+                Insert timed shot template
+              </button>
+            </div>
+          </details>
           <details className="text-[10px] text-muted">
             <summary className="cursor-pointer font-semibold">Writing dialogue? A few tips</summary>
             <ul className="mt-1 list-disc space-y-1 pl-4">
