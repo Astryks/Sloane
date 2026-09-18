@@ -1113,6 +1113,28 @@ function StitchPageInner() {
     ? Math.max(0.35, Math.min(TIMELINE_DETAIL_PIXELS_PER_SECOND, 720 / Math.max(totalVideoDuration, 1)))
     : timelineZoom;
 
+  // Audio is mixed into the video project, so a newly imported recording
+  // should not make the visible timeline several minutes longer than the
+  // movie. Keep the source file whole for the audio-mask editor, but cap its
+  // placed timeline window to the current video duration so its trim handle
+  // stays immediately reachable beside the media player length.
+  useEffect(() => {
+    if (totalVideoDuration <= 0) return;
+    // This intentionally normalizes imported timeline placement when video
+    // metadata becomes available; the source file remains untouched.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAudioTracks((previous) => {
+      let changed = false;
+      const next = previous.map((track) => {
+        if (track.endSec <= totalVideoDuration) return track;
+        changed = true;
+        const endSec = Math.max(track.startSec + 0.2, totalVideoDuration);
+        return { ...track, endSec, fadeOut: Math.min(Math.max(track.fadeOut, 1), (endSec - track.startSec) / 2) };
+      });
+      return changed ? next : previous;
+    });
+  }, [totalVideoDuration]);
+
   // Sum of every added clip's own real file size - just the video clips
   // (by far the dominant contributor; audio tracks/images are typically
   // much smaller) - drives the soft large-project warning below.
