@@ -174,6 +174,7 @@ const MAX_CAPTION_OVERLAYS_TOTAL = 150; // auto-CAPTIONS (2026-09-17) reuse the 
 // from another editing pass briefly reintroduced a hard 500MB block here -
 // removed again, same reasoning as before.)
 const LARGE_PROJECT_WARNING_BYTES = 1024 * 1024 * 1024; // 1GB total across all added clips
+const LARGE_SOURCE_BYTES = 500 * 1024 * 1024; // source-first workflow above this size
 // Shared time scale for the visual timeline below - both the video track
 // (a plain flex row, its blocks' widths summing to the real total) and
 // every audio lane (each block absolutely positioned by real start/end
@@ -981,6 +982,13 @@ function StitchPageInner() {
           });
           return next;
         });
+        // A very large original is useful, but asking a browser to treat it
+        // like an ordinary short clip is what causes the slow/stuck feeling.
+        // Open the existing full-source editor immediately so the user picks
+        // the small window they actually intend to use before doing anything
+        // expensive with the project.
+        const firstLargeSource = items.find((item) => item.file.size > LARGE_SOURCE_BYTES);
+        if (firstLargeSource) setSourceEditorId(firstLargeSource.id);
         setMediaPreparationMessage("");
       } catch {
         // Leave whatever's already known as-is - handleCombine will surface
@@ -1191,6 +1199,7 @@ function StitchPageInner() {
   // much smaller) - drives the soft large-project warning below.
   const totalFileBytes = items.reduce((sum, item) => sum + item.file.size, 0);
   const showSizeWarning = totalFileBytes > LARGE_PROJECT_WARNING_BYTES && !sizeWarningDismissed;
+  const hasLargeSource = items.some((item) => item.file.size > LARGE_SOURCE_BYTES);
 
   // Every real cut point in the final video's timeline (2026-09-16, per
   // direct follow-up) - 0, the boundary between each pair of clips, and
@@ -2943,6 +2952,12 @@ function StitchPageInner() {
                   </button>
                 </div>
               )}
+              {hasLargeSource && !sourceEditorId && (
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-purple/25 bg-purple-wash px-3 py-2 text-xs text-purple-dark">
+                  <span>Large source detected. Choose the short section you want to use before exporting—your normal timeline stays the same.</span>
+                  <button type="button" onClick={() => { const item = items.find((candidate) => candidate.file.size > LARGE_SOURCE_BYTES); if (item) setSourceEditorId(item.id); }} className="rounded-full bg-purple px-3 py-1 font-semibold text-white">Choose section</button>
+                </div>
+              )}
               {mediaPreparationMessage && (
                 <p className="mb-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/70">{mediaPreparationMessage}</p>
               )}
@@ -3637,7 +3652,7 @@ function StitchPageInner() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold">Edit source window</p>
-                  <p className="text-xs text-muted">The player above contains the full original file. Choose the section that appears in this timeline block; long uploads start with a 10-second window so they do not stretch the whole project.</p>
+                  <p className="text-xs text-muted">The player above contains the full original file. Choose the section that appears in this timeline block; long uploads start with a 10-second window so they do not stretch the whole project. Your normal timeline and controls stay exactly the same.</p>
                 </div>
                 <button onClick={() => setSourceEditorId(null)} className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted">Done</button>
               </div>
