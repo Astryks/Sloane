@@ -62,6 +62,7 @@
 body {
   color: var(--foreground);
   background: var(--background);
+  overscroll-behavior-y: none;
 }
 
 .art-backdrop {
@@ -69,6 +70,12 @@ body {
   inset: 0;
   z-index: 0;
   display: flex;
+  /* This decorative layer must never participate in input or scroll hit
+     testing. Keeping it in its own compositor layer prevents the large
+     background image from repainting with every scroll tick. */
+  pointer-events: none;
+  contain: strict;
+  will-change: transform;
 }
 
 .page-content {
