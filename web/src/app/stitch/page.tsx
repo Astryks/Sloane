@@ -874,6 +874,11 @@ function StitchPageInner() {
     return function onPointerDown(e: React.PointerEvent) {
       e.preventDefault();
       e.stopPropagation();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Window-level listeners below still cover browsers without capture.
+      }
       const startX = e.clientX;
       const startValue = getStartValue();
       function onMove(ev: PointerEvent) {
@@ -2905,7 +2910,8 @@ function StitchPageInner() {
                                   (v) => updateItemTrim(item.id, { start: Math.max(0, Math.min(v, trim.end - 0.2)) }),
                                   [...clipBoundaries, previewTime],
                                 )}
-                                className="absolute inset-y-0 left-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/80 text-[11px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                                style={{ touchAction: "none" }}
+                                className="absolute inset-y-0 left-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
                                 title="Drag this left edge to trim the start"
                               ><span className="pointer-events-none">‹</span></div>
                               <div
@@ -2914,7 +2920,8 @@ function StitchPageInner() {
                                   (v) => updateItemTrim(item.id, { end: Math.max(trim.start + 0.2, Math.min(v, fullDuration)) }),
                                   [...clipBoundaries, previewTime],
                                 )}
-                                className="absolute inset-y-0 right-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/80 text-[11px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                                style={{ touchAction: "none" }}
+                                className="absolute inset-y-0 right-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
                                 title="Drag this right edge to trim the end"
                               ><span className="pointer-events-none">›</span></div>
                               {/* Fade in/out (2026-09-16, per direct request
@@ -3070,7 +3077,8 @@ function StitchPageInner() {
                               clipBoundaries,
                             )(e);
                           }}
-                          className="absolute inset-y-0 left-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[11px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                          style={{ touchAction: "none" }}
+                          className="absolute inset-y-0 left-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
                           title="Drag this left edge to trim the audio start"
                         ><span className="pointer-events-none">‹</span></div>
                         <div
@@ -3082,7 +3090,8 @@ function StitchPageInner() {
                               clipBoundaries,
                             )(e);
                           }}
-                          className="absolute inset-y-0 right-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[11px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                          style={{ touchAction: "none" }}
+                          className="absolute inset-y-0 right-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
                           title="Drag this right edge to trim the audio end"
                         ><span className="pointer-events-none">›</span></div>
                         {/* Fade in/out (2026-09-16, per direct request -
