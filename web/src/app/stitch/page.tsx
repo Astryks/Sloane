@@ -2783,6 +2783,7 @@ function StitchPageInner() {
                       return (
                         <div
                           key={item.id}
+                          onPointerDown={(e) => handleReorderPointerDown(e, itemIndex)}
                           style={{
                             width: Math.max(48, duration * timelinePixelsPerSecond),
                             transform: isDragging ? `translateX(${reorderDrag!.offsetPx}px)` : undefined,
@@ -2804,6 +2805,7 @@ function StitchPageInner() {
                               src={item.previewUrl}
                               autoPlay
                               controls
+                              onPointerDown={(e) => e.stopPropagation()}
                               className="h-full w-full object-cover"
                               onLoadedMetadata={(e) => {
                                 e.currentTarget.currentTime = trim?.start ?? 0;
@@ -2820,43 +2822,10 @@ function StitchPageInner() {
                             // eslint-disable-next-line @next/next/no-img-element -- a runtime data: URL thumbnail, not a static/remote asset next/image is built for
                             thumb && <img src={thumb} alt="" className="h-full w-full object-cover" />
                           )}
-                          {/* Reorder grip - a distinct top strip, separate
-                              from the left/right trim handles on the sides,
-                              so the two gestures never conflict. */}
-                          <div
-                            onPointerDown={(e) => handleReorderPointerDown(e, itemIndex)}
-                            className="absolute inset-x-2.5 top-0 h-3 cursor-grab touch-none rounded-b bg-black/0 transition hover:bg-white/20 active:cursor-grabbing"
-                          />
-                          {/* Mask reposition (2026-09-16, per direct
-                              feedback - "right now it just resizes it,
-                              allow users to edit mask and use only part of
-                              each video clip"): the edge handles below
-                              already change WHICH PART of the source plays
-                              by moving one end of trim.start/trim.end at a
-                              time (shrinking/growing it - genuinely a
-                              resize). This is the missing piece - drag the
-                              BODY of the block to slide the same-size
-                              in/out window earlier or later within the
-                              source clip (e.g. "use seconds 4-6" instead of
-                              only ever "0-2"), exactly mirroring how an
-                              audio track's body-drag repositions it
-                              without changing its own duration. Sits below
-                              the play/delete row in paint order so those
-                              buttons stay clickable over it. */}
-                          {trim && fullDuration != null && (
-                            <div
-                              onPointerDown={makeAxisDragHandler(
-                                () => trim.start,
-                                (v) => {
-                                  const dur = trim.end - trim.start;
-                                  const newStart = Math.max(0, Math.min(v, fullDuration - dur));
-                                  updateItemTrim(item.id, { start: newStart, end: newStart + dur });
-                                },
-                              )}
-                              title="Drag to choose which part of this clip plays"
-                              className="absolute inset-x-2.5 top-3 bottom-4 cursor-grab touch-none active:cursor-grabbing"
-                            />
-                          )}
+                          {/* Dragging anywhere on the clip reorders the main
+                              video sequence. The Window/Edit mask control
+                              opens the non-destructive source selector, while
+                              the amber edges remain dedicated trim handles. */}
                           {/* Play + delete, centered so they never overlap
                               the left/right trim handles (2026-09-16, per
                               direct request - play each clip, and "give the
