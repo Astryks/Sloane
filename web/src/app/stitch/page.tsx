@@ -272,6 +272,132 @@ function formatBytes(bytes: number): string {
   return `${Math.round(bytes / (1024 * 1024))}MB`;
 }
 
+const LARGE_THUMBNAIL_SKIP_BYTES = 80 * 1024 * 1024;
+const LARGE_AUDIO_PEAKS_SKIP_BYTES = 24 * 1024 * 1024;
+const MEDIA_META_TIMEOUT_MS = 12_000;
+
+function boxType(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+}
+
+function parseIsoBmffMetaFromMoov(moov: ArrayBuffer): { width: number; height: number; duration: number } | null {
+  const bytes = new Uint8Array(moov);
+  const view = new DataView(moov);
+  let duration: number | null = null;
+  let width = 0;
+  let height = 0;
+  const walk = (start: number, end: number) => {
+    let offset = start;
+    while (offset + 8 <= end) {
+      let size = view.getUint32(offset);
+      const type = boxType(bytes, offset + 4);
+      let header = 8;
+      if (size === 1) {
+        if (offset + 16 > end) break;
+        size = Number(view.getBigUint64(offset + 8));
+        header = 16;
+      } else if (size === 0) {
+        size = end - offset;
+      }
+      if (size < header) break;
+      const boxEnd = Math.min(end, offset + size);
+      const payload = offset + header;
+      if (type === "trak" || type === "mdia" || type === "minf" || type === "stbl") {
+        walk(payload, boxEnd);
+      } else if (type === "mvhd" && payload < boxEnd) {
+        const version = bytes[payload];
+        if (version === 0 && payload + 20 <= boxEnd) {
+          const timescale = view.getUint32(payload + 12);
+          const raw = view.getUint32(payload + 16);
+          if (timescale > 0 && raw > 0) duration = raw / timescale;
+        } else if (version === 1 && payload + 32 <= boxEnd) {
+          const timescale = view.getUint32(payload + 20);
+          const raw = Number(view.getBigUint64(payload + 24));
+          if (timescale > 0 && raw > 0) duration = raw / timescale;
+        }
+      } else if (type === "tkhd" && payload < boxEnd) {
+        const version = bytes[payload];
+        const widthOffset = version === 1 ? 88 : 76;
+        const heightOffset = widthOffset + 4;
+        if (payload + heightOffset + 4 <= boxEnd) {
+          const nextWidth = view.getUint32(payload + widthOffset) >>> 16;
+          const nextHeight = view.getUint32(payload + heightOffset) >>> 16;
+          if (nextWidth > 0 && nextHeight > 0 && width === 0) {
+            width = nextWidth;
+            height = nextHeight;
+          }
+        }
+      }
+      offset += size;
+    }
+  };
+  walk(0, bytes.byteLength);
+  if (duration == null || !isFinite(duration) || duration <= 0) return null;
+  return { duration, width: width || 1920, height: height || 1080 };
+}
+
+async function readIsoBmffMeta(file: File): Promise<{ width: number; height: number; duration: number } | null> {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  const looksMp4 = type.includes("mp4") || type.includes("quicktime") || /\.(mp4|mov|m4v|m4a)$/i.test(name);
+  if (!looksMp4 && !type.includes("video") && !type.includes("audio")) return null;
+  let offset = 0;
+  while (offset + 8 <= file.size) {
+    const headerBuf = await file.slice(offset, Math.min(file.size, offset + 16)).arrayBuffer();
+    if (headerBuf.byteLength < 8) break;
+    const headerView = new DataView(headerBuf);
+    const headerBytes = new Uint8Array(headerBuf);
+    let size = headerView.getUint32(0);
+    const box = boxType(headerBytes, 4);
+    let headerSize = 8;
+    if (size === 1) {
+      if (headerBuf.byteLength < 16) break;
+      size = Number(headerView.getBigUint64(8));
+      headerSize = 16;
+    } else if (size === 0) {
+      size = file.size - offset;
+    }
+    if (!Number.isFinite(size) || size < headerSize) break;
+    if (box === "moov") {
+      const moovEnd = Math.min(file.size, offset + size);
+      const moov = await file.slice(offset, moovEnd).arrayBuffer();
+      return parseIsoBmffMetaFromMoov(moov);
+    }
+    offset += size;
+  }
+  return null;
+}
+
+function waitForMediaMeta(el: HTMLMediaElement, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("durationchange", onDuration);
+      el.removeEventListener("error", onError);
+      fn();
+    };
+    const onLoaded = () => {
+      if (isFinite(el.duration) && el.duration > 0) finish(resolve);
+    };
+    const onDuration = () => {
+      if (isFinite(el.duration) && el.duration > 0) finish(resolve);
+    };
+    const onError = () => finish(() => reject(new Error("Could not read this file's info")));
+    const timer = window.setTimeout(() => {
+      if (isFinite(el.duration) && el.duration > 0) finish(resolve);
+      else finish(() => reject(new Error("Timed out reading this file's info")));
+    }, timeoutMs);
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("durationchange", onDuration);
+    el.addEventListener("error", onError);
+    if (el.readyState >= 1 && isFinite(el.duration) && el.duration > 0) finish(resolve);
+  });
+}
+
 // Real fix (follow-up audit, 2026-09-17): `?videos=` (used by /ads to hand
 // off finished storyboard scenes, see the preload effect below) used to
 // fetch ANY url a visitor was given with no host check at all - a crafted
@@ -340,40 +466,57 @@ function loadStitchProject(): Promise<SavedStitchProject | null> {
 // not a fluke, a genuinely malformed container). Reads real dimensions
 // via a native <video> element rather than guessing, so the fix works for
 // any mix of aspect ratios, not just the two seen while debugging.
-function getVideoMeta(file: File): Promise<{ width: number; height: number; duration: number }> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.onloadedmetadata = () => {
-      const { videoWidth, videoHeight, duration } = video;
-      URL.revokeObjectURL(video.src);
-      if (!videoWidth || !videoHeight || !isFinite(duration)) reject(new Error("Could not read this video's info"));
-      else resolve({ width: videoWidth, height: videoHeight, duration });
-    };
-    video.onerror = () => {
-      URL.revokeObjectURL(video.src);
-      reject(new Error("Could not read this video's info"));
-    };
-    video.src = URL.createObjectURL(file);
-  });
+async function getVideoMeta(file: File): Promise<{ width: number; height: number; duration: number }> {
+  // Large MP4/MOV files often store `moov` after `mdat`. A <video preload=metadata>
+  // then has to scan the whole file before duration is known, which is what made
+  // the stitch player look frozen on big uploads. Read only box headers + the
+  // moov atom (never the media data) first.
+  const boxed = await readIsoBmffMeta(file);
+  if (boxed && boxed.duration > 0) return boxed;
+
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+  const objectUrl = URL.createObjectURL(file);
+  video.src = objectUrl;
+  try {
+    await waitForMediaMeta(video, MEDIA_META_TIMEOUT_MS);
+    if (!isFinite(video.duration) || video.duration <= 0) {
+      try {
+        video.currentTime = Number.MAX_SAFE_INTEGER;
+        await waitForMediaMeta(video, 2500);
+      } catch {
+        /* still unusable */
+      }
+    }
+    const { videoWidth, videoHeight, duration } = video;
+    if (!isFinite(duration) || duration <= 0) throw new Error("Could not read this video's info");
+    return { width: videoWidth || 1920, height: videoHeight || 1080, duration };
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
-function getAudioDuration(file: File): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const audio = document.createElement("audio");
-    audio.preload = "metadata";
-    audio.onloadedmetadata = () => {
-      const { duration } = audio;
-      URL.revokeObjectURL(audio.src);
-      if (!isFinite(duration)) reject(new Error("Could not read this music file's length"));
-      else resolve(duration);
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(audio.src);
-      reject(new Error("Could not read this music file's length"));
-    };
-    audio.src = URL.createObjectURL(file);
-  });
+async function getAudioDuration(file: File): Promise<number> {
+  const boxed = await readIsoBmffMeta(file);
+  if (boxed && boxed.duration > 0) return boxed.duration;
+
+  const audio = document.createElement("audio");
+  audio.preload = "metadata";
+  const objectUrl = URL.createObjectURL(file);
+  audio.src = objectUrl;
+  try {
+    await waitForMediaMeta(audio, MEDIA_META_TIMEOUT_MS);
+    if (!isFinite(audio.duration) || audio.duration <= 0) throw new Error("Could not read this music file's length");
+    return audio.duration;
+  } finally {
+    audio.removeAttribute("src");
+    audio.load();
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 // Real visual timeline (2026-09-16, per direct request - "make the video
@@ -385,30 +528,47 @@ function getAudioDuration(file: File): Promise<number> {
 // keep re-generating it.
 function getVideoThumbnail(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (file.size > LARGE_THUMBNAIL_SKIP_BYTES) {
+      reject(new Error("Skipping thumbnail for a large file"));
+      return;
+    }
     const video = document.createElement("video");
     video.preload = "metadata";
     video.muted = true;
+    video.playsInline = true;
+    const objectUrl = URL.createObjectURL(file);
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      video.removeAttribute("src");
+      video.load();
+      URL.revokeObjectURL(objectUrl);
+    };
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out drawing this video's thumbnail"));
+    }, 8000);
     video.onloadedmetadata = () => {
-      video.currentTime = Math.min(0.15, video.duration / 2);
+      video.currentTime = Math.min(0.15, isFinite(video.duration) ? video.duration / 2 : 0.15);
     };
     video.onseeked = () => {
       const canvas = document.createElement("canvas");
       canvas.width = 96;
       canvas.height = 54;
       const ctx = canvas.getContext("2d");
-      URL.revokeObjectURL(video.src);
       if (!ctx) {
+        cleanup();
         reject(new Error("Could not draw this video's thumbnail"));
         return;
       }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      cleanup();
       resolve(canvas.toDataURL("image/jpeg", 0.7));
     };
     video.onerror = () => {
-      URL.revokeObjectURL(video.src);
+      cleanup();
       reject(new Error("Could not read this video for a thumbnail"));
     };
-    video.src = URL.createObjectURL(file);
+    video.src = objectUrl;
   });
 }
 
@@ -422,6 +582,7 @@ function getVideoThumbnail(file: File): Promise<string> {
 // nicety - if decoding fails for an unusual format, the caller just skips
 // showing a waveform for that track; the track itself still works.
 async function getAudioPeaks(file: File, buckets = 120): Promise<number[]> {
+  if (file.size > LARGE_AUDIO_PEAKS_SKIP_BYTES) return [];
   const arrayBuffer = await file.arrayBuffer();
   const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const ctx = new AudioCtx();
@@ -669,7 +830,7 @@ function StitchPageInner() {
   // thumbnail already has.
   const [itemDurations, setItemDurations] = useState<Record<string, number>>({});
   const [itemTrims, setItemTrims] = useState<Record<string, ItemTrim>>({});
-  type HistorySnapshot = { items: VideoItem[]; trims: Record<string, ItemTrim>; audioTracks: AudioTrack[]; textOverlays: TextOverlay[]; imageOverlays: ImageOverlay[]; duckMusic: boolean };
+  type HistorySnapshot = { items: VideoItem[]; trims: Record<string, ItemTrim>; audioTracks: AudioTrack[]; textOverlays: TextOverlay[]; imageOverlays: ImageOverlay[]; videoOverlays: VideoOverlay[]; duckMusic: boolean };
   const undoStackRef = useRef<HistorySnapshot[]>([]);
   const redoStackRef = useRef<HistorySnapshot[]>([]);
   const lastSnapshotRef = useRef<HistorySnapshot | null>(null);
@@ -720,6 +881,7 @@ function StitchPageInner() {
   const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const videoOverlayElRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const currentStageItemIdRef = useRef<string | null>(null); // which item's file is currently loaded into the stage <video>, so we only reassign .src on an actual clip change
+  const stageLoadGenerationRef = useRef(0);// Reject stale media events after a newer clip load wins.
   // Intent flags so async loadedmetadata play() (which is outside the click
   // gesture) can still honor mute preferences and recover from autoplay blocks.
   const previewWantPlayRef = useRef(false);
@@ -757,6 +919,16 @@ function StitchPageInner() {
   // the same moment it always did, same as before this feature existed.
   const transitionVideoRef = useRef<HTMLVideoElement | null>(null);
   const currentTransitionItemIdRef = useRef<string | null>(null);
+  const autoOpenedLargeSourcesRef = useRef<Set<string>>(new Set());
+  const previewTimeRef = useRef(0);
+  const editorActionsRef = useRef<{
+    undoEdit: () => void;
+    redoEdit: () => void;
+    splitAtPlayhead: () => void;
+    deleteAtPlayhead: () => void;
+    handlePreviewPlayToggle: () => void;
+    seekPreviewTo: (t: number) => void;
+  } | null>(null);
 
   // Picks up scenes handed off from /ads (2026-09-14, per direct request -
   // "at the end they have an option to click create full ad where we
@@ -854,7 +1026,7 @@ function StitchPageInner() {
         setError("No project has been saved on this device yet.");
         return;
       }
-      revokeAllPreviewUrls(items, audioTracks, imageOverlays, resultUrl);
+      revokeAllPreviewUrls(items, audioTracks, imageOverlays, videoOverlays, resultUrl);
       setResultUrl(null);
       setItems(saved.items.map((item) => ({ ...item, previewUrl: URL.createObjectURL(item.file) })));
       setAudioTracks(saved.audioTracks.map((track, index) => ({ ...track, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, kind: track.kind ?? (index === 0 ? "dialogue" : index === 1 ? "music" : "other"), previewUrl: URL.createObjectURL(track.file) })));
@@ -949,6 +1121,10 @@ function StitchPageInner() {
     };
   }
 
+  useEffect(() => {
+    previewTimeRef.current = previewTime;
+  }, [previewTime]);
+
   // Reads each clip's real duration (cheap - metadata only, never decodes
   // or re-encodes anything) so the trim controls below can show/clamp
   // against a real per-clip length, and defaults each new clip's trim
@@ -968,34 +1144,38 @@ function StitchPageInner() {
         }
         return;
       }
-      try {
-        const metas = await Promise.all(items.map((item) => getVideoMeta(item.file)));
-        if (cancelled) return;
-        const durations: Record<string, number> = {};
-        metas.forEach((m, i) => {
-          durations[items[i].id] = m.duration;
-        });
-        setItemDurations(durations);
-        setItemTrims((prev) => {
-          const next: Record<string, ItemTrim> = {};
-          items.forEach((item, i) => {
-            next[item.id] = prev[item.id] ?? { start: 0, end: Math.min(10, metas[i].duration), fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
-          });
-          return next;
-        });
-        // A very large original is useful, but asking a browser to treat it
-        // like an ordinary short clip is what causes the slow/stuck feeling.
-        // Open the existing full-source editor immediately so the user picks
-        // the small window they actually intend to use before doing anything
-        // expensive with the project.
-        const firstLargeSource = items.find((item) => item.file.size > LARGE_SOURCE_BYTES);
-        if (firstLargeSource) setSourceEditorId(firstLargeSource.id);
-        setMediaPreparationMessage("");
-      } catch {
-        // Leave whatever's already known as-is - handleCombine will surface
-        // any real problem with a clip when the user actually combines.
-        if (!cancelled) setMediaPreparationMessage("Some footage is still loading. You can keep arranging clips while it finishes.");
+      const durations: Record<string, number> = {};
+      const trimsToSeed: Record<string, ItemTrim> = {};
+      let failed = 0;
+      for (const item of items) {
+        try {
+          const meta = await getVideoMeta(item.file);
+          if (cancelled) return;
+          durations[item.id] = meta.duration;
+          trimsToSeed[item.id] = { start: 0, end: Math.min(10, meta.duration), fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
+        } catch {
+          failed += 1;
+        }
       }
+      if (cancelled) return;
+      setItemDurations((prev) => ({ ...prev, ...durations }));
+      setItemTrims((prev) => {
+        const next: Record<string, ItemTrim> = {};
+        for (const item of items) {
+          next[item.id] = prev[item.id] ?? trimsToSeed[item.id] ?? { start: 0, end: 10, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
+        }
+        return next;
+      });
+      const firstNewLargeSource = items.find((item) => item.file.size > LARGE_SOURCE_BYTES && !autoOpenedLargeSourcesRef.current.has(item.id));
+      if (firstNewLargeSource) {
+        autoOpenedLargeSourcesRef.current.add(firstNewLargeSource.id);
+        setSourceEditorId(firstNewLargeSource.id);
+      }
+      const liveIds = new Set(items.map((item) => item.id));
+      for (const id of Array.from(autoOpenedLargeSourcesRef.current)) {
+        if (!liveIds.has(id)) autoOpenedLargeSourcesRef.current.delete(id);
+      }
+      setMediaPreparationMessage(failed > 0 ? `${failed} clip${failed === 1 ? "" : "s"} still loading metadata. You can keep arranging the others.` : "");
     })();
     return () => {
       cancelled = true;
@@ -1009,8 +1189,8 @@ function StitchPageInner() {
   const historySignature = `${items.map((item) => item.id).join(",")}|${items.map((item) => {
     const trim = itemTrims[item.id];
     return trim ? `${trim.start}:${trim.end}:${trim.speed}:${trim.transitionType}:${trim.muteAudio}` : "";
-  }).join(",")}|${audioTracks.map((track) => `${track.id}:${track.startSec}:${track.endSec}:${track.volume}:${track.kind}`).join(",")}|${textOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.text}:${overlay.position}`).join(",")}|${imageOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.position}:${overlay.scalePercent}`).join(",")}|${duckMusic}`;
-  const historySnapshot: HistorySnapshot = { items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic };
+  }).join(",")}|${audioTracks.map((track) => `${track.id}:${track.startSec}:${track.endSec}:${track.volume}:${track.kind}`).join(",")}|${textOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.text}:${overlay.position}`).join(",")}|${imageOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.position}:${overlay.scalePercent}`).join(",")}|${videoOverlays.map((overlay) => `${overlay.id}:${overlay.startSec}:${overlay.endSec}:${overlay.muted}`).join(",")}|${duckMusic}`;
+  const historySnapshot: HistorySnapshot = { items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, videoOverlays, duckMusic };
   useEffect(() => {
     if (!historyReadyRef.current) {
       historyReadyRef.current = true;
@@ -1032,26 +1212,28 @@ function StitchPageInner() {
   function undoEdit() {
     const previous = undoStackRef.current.pop();
     if (!previous) return;
-    redoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic });
+    redoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, videoOverlays, duckMusic });
     historyRestoringRef.current = true;
     setItems(previous.items);
     setItemTrims(previous.trims);
     setAudioTracks(previous.audioTracks);
     setTextOverlays(previous.textOverlays);
     setImageOverlays(previous.imageOverlays);
+    setVideoOverlays(previous.videoOverlays ?? []);
     setDuckMusic(previous.duckMusic);
   }
 
   function redoEdit() {
     const next = redoStackRef.current.pop();
     if (!next) return;
-    undoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, duckMusic });
+    undoStackRef.current.push({ items, trims: itemTrims, audioTracks, textOverlays, imageOverlays, videoOverlays, duckMusic });
     historyRestoringRef.current = true;
     setItems(next.items);
     setItemTrims(next.trims);
     setAudioTracks(next.audioTracks);
     setTextOverlays(next.textOverlays);
     setImageOverlays(next.imageOverlays);
+    setVideoOverlays(next.videoOverlays ?? []);
     setDuckMusic(next.duckMusic);
   }
 
@@ -1059,35 +1241,33 @@ function StitchPageInner() {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
       if (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      const actions = editorActionsRef.current;
+      if (!actions) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
-        if (event.shiftKey) redoEdit();
-        else undoEdit();
+        if (event.shiftKey) actions.redoEdit();
+        else actions.undoEdit();
       }
       if (!event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
-        splitAtPlayhead();
+        actions.splitAtPlayhead();
       }
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
-        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
-        deleteAtPlayhead();
+        actions.deleteAtPlayhead();
       }
       if (event.key === " ") {
         event.preventDefault();
-        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
-        handlePreviewPlayToggle();
+        actions.handlePreviewPlayToggle();
       }
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        // eslint-disable-next-line react-hooks/immutability -- native listener invokes the component handler.
-        seekPreviewTo(previewTime + (event.key === "ArrowLeft" ? -0.1 : 0.1));
+        actions.seekPreviewTo(previewTimeRef.current + (event.key === "ArrowLeft" ? -0.1 : 0.1));
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  }, []);
 
   // One thumbnail per clip, generated once (not tied to the current trim -
   // see getVideoThumbnail's comment) and never regenerated for a clip
@@ -1101,7 +1281,7 @@ function StitchPageInner() {
       // retain responsive trimming/reordering and simply show filenames.
       if (items.reduce((total, item) => total + item.file.size, 0) > LARGE_PROJECT_WARNING_BYTES) return;
       for (const item of items) {
-        if (itemThumbnails[item.id]) continue;
+        if (itemThumbnails[item.id] || item.file.size > LARGE_THUMBNAIL_SKIP_BYTES) continue;
         try {
           const url = await getVideoThumbnail(item.file);
           if (!cancelled) setItemThumbnails((prev) => (prev[item.id] ? prev : { ...prev, [item.id]: url }));
@@ -1556,7 +1736,7 @@ function StitchPageInner() {
     const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
     const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
-    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100, muted: false }]);
+    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: item.previewUrl, sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100, muted: false }]);
     setSelectedVideoOverlayId(id);
   }
 
@@ -1579,9 +1759,15 @@ function StitchPageInner() {
   function removeVideoOverlay(id: string) {
     setVideoOverlays((previous) => {
       const target = previous.find((overlay) => overlay.id === id);
-      if (target) URL.revokeObjectURL(target.previewUrl);
-      if (target?.id === selectedVideoOverlayId) setSelectedVideoOverlayId(null);
-      return previous.filter((overlay) => overlay.id !== id);
+      const remaining = previous.filter((overlay) => overlay.id !== id);
+      if (target) {
+        const urlStillUsed =
+          items.some((item) => item.previewUrl === target.previewUrl) ||
+          remaining.some((overlay) => overlay.previewUrl === target.previewUrl);
+        if (!urlStillUsed) URL.revokeObjectURL(target.previewUrl);
+        if (target.id === selectedVideoOverlayId) setSelectedVideoOverlayId(null);
+      }
+      return remaining;
     });
   }
 
@@ -1624,8 +1810,8 @@ function StitchPageInner() {
     if (!originalTrim) return;
     splitIdRef.current += 1;
     const splitId = splitIdRef.current;
-    const first: VideoItem = { ...entry.item, id: `${entry.item.id}-a-${splitId}`, previewUrl: URL.createObjectURL(entry.item.file) };
-    const second: VideoItem = { ...entry.item, id: `${entry.item.id}-b-${splitId}`, previewUrl: URL.createObjectURL(entry.item.file) };
+    const first: VideoItem = { ...entry.item, id: `${entry.item.id}-a-${splitId}` };
+    const second: VideoItem = { ...entry.item, id: `${entry.item.id}-b-${splitId}` };
     setItems((prev) => {
       const index = prev.findIndex((item) => item.id === entry.item.id);
       if (index < 0) return prev;
@@ -1645,6 +1831,7 @@ function StitchPageInner() {
     const entry = videoTimelineEntries.find((candidate) => previewTime >= candidate.timelineStart && previewTime < candidate.timelineEnd);
     if (!entry) return;
     const index = items.findIndex((item) => item.id === entry.item.id);
+    // eslint-disable-next-line react-hooks/immutability -- removeItem is declared below because it also owns URL cleanup.
     if (index >= 0) removeItem(index);
   }
 
@@ -1761,35 +1948,51 @@ function StitchPageInner() {
   function loadAndPlayEntry(entry: TimelineVideoEntry, localStart: number, shouldPlay = true) {
     const v = stageVideoRef.current;
     if (!v) return;
+    const loadGeneration = ++stageLoadGenerationRef.current;
+    const sourceUrl = entry.item.previewUrl;
+    currentStageItemIdRef.current = entry.item.id;
     const apply = () => {
+      if (loadGeneration !== stageLoadGenerationRef.current || v.src !== sourceUrl) return;
+      let finished = false;
+      const finish = () => {
+        if (finished || loadGeneration !== stageLoadGenerationRef.current || v.src !== sourceUrl) return;
+        finished = true;
+        window.clearTimeout(seekTimer);
+        v.removeEventListener("seeked", finish);
+        v.playbackRate = entry.speed;
+        v.muted = previewMutedRef.current || Boolean(itemTrims[entry.item.id]?.muteAudio);
+        if (shouldPlay && previewWantPlayRef.current) {
+          void safePlayMedia(v);
+        } else if (!shouldPlay) {
+          v.pause();
+        }
+      };
+      const seekTimer = window.setTimeout(finish, 1500);
+      v.addEventListener("seeked", finish);
       try {
-        v.currentTime = localStart;
+        if (Math.abs(v.currentTime - localStart) < 0.04 && v.readyState >= 2) {
+          finish();
+        } else {
+          v.currentTime = localStart;
+        }
       } catch {
-        /* ignore seek-before-ready races */
-      }
-      // Real speed ramping (2026-09-17) simulated live in the preview too,
-      // not just the export - native <video> playbackRate is a genuine,
-      // correct way to do this.
-      v.playbackRate = entry.speed;
-      v.muted = previewMutedRef.current || Boolean(itemTrims[entry.item.id]?.muteAudio);
-      if (shouldPlay && previewWantPlayRef.current) {
-        void safePlayMedia(v);
-      } else if (!shouldPlay) {
-        v.pause();
+        finish();
       }
     };
     const onLoaded = () => {
       v.removeEventListener("loadedmetadata", onLoaded);
+      if (loadGeneration !== stageLoadGenerationRef.current || v.src !== sourceUrl) return;
       apply();
     };
     // Same blob URL already loaded — don't force a full reload (that was
     // losing the user-gesture window and blanking the stage).
-    if (v.src === entry.item.previewUrl && v.readyState >= 1) {
+    if (v.src === sourceUrl && v.readyState >= 1) {
       apply();
       return;
     }
     v.addEventListener("loadedmetadata", onLoaded);
-    v.src = entry.item.previewUrl;
+    v.preload = entry.item.file.size > LARGE_SOURCE_BYTES ? "metadata" : "auto";
+    v.src = sourceUrl;
     v.load();
     if (v.readyState >= 1) onLoaded();
   }
@@ -1842,7 +2045,11 @@ function StitchPageInner() {
 
   function clearTransitionVideo() {
     const sv = transitionVideoRef.current;
-    if (sv && !sv.paused) sv.pause();
+    if (sv && currentTransitionItemIdRef.current !== null) {
+      sv.pause();
+      sv.removeAttribute("src");
+      sv.load();
+    }
     currentTransitionItemIdRef.current = null;
   }
 
@@ -1958,6 +2165,16 @@ function StitchPageInner() {
   // ever plays the visitor's own already-downloaded files through native
   // <video>/<audio> elements and seeks between them - no ffmpeg, no
   // encoding, nothing sent anywhere.
+  function playSourceSection(itemId: string) {
+    const entry = videoTimelineEntries.find((candidate) => candidate.item.id === itemId);
+    if (!entry) return;
+    setPreviewTime(entry.timelineStart);
+    previewWantPlayRef.current = true;
+    setPreviewPlaying(true);
+    currentStageItemIdRef.current = entry.item.id;
+    loadAndPlayEntry(entry, entry.trimStart, true);
+  }
+
   function handlePreviewPlayToggle() {
     const v = stageVideoRef.current;
     if (!v) {
@@ -2016,15 +2233,24 @@ function StitchPageInner() {
   // every audio track in sync with that position, and crosses over to the
   // next clip (or stops, at the very end) once the current clip's trimmed
   // range is exhausted.
+  useEffect(() => {
+    editorActionsRef.current = { undoEdit, redoEdit, splitAtPlayhead, deleteAtPlayhead, handlePreviewPlayToggle, seekPreviewTo };
+  });
+
   function handleStageTimeUpdate() {
     const v = stageVideoRef.current;
-    if (!v || !previewPlaying || timelineScrubbingRef.current) return;
+    if (!v || !previewPlaying || timelineScrubbingRef.current || v.seeking) return;
     const entry = videoTimelineEntries.find((e) => e.item.id === currentStageItemIdRef.current);
     if (!entry) {
       v.pause();
       setPreviewPlaying(false);
       return;
     }
+    if (v.currentSrc !== entry.item.previewUrl) return;
+    // Ignore stale currentTime from before a long-file seek lands inside the
+    // selected window - otherwise previewTime goes negative or the player
+    // thinks the clip already ended and skips ahead.
+    if (v.currentTime + 0.35 < entry.trimStart) return;
     // Source-file seconds -> final-timeline seconds: at speed 2x, the
     // <video> element's own currentTime (in source-file units, since
     // playbackRate doesn't change what unit currentTime is measured in)
@@ -2071,17 +2297,18 @@ function StitchPageInner() {
     setItems((prev) => {
       const target = prev[index];
       if (!target) return prev;
-      URL.revokeObjectURL(target.previewUrl);
-      // A removed clip can't stay "the one currently showing" in either
-      // preview surface - clear both rather than let them keep pointing at
-      // a revoked object URL.
+      const remaining = prev.filter((_, i) => i !== index);
+      const urlStillUsed =
+        remaining.some((item) => item.previewUrl === target.previewUrl) ||
+        videoOverlays.some((overlay) => overlay.previewUrl === target.previewUrl);
+      if (!urlStillUsed) URL.revokeObjectURL(target.previewUrl);
       setPreviewItemId((cur) => (cur === target.id ? null : cur));
       if (currentStageItemIdRef.current === target.id) {
         stageVideoRef.current?.pause();
         currentStageItemIdRef.current = null;
         setPreviewPlaying(false);
       }
-      return prev.filter((_, i) => i !== index);
+      return remaining;
     });
   }
 
@@ -2093,28 +2320,37 @@ function StitchPageInner() {
     currentItems: VideoItem[],
     currentAudioTracks: AudioTrack[],
     currentImageOverlays: ImageOverlay[],
+    currentVideoOverlays: VideoOverlay[],
     currentResultUrl: string | null,
   ) {
-    for (const item of currentItems) URL.revokeObjectURL(item.previewUrl);
-    for (const track of currentAudioTracks) URL.revokeObjectURL(track.previewUrl);
-    for (const overlay of currentImageOverlays) URL.revokeObjectURL(overlay.previewUrl);
-    if (currentResultUrl) URL.revokeObjectURL(currentResultUrl);
+    const seen = new Set<string>();
+    const revoke = (url: string) => {
+      if (seen.has(url)) return;
+      seen.add(url);
+      URL.revokeObjectURL(url);
+    };
+    for (const item of currentItems) revoke(item.previewUrl);
+    for (const track of currentAudioTracks) revoke(track.previewUrl);
+    for (const overlay of currentImageOverlays) revoke(overlay.previewUrl);
+    for (const overlay of currentVideoOverlays) revoke(overlay.previewUrl);
+    if (currentResultUrl) revoke(currentResultUrl);
   }
 
   // Tracks the latest items/audioTracks/imageOverlays/resultUrl in a ref
   // purely so the unmount cleanup below reads their real, final values
   // instead of a stale closure over whatever they were when this effect
   // first ran.
-  const latestStateRef = useRef({ items, audioTracks, imageOverlays, resultUrl });
+  const latestStateRef = useRef({ items, audioTracks, imageOverlays, videoOverlays, resultUrl });
   useEffect(() => {
-    latestStateRef.current = { items, audioTracks, imageOverlays, resultUrl };
-  }, [items, audioTracks, imageOverlays, resultUrl]);
+    latestStateRef.current = { items, audioTracks, imageOverlays, videoOverlays, resultUrl };
+  }, [items, audioTracks, imageOverlays, videoOverlays, resultUrl]);
   useEffect(() => {
     return () => {
       revokeAllPreviewUrls(
         latestStateRef.current.items,
         latestStateRef.current.audioTracks,
         latestStateRef.current.imageOverlays,
+        latestStateRef.current.videoOverlays,
         latestStateRef.current.resultUrl,
       );
     };
@@ -2703,7 +2939,7 @@ function StitchPageInner() {
               audioElRefs.current[track.id] = el;
             }}
             src={track.previewUrl}
-            preload="auto"
+            preload="none"
             muted={previewMuted}
             className="hidden"
           />
@@ -2735,7 +2971,15 @@ function StitchPageInner() {
                 letterboxes whatever's playing (any mix of portrait/
                 landscape clips) inside it instead. */}
             <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
-              <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
+              <video
+                ref={stageVideoRef}
+                onTimeUpdate={handleStageTimeUpdate}
+                onError={() => setPreviewError("This browser couldn't decode that file. Try an MP4 (H.264) copy, or pick a shorter section.")}
+                muted={previewMuted}
+                playsInline
+                preload="metadata"
+                className="h-full w-full object-contain"
+              />
               <div className="pointer-events-none absolute right-2 top-2 rounded bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white">
                 {formatTime(previewTime)} / {formatTime(totalVideoDuration)}
               </div>
@@ -2745,7 +2989,8 @@ function StitchPageInner() {
                   <video
                     key={overlay.id}
                     ref={(element) => { videoOverlayElRefs.current[overlay.id] = element; }}
-                    src={overlay.previewUrl}
+                    src={active ? overlay.previewUrl : undefined}
+                    preload="none"
                     muted={previewMuted || overlay.muted} playsInline
                     className={`absolute inset-0 h-full w-full object-cover ${active ? "block" : "hidden"}`}
                   />
@@ -3672,11 +3917,28 @@ function StitchPageInner() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold">Edit source window</p>
-                  <p className="text-xs text-muted">The player above contains the full original file. Choose the section that appears in this timeline block; long uploads start with a 10-second window so they do not stretch the whole project. Your normal timeline and controls stay exactly the same.</p>
+                  <p className="text-xs text-muted">
+                    {sourceItem.file.size > LARGE_SOURCE_BYTES
+                      ? "This file is large, so the section is chosen here and played in Live preview above — a second full-size player would decode the same footage twice and stall the tab. Use the sliders, then press ▶ Preview."
+                      : "The player above contains the full original file. Choose the section that appears in this timeline block; long uploads start with a 10-second window so they do not stretch the whole project. Your normal timeline and controls stay exactly the same."}
+                  </p>
                 </div>
                 <button onClick={() => setSourceEditorId(null)} className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted">Done</button>
               </div>
-              <video src={sourceItem.previewUrl} controls className="h-48 w-full rounded-xl bg-black object-contain" />
+              {sourceItem.file.size > LARGE_SOURCE_BYTES ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 text-xs text-muted">
+                  <span>{sourceItem.file.name} · {formatBytes(sourceItem.file.size)} · {formatTime(sourceDuration)}</span>
+                  <button
+                    type="button"
+                    onClick={() => playSourceSection(sourceItem.id)}
+                    className="rounded-full bg-purple px-3 py-1 font-semibold text-white"
+                  >
+                    Play this section
+                  </button>
+                </div>
+              ) : (
+                <video src={sourceItem.previewUrl} controls preload="metadata" className="h-48 w-full rounded-xl bg-black object-contain" />
+              )}
               <div className="relative h-8 rounded-lg bg-slate-200">
                 <div className="absolute inset-y-0 rounded-lg bg-purple/30" style={{ left: `${(sourceTrim.start / sourceDuration) * 100}%`, right: `${100 - (sourceTrim.end / sourceDuration) * 100}%` }} />
                 <input aria-label="Source window start" type="range" min="0" max={sourceDuration} step="0.1" value={sourceTrim.start} onChange={(e) => updateItemTrim(sourceItem.id, { start: Math.min(Number(e.target.value), sourceTrim.end - 0.2) })} className="absolute inset-x-0 top-0 h-4 w-full accent-purple" />
