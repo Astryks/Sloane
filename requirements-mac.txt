@@ -6,6 +6,7 @@ numpy>=1.26
 scipy
 librosa
 soundfile
+audiotsm==0.1.2
 # Optional: pyworld enables high-quality pitch DSP but currently requires a
 # local C++ toolchain on some Python/Mac combinations. The engine falls back
 # gracefully when it is unavailable.

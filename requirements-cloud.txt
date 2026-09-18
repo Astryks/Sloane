@@ -5,4 +5,5 @@ demucs
 faster-whisper
 pyworld
 soundfile
+audiotsm==0.1.2
 numpy

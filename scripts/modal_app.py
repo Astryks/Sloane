@@ -189,8 +189,9 @@ class LucyTTS:
         import sys
 
         sys.path.insert(0, "/app")
-        global generate_preset, generate_clone, UnknownVoiceError, ReferenceAudioTooShortError, UnsupportedReferenceAudioError
+        global generate_preset, generate_clone, UnknownVoiceError, GenerationQualityError, ReferenceAudioTooShortError, UnsupportedReferenceAudioError
         from lucy_tts_engine import (
+            GenerationQualityError as _GQE,
             ReferenceAudioTooShortError as _RATSE,
             UnknownVoiceError as _UVE,
             UnsupportedReferenceAudioError as _URAE,
@@ -200,7 +201,7 @@ class LucyTTS:
         )
 
         generate_preset, generate_clone = _gp, _gc
-        UnknownVoiceError, ReferenceAudioTooShortError = _UVE, _RATSE
+        UnknownVoiceError, GenerationQualityError, ReferenceAudioTooShortError = _UVE, _GQE, _RATSE
         UnsupportedReferenceAudioError = _URAE
         # Preload every preset voice's LoRA now, not on each voice's first
         # request - see lucy_tts_engine.py's MAX_CACHED_VOICES comment for
@@ -219,7 +220,7 @@ class LucyTTS:
                 exaggeration=exaggeration, cfg_weight=cfg_weight,
                 pitch_semitones=pitch_semitones, speed=speed,
             )
-        except (UnknownVoiceError, ReferenceAudioTooShortError) as exc:
+        except (UnknownVoiceError, ReferenceAudioTooShortError, GenerationQualityError) as exc:
             return {"error": str(exc)}
         if audio is None:
             return {"error": "no audio generated"}
@@ -233,7 +234,7 @@ class LucyTTS:
                 text, reference_audio_bytes,
                 exaggeration=exaggeration, cfg_weight=cfg_weight, speed=speed,
             )
-        except (UnknownVoiceError, ReferenceAudioTooShortError, UnsupportedReferenceAudioError) as exc:
+        except (UnknownVoiceError, ReferenceAudioTooShortError, UnsupportedReferenceAudioError, GenerationQualityError) as exc:
             return {"error": str(exc)}
         if audio is None:
             return {"error": "no audio generated"}

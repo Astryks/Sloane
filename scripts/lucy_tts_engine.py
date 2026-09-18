@@ -61,6 +61,12 @@ def select_device() -> str:
 DEVICE = os.environ.get("LUCY_DEVICE", select_device())
 NEW_VOCAB_SIZE = 2454  # matches TrainConfig.new_vocab_size for is_turbo=False
 
+# Native model output is the production default. Previous releases layered
+# several waveform transformations on top of Chatterbox; stacked together,
+# those transformations can sound metallic and can damage word boundaries.
+# Keep them only for explicit offline A/B tests, never by default.
+ENABLE_EXPERIMENTAL_DSP = os.environ.get("LUCY_EXPERIMENTAL_DSP") == "1"
+
 PRESET_VOICES = {
     # Kirsty and Matt reuse the very first two fine-tuned voices (Phase 6) -
     # renamed for the customer-facing preset picker, no retraining needed.
@@ -576,6 +582,11 @@ SAD_WORDS = {
     "mourning", "depressed", "tragic", "tragedy", "gloomy", "somber",
     "regret", "regretful", "ashamed", "hopeless", "grim",
 }
+ANGRY_WORDS = {
+    "angry", "anger", "furious", "furiously", "outraged", "frustrated",
+    "frustrating", "annoyed", "annoying", "mad", "rage", "raging",
+    "unacceptable", "enough", "stop", "demand", "refuse", "betrayed",
+}
 
 
 def plan_delivery(text: str, voice_id: str | None = None) -> dict:
@@ -663,7 +674,16 @@ def plan_delivery(text: str, voice_id: str | None = None) -> dict:
 
     happy_hits = sum(1 for tok in tokens if tok in HAPPY_WORDS)
     sad_hits = sum(1 for tok in tokens if tok in SAD_WORDS)
-    if happy_hits > sad_hits:
+    angry_hits = sum(1 for tok in tokens if tok in ANGRY_WORDS)
+    if angry_hits > max(happy_hits, sad_hits):
+        # Firm and energized, using only native model controls rather than a
+        # synthetic pitch shift.
+        intensity = min(1.0, 0.3 * (angry_hits - max(happy_hits, sad_hits)))
+        exaggeration_offset += 0.12 * intensity
+        cfg_weight_offset -= 0.04 * intensity
+        temperature_offset += 0.03 * intensity
+        pause_multiplier *= 1.0 - 0.08 * intensity
+    elif happy_hits > sad_hits:
         # Happy: higher energy (more exaggeration, looser cfg lets it move),
         # a touch brighter/less monotone (temperature up slightly), a
         # smaller pitch lift than the "high pitch" per-voice knob elsewhere
@@ -679,7 +699,6 @@ def plan_delivery(text: str, voice_id: str | None = None) -> dict:
         exaggeration_offset += 0.15 * intensity
         cfg_weight_offset -= 0.08 * intensity
         temperature_offset += 0.05 * intensity
-        pitch_offset_semitones = 1.2 * intensity
         pause_multiplier *= 1.0 - 0.15 * intensity
     elif sad_hits > happy_hits:
         # Sad: lower energy, steadier/tighter cfg and lower temperature for
@@ -690,7 +709,6 @@ def plan_delivery(text: str, voice_id: str | None = None) -> dict:
         exaggeration_offset -= 0.15 * intensity
         cfg_weight_offset += 0.10 * intensity
         temperature_offset -= 0.06 * intensity
-        pitch_offset_semitones = -1.0 * intensity
         pause_multiplier *= 1.0 + 0.25 * intensity
 
     pause_multiplier = _clamp(pause_multiplier, *PAUSE_MULTIPLIER_RANGE)
@@ -719,28 +737,28 @@ def resolve_gen_params(
     vary within one piece of text.
     """
     plan = plan_delivery(text, voice_id)
+    # Use the neutral model by default. The historical per-voice map contains
+    # speculative tuning passes, not new training; leaving it behind an
+    # explicit switch restores Megan to her pre-tuning delivery too.
     params = {
         **DEFAULT_GEN_PARAMS,
-        **(GEN_PARAMS_BY_VOICE.get(voice_id, {}) if voice_id else {}),
+        **(GEN_PARAMS_BY_VOICE.get(voice_id, {}) if ENABLE_EXPERIMENTAL_DSP and voice_id else {}),
     }
+    # The UI always supplies the expressiveness slider. Treat it as a
+    # baseline, then retain the small sentence-aware native-model adjustment
+    # instead of accidentally overwriting it.
     params["exaggeration"] = _clamp(
-        float(params["exaggeration"]) + plan["exaggeration_offset"],
+        float(exaggeration if exaggeration is not None else params["exaggeration"]) + plan["exaggeration_offset"],
         *EXAGGERATION_RANGE,
     )
     params["cfg_weight"] = _clamp(
-        float(params["cfg_weight"]) + plan["cfg_weight_offset"],
+        float(cfg_weight if cfg_weight is not None else params["cfg_weight"]) + plan["cfg_weight_offset"],
         *CFG_WEIGHT_RANGE,
     )
     params["temperature"] = _clamp(
-        float(params["temperature"]) + plan["temperature_offset"],
+        float(temperature if temperature is not None else params["temperature"]) + plan["temperature_offset"],
         *TEMPERATURE_RANGE,
     )
-    if exaggeration is not None:
-        params["exaggeration"] = float(exaggeration)
-    if cfg_weight is not None:
-        params["cfg_weight"] = float(cfg_weight)
-    if temperature is not None:
-        params["temperature"] = float(temperature)
     return params, plan["pause_multiplier"], plan["pitch_offset_semitones"]
 
 
@@ -755,7 +773,10 @@ def resolve_gen_params(
 # bug (see generate_sentence_with_retry) - this is a real tradeoff, not a
 # free win, so MAX_CHUNK_WORDS deliberately stays well under where that
 # instability was observed to get worse.
-MAX_CHUNK_WORDS = 40
+MAX_CHUNK_WORDS = 30
+# If a full-quality take repeatedly fails, regenerate only the affected
+# section in shorter pieces. This is a recovery path, not the normal pace.
+QUALITY_FALLBACK_MAX_WORDS = 12
 
 # Was {"voice_meditation": 14, "voice_sales": 14} - both were mitigations
 # for too little training data to sustain a long continuous generation
@@ -772,7 +793,11 @@ MAX_CHUNK_WORDS = 40
 # but that voice (Michelle) was removed from the roster entirely 2026-09-10
 # per direct user feedback, so the entry moot either way. Empty for now -
 # every remaining voice uses the shared MAX_CHUNK_WORDS default.
-MAX_CHUNK_WORDS_BY_VOICE: dict[str, int] = {}
+MAX_CHUNK_WORDS_BY_VOICE: dict[str, int] = {
+    # Mia has the reported live word-drop issue. Smaller coherent chunks
+    # reduce forced-EOS risk without altering her source voice or speed.
+    "voice_mia": 24,
+}
 
 
 def split_long_sentence(sentence: str, max_words: int) -> list[str]:
@@ -1454,7 +1479,7 @@ def apply_word_emphasis(audio: np.ndarray, sr: int, whisper_words: list) -> np.n
 # its first attempt. More attempts meaningfully lowers the chance every one
 # of them fails at once (independent Bernoulli trials), at the cost of more
 # GPU seconds on the relatively rare case that needs them.
-MAX_GENERATION_ATTEMPTS = 6
+MAX_GENERATION_ATTEMPTS = 8
 # Was 0.7. Multi-sentence chunking (grouping several sentences into one
 # generation call for cross-sentence prosody, see chunk_sentences) means a
 # generation can drop one *entire* sentence out of several and still clear
@@ -1469,7 +1494,12 @@ MAX_GENERATION_ATTEMPTS = 6
 # real fix for the underlying instability is still more training data or a
 # better base model, not a stricter proxy metric, but this is the honest
 # lever available today without retraining.
-MIN_WORD_OVERLAP_RATIO = 0.85  # below this, treat as a bad generation (words skipped/mangled) and retry
+MIN_WORD_OVERLAP_RATIO = 0.94  # below this, treat as a bad generation (words skipped/mangled) and retry
+
+
+class GenerationQualityError(RuntimeError):
+    """No complete, clean take was produced after the configured retries."""
+
 
 # Filler words Chatterbox has been observed to prepend that weren't in the
 # input at all - reported live 2026-09-10 as "Alice is saying 'so' for no
@@ -1498,9 +1528,10 @@ def has_spurious_hesitation(transcribed_text: str) -> bool:
     return any(w in HESITATION_MARKERS for w in words)
 
 
-def _normalize_words(text: str) -> set[str]:
-    stripped = text.lower().translate(str.maketrans("", "", string.punctuation))
-    return set(stripped.split())
+def _normalize_words(text: str) -> list[str]:
+    # Keep order and repeated words. A set-based check can report 100% even
+    # when a repeated or middle phrase was skipped entirely.
+    return re.findall(r"[a-z0-9]+(?:['][a-z0-9]+)?", text.lower())
 
 
 def word_overlap_ratio(input_text: str, transcribed_text: str) -> float:
@@ -1508,7 +1539,12 @@ def word_overlap_ratio(input_text: str, transcribed_text: str) -> float:
     if not input_words:
         return 1.0
     output_words = _normalize_words(transcribed_text)
-    return len(input_words & output_words) / len(input_words)
+    # Longest ordered match measures how much of the written script survived
+    # in spoken order. It catches the exact "quiet rhythm" / middle-clause
+    # omission that an unordered word set can accidentally accept.
+    matcher = difflib.SequenceMatcher(a=input_words, b=output_words, autojunk=False)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return matched / len(input_words)
 
 
 def has_spurious_leading_filler(input_text: str, transcribed_text: str) -> bool:
@@ -1559,40 +1595,58 @@ def ends_abruptly(audio: np.ndarray, sr: int) -> bool:
     return (final_rms / preceding_rms) >= CUTOFF_RATIO_THRESHOLD
 
 
+# A natural sentence pause is normally well below a second. A longer silent
+# hole inside one generated piece is the other visible failure mode reported
+# for Mia: speech resumes later, but the listener hears a blank section.
+MAX_INTERNAL_SILENCE_SECONDS = 1.35
+_SILENCE_WINDOW_SECONDS = 0.03
+
+
+def has_unexpected_internal_silence(audio: np.ndarray, sr: int) -> bool:
+    """Return True for a conspicuous silent hole between voiced regions.
+
+    This deliberately ignores short clips, leading/trailing silence, and
+    normal pauses. Its threshold is relative to the takes own voiced level,
+    so naturally quiet voices are not treated as mute.
+    """
+    frame_size = max(1, int(sr * _SILENCE_WINDOW_SECONDS))
+    if len(audio) < frame_size * 8:
+        return False
+    usable = len(audio) - (len(audio) % frame_size)
+    if usable <= 0:
+        return False
+    frames = audio[:usable].astype(np.float64).reshape(-1, frame_size)
+    rms = np.sqrt(np.mean(frames**2, axis=1))
+    voiced_levels = rms[rms > 1e-4]
+    if len(voiced_levels) < 2:
+        return False
+    threshold = max(0.0015, float(np.percentile(voiced_levels, 70)) * 0.06)
+    voiced = rms >= threshold
+    voiced_indices = np.flatnonzero(voiced)
+    if len(voiced_indices) < 2:
+        return False
+    first, last = int(voiced_indices[0]), int(voiced_indices[-1])
+    min_gap_frames = max(1, int(np.ceil(MAX_INTERNAL_SILENCE_SECONDS / _SILENCE_WINDOW_SECONDS)))
+    gap_start: int | None = None
+    for index in range(first, last + 1):
+        if not voiced[index] and gap_start is None:
+            gap_start = index
+        elif voiced[index] and gap_start is not None:
+            if index - gap_start >= min_gap_frames:
+                return True
+            gap_start = None
+    return False
+
+
 def generate_sentence_with_retry(engine: ChatterboxTTS, sentence: str, reference_path: str, **kwargs) -> np.ndarray:
+    """Generate one text piece and return it only after every quality check passes.
+
+    The model can occasionally force an early end, omit a middle phrase, or
+    leave a long silent hole. Each of those conditions is rejected and
+    regenerated. No closest bad take is ever returned to the caller.
     """
-    Two distinct, real generation glitches this works around, both hit
-    repeatedly during manual testing across every voice this project has,
-    and both reported live in production with no recovery:
-    1. Chatterbox's alignment-stream safety mechanism occasionally forces
-       an early EOS on an otherwise-fine sentence, producing audio far too
-       short for the text ("audio isn't playing for all the text, just
-       3-4 words") - caught by the duration check below.
-    2. Separately, a generation can come back the *right* length but with
-       words dropped or mangled mid-sentence ("Alice skipped some words") -
-       duration alone can't catch this, so we transcribe the result with
-       Whisper and compare against the input text; too little word overlap
-       means retry, same as the duration case.
-    Generation is stochastic - a retry reliably gets a clean result in the
-    manual testing that uncovered both of these, so retrying with identical
-    inputs is a real fix, not a hack.
-    """
-    word_count = len(sentence.split())
-    min_expected_seconds = max(0.3, word_count / 5.0)  # generous - real speech is rarely faster than this
-    # Was "ship whichever attempt happened to run last" when every attempt
-    # fails - harmless when there were only 2-3 rejection reasons, but
-    # adding ends_abruptly() as a 4th one (on top of duration/overlap/
-    # filler) makes exhausting all MAX_GENERATION_ATTEMPTS attempts more
-    # likely for ANY voice, and "last" can easily be the single worst take
-    # (e.g. a near-silent 0.1s clip) rather than the closest-to-passing one.
-    # Reproduced live 2026-09-10 (Brad/voice_tech shipped 0.1s of near-
-    # silence after all 4 attempts failed in a batch run - a re-run in
-    # isolation succeeded fine on the first try, confirming this was
-    # exhaustion bad luck, not a deterministic bug for that text). Now
-    # tracks the best-scoring attempt seen and ships that instead.
-    best_trimmed = np.array([], dtype=np.float32)
-    best_score = -1.0
-    best_words: list = []
+    word_count = len(_normalize_words(sentence))
+    min_expected_seconds = max(0.3, word_count / 5.0)
 
     for attempt in range(MAX_GENERATION_ATTEMPTS):
         wav_tensor = engine.generate(text=sentence, audio_prompt_path=reference_path, **kwargs)
@@ -1604,79 +1658,40 @@ def generate_sentence_with_retry(engine: ChatterboxTTS, sentence: str, reference
 
         if duration < min_expected_seconds:
             print(f"[engine] short generation ({duration:.2f}s for {word_count} words), retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
-            # Real bug fixed here: this docstring says the exhaustion
-            # fallback "tracks the best-scoring attempt seen" (added after
-            # a near-silent 0.1s clip shipped from a *worse* later attempt
-            # - see the comment above), but every short attempt was scored
-            # a flat 0.0, and `best_score < 0.0` is only ever true once (the
-            # very first update) - so the FIRST short attempt always won,
-            # not the longest/least-bad one, exactly the bug this was
-            # supposed to fix. Score by how close to passing the duration
-            # actually was instead, capped below the ends_abruptly tier's
-            # 0.2 so a real-content-but-cut-off take is still always
-            # preferred over any too-short one, same tier ordering as before.
-            if duration > 0:
-                duration_score = min(0.19, (duration / min_expected_seconds) * 0.19)
-                if duration_score > best_score:
-                    best_trimmed, best_score, best_words = trimmed, duration_score, []
             continue
-
         if ends_abruptly(trimmed, engine.sr):
-            print(f"[engine] audio cuts off abruptly (not decaying by the end), retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
-            if best_score < 0.2:
-                best_trimmed, best_score, best_words = trimmed, 0.2, []
+            print(f"[engine] audio cuts off abruptly, retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
+            continue
+        if has_unexpected_internal_silence(trimmed, engine.sr):
+            print(f"[engine] unexpected internal silence, retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             continue
 
-        # word_timestamps=True costs no extra inference pass - same
-        # transcription already needed for the overlap/filler checks below
-        # also gives per-word timing, reused for apply_word_emphasis().
+        # Verify content on every accepted take. Keeping word order and
+        # duplicates lets this catch omissions such as quiet rhythm.
         segments, _ = verifier_model.transcribe(trimmed, language="en", word_timestamps=True)
         segments = list(segments)
         transcribed_text = " ".join(seg.text for seg in segments)
         overlap = word_overlap_ratio(sentence, transcribed_text)
-        whisper_words = [w for seg in segments for w in (seg.words or [])]
+        whisper_words = [word for seg in segments for word in (seg.words or [])]
         if overlap < MIN_WORD_OVERLAP_RATIO:
-            print(f"[engine] word mismatch (overlap {overlap:.0%}) - said \"{transcribed_text[:80]}\" for \"{sentence[:80]}\", retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
-            if overlap > best_score:
-                best_trimmed, best_score, best_words = trimmed, overlap, whisper_words
+            print(f"[engine] word mismatch ({overlap:.0%}), retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             continue
         if has_spurious_leading_filler(sentence, transcribed_text):
-            print(f"[engine] spurious leading filler - said \"{transcribed_text[:40]}\" for \"{sentence[:40]}\", retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
-            if overlap - 0.05 > best_score:
-                best_trimmed, best_score, best_words = trimmed, overlap - 0.05, whisper_words
+            print(f"[engine] spurious leading filler, retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             continue
         if has_spurious_hesitation(transcribed_text):
-            print(f"[engine] spurious hesitation marker - said \"{transcribed_text[:80]}\" for \"{sentence[:80]}\", retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
-            if overlap - 0.05 > best_score:
-                best_trimmed, best_score, best_words = trimmed, overlap - 0.05, whisper_words
+            print(f"[engine] spurious hesitation marker, retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             continue
-        shaped = apply_word_emphasis(trimmed, engine.sr, whisper_words)
-        # Gives every sentence but the chunk's last one (the caller in
-        # synthesize() already shapes that against the chunk's true end) a
-        # real terminal contour, not just whatever Chatterbox produced on
-        # its own - see apply_interior_sentence_prosody's docstring.
-        shaped = apply_interior_sentence_prosody(shaped, engine.sr, sentence, whisper_words)
-        # Must run last - it's the only one of these three that changes the
-        # audio's length (inserts silence), so anything anchored to a
-        # sample position needs to have already run against the original,
-        # not-yet-lengthened array.
-        shaped = apply_comma_pauses(shaped, engine.sr, sentence, whisper_words)
-        return shaped
 
-    if len(best_trimmed) == 0:
-        # Real bug fixed here: every attempt came back completely
-        # zero-length (not just short/mismatched) - there is no "closest-
-        # to-passing" fallback to ship. The caller (synthesize) silently
-        # dropped this chunk from the final output with no error and no
-        # log line at all - a chunk of real text (up to ~40 words) missing
-        # from a customer's finished audio with the job still reporting
-        # COMPLETED. This can't be recovered here (nothing was generated to
-        # ship), but it's now loudly logged so it's at least searchable/
-        # alertable instead of invisible.
-        print(f"[engine] CRITICAL: all {MAX_GENERATION_ATTEMPTS} attempts produced zero-length audio for chunk \"{sentence[:80]}\" - this chunk will be MISSING from the final output")
-        return best_trimmed
-    print(f"[engine] all {MAX_GENERATION_ATTEMPTS} attempts came back bad - shipping the closest-to-passing one rather than failing outright")
-    return apply_word_emphasis(best_trimmed, engine.sr, best_words)
+        if ENABLE_EXPERIMENTAL_DSP:
+            shaped = apply_word_emphasis(trimmed, engine.sr, whisper_words)
+            shaped = apply_interior_sentence_prosody(shaped, engine.sr, sentence, whisper_words)
+            return apply_comma_pauses(shaped, engine.sr, sentence, whisper_words)
+        return trimmed
+
+    raise GenerationQualityError(
+        f"Could not produce a complete reading after {MAX_GENERATION_ATTEMPTS} attempts. Please retry this sentence."
+    )
 
 
 def synthesize(
@@ -1702,56 +1717,69 @@ def synthesize(
     pitch actually change chunk-to-chunk instead of being averaged across
     the entire input text."""
     all_chunks = []
-    sr = 24000
+    sr = engine.sr
     sentences = split_sentences(text)
     text_chunks = chunk_sentences(sentences, max_words=max_chunk_words)
     rng = np.random.default_rng()
     # Generate first, then insert pauses only between kept chunks so a failed
     # final attempt cannot leave trailing metronomic silence.
-    generated: list[tuple[np.ndarray, str, float]] = []
-    for chunk, last_sentence in text_chunks:
-        gen_params, chunk_pause_mult, chunk_pitch_offset = resolve_gen_params(
-            chunk, voice_id, exaggeration=exaggeration, cfg_weight=cfg_weight, temperature=temperature
+    generated: list[tuple[np.ndarray, str, float, bool]] = []
+
+    def generate_verified_piece(piece: str, ending: str, bridge_after: bool = False) -> tuple[np.ndarray, str, float, bool]:
+        gen_params, piece_pause_mult, piece_pitch_offset = resolve_gen_params(
+            piece, voice_id, exaggeration=exaggeration, cfg_weight=cfg_weight, temperature=temperature
         )
-        trimmed = generate_sentence_with_retry(engine, chunk, reference_path, **gen_params)
+        trimmed = generate_sentence_with_retry(engine, piece, reference_path, **gen_params)
         if len(trimmed) == 0:
-            print(f"[engine] dropping empty chunk from final output: \"{chunk[:80]}\"")
-        if len(trimmed) > 0:
-            sr = engine.sr
-            if chunk_pitch_offset:
-                # This chunk's own happy/sad pitch nudge - separate from and
-                # applied before the per-voice static pitch_semitones below.
-                # Uses apply_pitch_shift_clean (pyworld), not librosa's phase
-                # vocoder - see that function's docstring for the real
-                # echo/underwater artifact this switch fixes.
-                trimmed = apply_pitch_shift_clean(trimmed, sr, chunk_pitch_offset)
-            # Terminal fall/rise keyed off the *last* sentence ending in this
-            # chunk - statements get the forced fall, questions get a real
-            # forced rise (added 2026-09-10) instead of just an unforced one.
-            trimmed = apply_terminal_fall(trimmed, sr, last_sentence)
-            trimmed = apply_terminal_rise(trimmed, sr, last_sentence)
-            generated.append((trimmed, last_sentence, chunk_pause_mult))
-    for i, (trimmed, last_sentence, chunk_pause_mult) in enumerate(generated):
+            raise GenerationQualityError("A verified generation unexpectedly contained no audio.")
+        piece_sr = engine.sr
+        if ENABLE_EXPERIMENTAL_DSP:
+            if piece_pitch_offset:
+                trimmed = apply_pitch_shift_clean(trimmed, piece_sr, piece_pitch_offset)
+            trimmed = apply_terminal_fall(trimmed, piece_sr, ending)
+            trimmed = apply_terminal_rise(trimmed, piece_sr, ending)
+        return trimmed, ending, piece_pause_mult, bridge_after
+
+    for chunk, last_sentence in text_chunks:
+        try:
+            generated.append(generate_verified_piece(chunk, last_sentence))
+        except GenerationQualityError:
+            # A large, otherwise valid script can still be unlucky eight
+            # times in a row. Split only that troublesome section into small
+            # coherent pieces, then verify each piece independently.
+            fallback_limit = max(8, min(QUALITY_FALLBACK_MAX_WORDS, max_chunk_words // 2))
+            fallback_chunks = chunk_sentences(split_sentences(chunk), max_words=fallback_limit)
+            if len(fallback_chunks) <= 1:
+                raise
+            print(f"[engine] quality fallback: regenerating {len(fallback_chunks)} smaller pieces for {chunk[:80]!r}")
+            for fallback_chunk, fallback_last_sentence in fallback_chunks:
+                # A hard word-count split can land mid-sentence. Keep that
+                # bridge nearly seamless instead of inserting a sentence pause.
+                bridge_after = fallback_chunk.strip()[-1:] not in ".!?…"
+                generated.append(generate_verified_piece(fallback_chunk, fallback_last_sentence, bridge_after))
+
+    for i, (trimmed, last_sentence, chunk_pause_mult, bridge_after) in enumerate(generated):
         all_chunks.append(trimmed)
         if i < len(generated) - 1:
-            base_pause = pause_seconds_for(last_sentence)
+            base_pause = 0.06 if bridge_after else pause_seconds_for(last_sentence)
             pause_mult = _clamp(chunk_pause_mult, *PAUSE_MULTIPLIER_RANGE)
             # subtle randomization instead of an identical, metronomic gap
             # every time - real pause length between phrases isn't perfectly
             # uniform even from the same speaker
-            jittered_pause = max(0.08, base_pause * pause_mult * rng.uniform(0.8, 1.25))
+            jittered_pause = max(0.08, base_pause * pause_mult * rng.uniform(0.92, 1.08))
             all_chunks.append(np.zeros(int(sr * jittered_pause), dtype=np.float32))
     if not all_chunks:
         return None, None
     audio = np.concatenate(all_chunks)
-    if pitch_jitter_semitones:
-        audio = apply_pitch_jitter(audio, sr, pitch_jitter_semitones)
-    if pitch_semitones:
-        audio = apply_pitch_shift_clean(audio, sr, pitch_semitones)
-    if highpass_hz:
-        audio = apply_highpass(audio, sr, highpass_hz)
-    if notch_hz:
-        audio = apply_notch(audio, sr, notch_hz, notch_bandwidth_hz)
+    if ENABLE_EXPERIMENTAL_DSP:
+        if pitch_jitter_semitones:
+            audio = apply_pitch_jitter(audio, sr, pitch_jitter_semitones)
+        if pitch_semitones:
+            audio = apply_pitch_shift_clean(audio, sr, pitch_semitones)
+        if highpass_hz:
+            audio = apply_highpass(audio, sr, highpass_hz)
+        if notch_hz:
+            audio = apply_notch(audio, sr, notch_hz, notch_bandwidth_hz)
     if speed and speed != 1.0:
         audio = apply_speed(audio, speed)
     return audio, sr

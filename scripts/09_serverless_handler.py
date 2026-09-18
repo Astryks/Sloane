@@ -29,6 +29,7 @@ import runpod
 import soundfile as sf
 
 from lucy_tts_engine import (
+    GenerationQualityError,
     ReferenceAudioTooShortError,
     UnknownVoiceError,
     UnsupportedReferenceAudioError,
@@ -79,7 +80,7 @@ def handler(job):
         else:
             return {"error": f"unknown action '{action}'"}
 
-    except UnknownVoiceError as exc:
+    except (UnknownVoiceError, GenerationQualityError) as exc:
         return {"error": str(exc)}
     except (ReferenceAudioTooShortError, UnsupportedReferenceAudioError) as exc:
         return {"error": str(exc)}

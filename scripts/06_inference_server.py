@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from lucy_tts_engine import (
     DEVICE,
+    GenerationQualityError,
     PRESET_VOICES,
     ReferenceAudioTooShortError,
     UnknownVoiceError,
@@ -85,7 +86,7 @@ async def generate_preset_route(
             pitch_semitones=pitch_semitones,
             speed=speed,
         )
-    except UnknownVoiceError as exc:
+    except (UnknownVoiceError, GenerationQualityError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     if audio is None:
         return JSONResponse({"error": "no audio generated"}, status_code=500)
@@ -112,7 +113,7 @@ async def clone_voice_route(
             cfg_weight=cfg_weight,
             speed=speed,
         )
-    except (ReferenceAudioTooShortError, UnsupportedReferenceAudioError) as exc:
+    except (ReferenceAudioTooShortError, UnsupportedReferenceAudioError, GenerationQualityError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     if audio is None:
         return JSONResponse({"error": "no audio generated"}, status_code=500)
