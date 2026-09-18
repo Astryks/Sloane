@@ -693,6 +693,7 @@ function StitchPageInner() {
   const [previewTime, setPreviewTime] = useState(0); // position on the FINAL combined timeline, in seconds
   const [timelineView, setTimelineView] = useState<"fit" | "detail">("fit");
   const [timelineZoom, setTimelineZoom] = useState(TIMELINE_DETAIL_PIXELS_PER_SECOND);
+  const [timelineDragScale, setTimelineDragScale] = useState<number | null>(null);
   const stageVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioElRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const currentStageItemIdRef = useRef<string | null>(null); // which item's file is currently loaded into the stage <video>, so we only reassign .src on an actual clip change
@@ -879,6 +880,8 @@ function StitchPageInner() {
     return function onPointerDown(e: React.PointerEvent) {
       e.preventDefault();
       e.stopPropagation();
+      const dragScale = timelinePixelsPerSecond;
+      setTimelineDragScale(dragScale);
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
@@ -887,13 +890,14 @@ function StitchPageInner() {
       const startX = e.clientX;
       const startValue = getStartValue();
       function onMove(ev: PointerEvent) {
-        const deltaSeconds = (ev.clientX - startX) / timelinePixelsPerSecond;
+        const deltaSeconds = (ev.clientX - startX) / dragScale;
         let snapped = Math.round((startValue + deltaSeconds) * 10) / 10;
         if (boundaries && boundaries.length > 0) snapped = applyBoundarySnap(snapped, boundaries);
         onChange(snapped);
         setDragTooltip({ x: ev.clientX, y: ev.clientY, label: formatTime(Math.max(0, snapped)) });
       }
       function onUp() {
+        setTimelineDragScale(null);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         setDragTooltip(null);
@@ -1110,7 +1114,7 @@ function StitchPageInner() {
   // restores a precise pixels-per-second view for close editing. The source
   // window editor below remains full-width and is independent of this view.
   const timelinePixelsPerSecond = timelineView === "fit"
-    ? Math.max(0.35, Math.min(TIMELINE_DETAIL_PIXELS_PER_SECOND, 720 / Math.max(totalVideoDuration, 1)))
+    ? (timelineDragScale ?? Math.max(0.35, Math.min(TIMELINE_DETAIL_PIXELS_PER_SECOND, 720 / Math.max(totalVideoDuration, 1))))
     : timelineZoom;
 
   // Audio is mixed into the video project, so a newly imported recording
