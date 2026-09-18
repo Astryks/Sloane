@@ -631,6 +631,7 @@ function StitchPageInner() {
   const [imageOverlays, setImageOverlays] = useState<ImageOverlay[]>([]);
   const [videoOverlays, setVideoOverlays] = useState<VideoOverlay[]>([]);
   const [selectedVideoOverlayId, setSelectedVideoOverlayId] = useState<string | null>(null);
+  const [mediaPreparationMessage, setMediaPreparationMessage] = useState("");
   const [overlayError, setOverlayError] = useState("");
   // Soft large-project warning (2026-09-17, see LARGE_PROJECT_WARNING_BYTES'
   // own comment for why this is a dismissible warning, not a hard cap).
@@ -811,6 +812,7 @@ function StitchPageInner() {
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
       previewUrl: URL.createObjectURL(file),
     }));
+    if (added.length > 0) setMediaPreparationMessage(`Preparing ${added.length} video clip${added.length === 1 ? "" : "s"} for editing…`);
     setItems((prev) => [...prev, ...added]);
     audioFiles.forEach((file) => void addAudioTrack(file));
     imageFiles.forEach((file) => addImageOverlay(file));
@@ -977,9 +979,11 @@ function StitchPageInner() {
           });
           return next;
         });
+        setMediaPreparationMessage("");
       } catch {
         // Leave whatever's already known as-is - handleCombine will surface
         // any real problem with a clip when the user actually combines.
+        if (!cancelled) setMediaPreparationMessage("Some footage is still loading. You can keep arranging clips while it finishes.");
       }
     })();
     return () => {
@@ -1081,6 +1085,10 @@ function StitchPageInner() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Frame extraction is purely decorative. On a large local project it
+      // can force costly decoder work and make the editor look frozen, so
+      // retain responsive trimming/reordering and simply show filenames.
+      if (items.reduce((total, item) => total + item.file.size, 0) > LARGE_PROJECT_WARNING_BYTES) return;
       for (const item of items) {
         if (itemThumbnails[item.id]) continue;
         try {
@@ -2918,6 +2926,9 @@ function StitchPageInner() {
                     ✕
                   </button>
                 </div>
+              )}
+              {mediaPreparationMessage && (
+                <p className="mb-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/70">{mediaPreparationMessage}</p>
               )}
               {/* Plain div (not a <label>) wraps the whole drop target -
                   the blocks themselves live OUTSIDE any <label>/<input>
