@@ -2982,7 +2982,7 @@ function StitchPageInner() {
               <div className="mb-1 mt-3 flex items-center justify-between">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
-                  <p className="mt-0.5 text-[10px] text-white/55">To finish music gently: drag the right edge to where it should end, then drag <span className="font-semibold text-amber-300">Fade out</span> left.</p>
+                  <p className="mt-0.5 text-[10px] text-white/55">Select an audio bar, then click <span className="font-semibold text-amber-300">Fade in</span> or <span className="font-semibold text-amber-300">Fade out</span>. Each applies a one-second fade to that track only.</p>
                 </div>
                 <label className="flex items-center gap-1 text-[10px] text-white/60" title="Lower tracks after the first while the stitched dialogue is playing">
                   <input type="checkbox" checked={duckMusic} onChange={(e) => setDuckMusic(e.target.checked)} />
@@ -3050,6 +3050,22 @@ function StitchPageInner() {
                         >
                           Edit mask
                         </button>
+                        <div className="absolute left-5 top-0.5 z-10 flex gap-0.5">
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); updateAudioTrack(track.id, { fadeIn: Math.min(1, (track.endSec - track.startSec) / 2) }); }}
+                            title="Apply a one-second fade in to this audio track"
+                            className="rounded bg-black/70 px-1 text-[8px] font-semibold text-white"
+                          >Fade in</button>
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); updateAudioTrack(track.id, { fadeOut: Math.min(1, (track.endSec - track.startSec) / 2) }); }}
+                            title="Apply a one-second fade out to this audio track"
+                            className="rounded bg-black/70 px-1 text-[8px] font-semibold text-white"
+                          >Fade out</button>
+                        </div>
                         {/* Auto-sync to whichever video clip currently
                             sits under this track (2026-09-16, per direct
                             request - real camera-audio-to-mic sync via
@@ -3146,7 +3162,7 @@ function StitchPageInner() {
                   <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
                   {audioTracks.length === 0 ? "Drag audio files here, or click to add a track" : "+ Add another audio track"}
                 </label>
-                {audioTracks.length > 0 && <p className="px-1 text-[10px] text-white/45">On an audio bar, drag <span className="font-semibold text-amber-300">Fade in</span> or <span className="font-semibold text-amber-300">Fade out</span> sideways to control how gently the music starts and ends.</p>}
+                {audioTracks.length > 0 && <p className="px-1 text-[10px] text-white/45">Need a different length? Drag the labeled fade control sideways. It changes only the audio bar you are editing.</p>}
               </div>
 
               {/* Text titles/captions (2026-09-16, per direct request -
