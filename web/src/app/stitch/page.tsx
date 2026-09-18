@@ -1538,6 +1538,18 @@ function StitchPageInner() {
     setSelectedVideoOverlayId(id);
   }
 
+  // Moving a main-sequence clip into the overlay lane must not leave a
+  // confusing duplicate behind. Keep at least one base clip so there is
+  // always a meaningful sequence underneath the full-screen cutaway.
+  function moveItemToVideoOverlay(item: VideoItem, startSec = 0, maxDuration?: number) {
+    if (items.length <= 1) {
+      setError("Keep one video in the main sequence, then move another clip over it as an overlay.");
+      return;
+    }
+    addItemAsVideoOverlay(item, startSec, maxDuration);
+    setItems((previous) => previous.filter((candidate) => candidate.id !== item.id));
+  }
+
   function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
     setVideoOverlays((previous) => previous.map((overlay) => overlay.id === id ? { ...overlay, ...patch } : overlay));
   }
@@ -1647,20 +1659,20 @@ function StitchPageInner() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       setReorderDrag(null);
-      // A normal click deliberately creates an overlay copy. A meaningful
+      // A normal click moves the clip to the overlay lane. A meaningful
       // horizontal movement remains the magnetic reordering gesture.
       if (Math.abs(ev.clientX - startX) < 6) {
-        addItemAsVideoOverlay(item);
+        moveItemToVideoOverlay(item);
         return;
       }
       const newCenter = centers[index] + (ev.clientX - startX);
       // The central half of a clip is an intentional overlap target. Drop
-      // there to lay the dragged video over that base clip (muted); drop
+      // there to lay the dragged video over that base clip; drop
       // nearer either edge to retain the normal magnetic reorder behavior.
       const overlapTargetIndex = centers.findIndex((center, candidateIndex) => candidateIndex !== index && Math.abs(newCenter - center) < widths[candidateIndex] * 0.25);
       if (overlapTargetIndex >= 0) {
         const base = videoTimelineEntries[overlapTargetIndex];
-        if (base) addItemAsVideoOverlay(item, base.timelineStart, base.timelineEnd - base.timelineStart);
+        if (base) moveItemToVideoOverlay(item, base.timelineStart, base.timelineEnd - base.timelineStart);
         return;
       }
       let targetIndex = 0;
@@ -3062,11 +3074,11 @@ function StitchPageInner() {
                             <button
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
-                              onClick={(e) => { e.stopPropagation(); addItemAsVideoOverlay(item); }}
-                              title="Place this video over the main sequence; its audio stays on unless you mute it"
+                              onClick={(e) => { e.stopPropagation(); moveItemToVideoOverlay(item); }}
+                              title="Move this clip into the full-screen overlay lane; its audio stays on unless you mute it"
                               className="flex h-4 items-center justify-center rounded-full bg-fuchsia-700/90 px-1 text-[7px] font-bold text-white"
                             >
-                              Overlay
+                              Move to overlay
                             </button>
                             <button
                               type="button"
@@ -3183,10 +3195,10 @@ function StitchPageInner() {
                     <button type="button" onClick={() => setSelectedVideoOverlayId(null)} className="text-[10px] text-fuchsia-100/70">Hide overlay</button>
                   </div>
               <div className="space-y-1">
-                {videoOverlays.filter((overlay) => overlay.id === selectedVideoOverlayId).map((overlay) => (
+                {videoOverlays.map((overlay) => (
                   <div key={overlay.id} className="relative h-10 rounded-lg bg-fuchsia-500/10">
-                    <div style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }} className="group absolute inset-y-0 overflow-hidden rounded-lg border-2 border-fuchsia-300 bg-fuchsia-700/80">
-                      <div onPointerDown={makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)} className="absolute inset-0 cursor-grab" />
+                    <div style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }} className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
+                      <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
