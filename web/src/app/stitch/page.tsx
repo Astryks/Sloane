@@ -2737,7 +2737,10 @@ function StitchPageInner() {
                   })()}
                 </div>
               )}
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-white/40">Video</p>
+              <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">Video · main sequence</p>
+                {items.length > 1 && <p className="text-[10px] text-white/55">Clips play left to right. The green divider shows where the next clip begins.</p>}
+              </div>
               {showSizeWarning && (
                 <div className="mb-2 flex items-start justify-between gap-2 rounded-xl border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                   <span>
@@ -2769,12 +2772,13 @@ function StitchPageInner() {
                     Drag video clips here, or click to choose
                   </label>
                 ) : (
-                  <div className="flex gap-1">
+                  <div className="flex gap-0">
                     {items.map((item, itemIndex) => {
                       const trim = itemTrims[item.id];
                       const duration = trim ? Math.max(0.2, effectiveClipDuration(trim)) : (itemDurations[item.id] ?? 1);
                       const thumb = itemThumbnails[item.id];
                       const fullDuration = itemDurations[item.id];
+                      const timelineEntry = videoTimelineEntries[itemIndex];
                       const isDragging = reorderDrag?.id === item.id;
                       return (
                         <div
@@ -2784,8 +2788,12 @@ function StitchPageInner() {
                             transform: isDragging ? `translateX(${reorderDrag!.offsetPx}px)` : undefined,
                             zIndex: isDragging ? 20 : undefined,
                           }}
-                          className={`group relative h-16 shrink-0 overflow-hidden rounded-lg border border-white/25 bg-white/10 bg-cover bg-center ${isDragging ? "opacity-90 shadow-xl" : ""}`}
+                          title={`Video ${itemIndex + 1}: ${formatTime(timelineEntry?.timelineStart ?? 0)}–${formatTime(timelineEntry?.timelineEnd ?? duration)}. Drag the amber edges to trim.`}
+                          className={`group relative h-16 shrink-0 overflow-hidden rounded-none border-y border-r border-white/35 bg-white/10 bg-cover bg-center first:rounded-l-lg last:rounded-r-lg ${itemIndex > 0 ? "border-l-2 border-l-emerald-300/80" : "border-l border-white/35"} ${isDragging ? "opacity-90 shadow-xl" : ""}`}
                         >
+                          <div className="pointer-events-none absolute left-1 top-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                            Video {itemIndex + 1} · {formatTime(timelineEntry?.timelineStart ?? 0)}
+                          </div>
                           {/* Clicking the play button below swaps this
                               static thumbnail for a real, briefly-playing
                               <video> of just this clip's own trimmed range
