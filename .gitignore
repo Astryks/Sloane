@@ -1,6 +1,7 @@
 # Python
 .venv/
 .venv-mac/
+.local-models/
 __pycache__/
 *.pyc
 
@@ -14,6 +15,7 @@ raw_audio/
 clean_audio/
 training_data/
 zeroshot_test_output/
+local_voice_tests/
 *.wav
 *.mp4
 *.mov

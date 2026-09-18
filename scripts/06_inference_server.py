@@ -38,8 +38,13 @@ from lucy_tts_engine import (
 app = FastAPI(title="Lucy Inference API (dev/admin)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-AUDIO_DIR = Path("/workspace/sloane/api_generated_audio")
-AUDIO_DIR.mkdir(exist_ok=True)
+AUDIO_DIR = Path(
+    os.environ.get(
+        "LUCY_AUDIO_DIR",
+        Path(__file__).resolve().parent.parent / "api_generated_audio",
+    )
+)
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
 
 # Real fix (security audit, 2026-09-16): this had no auth of any kind - if

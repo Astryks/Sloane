@@ -11,6 +11,7 @@ unchanged from 06_inference_server.py as of the 2026-09-09 long-sentence
 chunking fix.
 """
 import difflib
+import gc
 import os
 import re
 import shutil
@@ -39,6 +40,9 @@ from peft import PeftModel
 # so RunPod's Dockerfile/CMD needs no changes) rather than a literal - the
 # only change needed to run this exact engine on either platform.
 MODEL_ROOT = os.environ.get("LUCY_MODEL_ROOT", "/workspace/sloane")
+VOICE_REFERENCE_DIR = Path(
+    os.environ.get("LUCY_VOICE_REFERENCE_DIR", Path(__file__).resolve().parent / "voice_references")
+)
 
 # The fine-tuning toolkit's own package layout (src.*) - reuse it directly
 # rather than reimplementing model loading.
@@ -60,6 +64,19 @@ def select_device() -> str:
 
 DEVICE = os.environ.get("LUCY_DEVICE", select_device())
 NEW_VOCAB_SIZE = 2454  # matches TrainConfig.new_vocab_size for is_turbo=False
+
+# The fine-tuning fork asks Hugging Face for attention maps during its
+# alignment-stream checks. Transformers 5 no longer silently falls back
+# from SDPA when output_attentions=True, and raises before a Mac can produce
+# any audio. Eager attention is the supported implementation for that
+# combination. Change the shared config before either the base or LoRA T3
+# model is constructed; CUDA production keeps its existing SDPA path.
+if DEVICE == "mps":
+    from src.chatterbox_.models.t3.llama_configs import LLAMA_CONFIGS  # noqa: E402
+
+    for _llama_config in LLAMA_CONFIGS.values():
+        if _llama_config.get("model_type") == "llama":
+            _llama_config["attn_implementation"] = "eager"
 
 # Native model output is the production default. Previous releases layered
 # several waveform transformations on top of Chatterbox; stacked together,
@@ -170,7 +187,7 @@ PRESET_VOICES = {
 # into the Modal image (see modal_app.py's add_local_file) since these are
 # small and don't need the Volume's fine-tuned-checkpoint machinery.
 ZERO_SHOT_PRESET_VOICES: dict[str, str] = {
-    "harper": "/app/voice_references/harper.wav",
+    "harper": str(VOICE_REFERENCE_DIR / "harper.wav"),
     # 2026-09-11: same zero-shot pattern, source is a Veo-generated 4s clip
     # (looped x3 to clear MIN_UPLOAD_SECONDS) rather than real recorded
     # audio of a real person - jess/liam/ryan/tyler are AI-generated voices
@@ -183,10 +200,10 @@ ZERO_SHOT_PRESET_VOICES: dict[str, str] = {
     # Australian, Australian-surfer) rather than by timbre, since there's
     # no way to derive a "male version" of an existing voice's actual
     # voiceprint.
-    "jess": "/app/voice_references/jess.wav",
-    "liam": "/app/voice_references/liam.wav",
-    "ryan": "/app/voice_references/ryan.wav",
-    "tyler": "/app/voice_references/tyler.wav",
+    "jess": str(VOICE_REFERENCE_DIR / "jess.wav"),
+    "liam": str(VOICE_REFERENCE_DIR / "liam.wav"),
+    "ryan": str(VOICE_REFERENCE_DIR / "ryan.wav"),
+    "tyler": str(VOICE_REFERENCE_DIR / "tyler.wav"),
 }
 
 # Runtime pitch adjustment, applied as post-processing (librosa.effects.
@@ -466,7 +483,14 @@ PAUSE_MULTIPLIER_RANGE = (0.7, 1.6)
 # later request, cold or warm. MAX_CACHED_VOICES auto-scales with
 # len(PRESET_VOICES), so recompute this math again if the roster grows
 # enough to threaten the VRAM budget.
-MAX_CACHED_VOICES = len(PRESET_VOICES)
+# A 16 GB Apple Silicon Mac cannot retain every LoRA-expanded T3 at once.
+# Keep one adapter resident on MPS and evict it when the next voice is used;
+# CUDA production retains the full roster by default. The environment
+# override is useful for larger Macs or deliberately smaller cloud workers.
+MAX_CACHED_VOICES = max(
+    1,
+    int(os.environ.get("LUCY_MAX_CACHED_VOICES", "1" if DEVICE == "mps" else str(len(PRESET_VOICES)))),
+)
 
 
 def warm_all_preset_voices() -> None:
@@ -502,9 +526,17 @@ def get_preset_t3(voice_id: str):
 
     if len(preset_t3_cache) >= MAX_CACHED_VOICES:
         evicted_id, evicted_t3 = preset_t3_cache.popitem(last=False)
+        # base_engine points at the most recently used adapter. Drop that
+        # reference before loading its replacement or a 16 GB Mac briefly
+        # holds both expanded T3 models and can run out of unified memory.
+        if base_engine.t3 is evicted_t3:
+            base_engine.t3 = base_t3
         del evicted_t3
+        gc.collect()
         if DEVICE == "cuda":
             torch.cuda.empty_cache()
+        elif DEVICE == "mps":
+            torch.mps.empty_cache()
         print(f"[engine] evicted '{evicted_id}' from GPU cache to make room for '{voice_id}'")
 
     print(f"[engine] loading fine-tuned T3 for '{voice_id}' (cache miss)...")
@@ -1547,6 +1579,47 @@ def word_overlap_ratio(input_text: str, transcribed_text: str) -> float:
     return matched / len(input_words)
 
 
+def omitted_word_count(input_text: str, transcribed_text: str) -> int:
+    """Estimate true deletions without treating every ASR substitution as a skip.
+
+    Whisper can write a spoken word as a homophone or alternate spelling. A
+    same-length ``replace`` opcode is therefore not evidence that speech was
+    omitted. A ``delete`` opcode, or an input side of ``replace`` that is
+    longer than its output side, is evidence that one or more written words
+    disappeared. Keeping SequenceMatcher's ordered, duplicate-aware opcodes
+    also catches the common failure where one item in "steady, steady,
+    steady" is skipped.
+    """
+    input_words = _normalize_words(input_text)
+    output_words = _normalize_words(transcribed_text)
+    matcher = difflib.SequenceMatcher(a=input_words, b=output_words, autojunk=False)
+    omitted = 0
+    for tag, input_start, input_end, output_start, output_end in matcher.get_opcodes():
+        input_length = input_end - input_start
+        output_length = output_end - output_start
+        if tag == "delete":
+            omitted += input_length
+        elif tag == "replace" and input_length > output_length:
+            omitted += input_length - output_length
+    return omitted
+
+
+def unexpected_word_count(input_text: str, transcribed_text: str) -> int:
+    """Estimate added words/repetitions while allowing equal-size ASR substitutions."""
+    input_words = _normalize_words(input_text)
+    output_words = _normalize_words(transcribed_text)
+    matcher = difflib.SequenceMatcher(a=input_words, b=output_words, autojunk=False)
+    unexpected = 0
+    for tag, input_start, input_end, output_start, output_end in matcher.get_opcodes():
+        input_length = input_end - input_start
+        output_length = output_end - output_start
+        if tag == "insert":
+            unexpected += output_length
+        elif tag == "replace" and output_length > input_length:
+            unexpected += output_length - input_length
+    return unexpected
+
+
 def has_spurious_leading_filler(input_text: str, transcribed_text: str) -> bool:
     input_words = input_text.strip().split()
     transcribed_words = transcribed_text.strip().split()
@@ -1672,7 +1745,15 @@ def generate_sentence_with_retry(engine: ChatterboxTTS, sentence: str, reference
         segments = list(segments)
         transcribed_text = " ".join(seg.text for seg in segments)
         overlap = word_overlap_ratio(sentence, transcribed_text)
+        omitted = omitted_word_count(sentence, transcribed_text)
+        unexpected = unexpected_word_count(sentence, transcribed_text)
         whisper_words = [word for seg in segments for word in (seg.words or [])]
+        if omitted:
+            print(f"[engine] omitted {omitted} word(s), retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
+            continue
+        if unexpected:
+            print(f"[engine] added/repeated {unexpected} word(s), retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
+            continue
         if overlap < MIN_WORD_OVERLAP_RATIO:
             print(f"[engine] word mismatch ({overlap:.0%}), retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             continue
@@ -1740,23 +1821,82 @@ def synthesize(
             trimmed = apply_terminal_rise(trimmed, piece_sr, ending)
         return trimmed, ending, piece_pause_mult, bridge_after
 
-    for chunk, last_sentence in text_chunks:
+    def generate_with_recovery(
+        piece: str,
+        ending: str,
+        bridge_after: bool = False,
+        depth: int = 0,
+    ) -> list[tuple[np.ndarray, str, float, bool]]:
+        """Generate one verified piece, recursively shrinking only on failure.
+
+        The normal path still gets all ``MAX_GENERATION_ATTEMPTS`` retries.
+        Recursion is a last resort for short phrases that repeatedly trigger
+        Chatterbox's forced-EOS/repetition guard (deliberate repetitions are a
+        common example). Every child is independently checked for omitted or
+        added words, so recovery never relaxes the completeness guarantee.
+        """
+        # Consecutive repeated words are unusually prone to being merged or
+        # echoed by this model. Sentence punctuation gives each repeat a clear
+        # acoustic boundary while preserving the exact normalized transcript.
+        generation_piece = re.sub(
+            r"\b([A-Za-z']+)\s*,\s*(?=\1\b)",
+            r"\1. ",
+            piece,
+            flags=re.IGNORECASE,
+        )
+        generation_piece = re.sub(
+            r"(?<=[.!?])\s+([a-z])",
+            lambda match: " " + match.group(1).upper(),
+            generation_piece,
+        )
+        if generation_piece != piece:
+            print(f"[engine] separating repeated words with clear punctuation: {generation_piece!r}")
+
         try:
-            generated.append(generate_verified_piece(chunk, last_sentence))
+            return [generate_verified_piece(generation_piece, ending, bridge_after)]
         except GenerationQualityError:
-            # A large, otherwise valid script can still be unlucky eight
-            # times in a row. Split only that troublesome section into small
-            # coherent pieces, then verify each piece independently.
-            fallback_limit = max(8, min(QUALITY_FALLBACK_MAX_WORDS, max_chunk_words // 2))
-            fallback_chunks = chunk_sentences(split_sentences(chunk), max_words=fallback_limit)
-            if len(fallback_chunks) <= 1:
+            words = piece.split()
+            word_count = len(words)
+            # Chatterbox can throw inside its alignment code for isolated
+            # one-word input, and two-word fragments are often less stable
+            # than the original phrase. Keep recovery units at >=3 words.
+            if word_count < 6 or depth >= 6:
                 raise
-            print(f"[engine] quality fallback: regenerating {len(fallback_chunks)} smaller pieces for {chunk[:80]!r}")
-            for fallback_chunk, fallback_last_sentence in fallback_chunks:
-                # A hard word-count split can land mid-sentence. Keep that
-                # bridge nearly seamless instead of inserting a sentence pause.
-                bridge_after = fallback_chunk.strip()[-1:] not in ".!?…"
-                generated.append(generate_verified_piece(fallback_chunk, fallback_last_sentence, bridge_after))
+
+            if depth == 0:
+                split_limit = max(3, min(QUALITY_FALLBACK_MAX_WORDS, max_chunk_words // 2))
+            else:
+                split_limit = max(3, (word_count + 1) // 2)
+            if split_limit >= word_count:
+                split_limit = max(3, word_count // 2)
+
+            recovery_chunks = chunk_sentences(split_sentences(piece), max_words=split_limit)
+            if len(recovery_chunks) <= 1:
+                # Punctuation/tokenisation can occasionally leave a phrase
+                # unsplit. Preserve the exact text while forcing a balanced
+                # word boundary so two- and four-word failures can recover.
+                midpoint = max(3, word_count // 2)
+                left = " ".join(words[:midpoint])
+                right = " ".join(words[midpoint:])
+                recovery_chunks = [(left, left), (right, ending)]
+
+            print(
+                f"[engine] quality fallback depth {depth + 1}: regenerating "
+                f"{len(recovery_chunks)} smaller pieces for {piece[:80]!r}"
+            )
+            recovered: list[tuple[np.ndarray, str, float, bool]] = []
+            for index, (child, child_ending) in enumerate(recovery_chunks):
+                is_last = index == len(recovery_chunks) - 1
+                child_bridge = child.strip()[-1:] not in ".!?…"
+                if is_last and bridge_after:
+                    child_bridge = True
+                recovered.extend(
+                    generate_with_recovery(child, child_ending, child_bridge, depth + 1)
+                )
+            return recovered
+
+    for chunk, last_sentence in text_chunks:
+        generated.extend(generate_with_recovery(chunk, last_sentence))
 
     for i, (trimmed, last_sentence, chunk_pause_mult, bridge_after) in enumerate(generated):
         all_chunks.append(trimmed)
