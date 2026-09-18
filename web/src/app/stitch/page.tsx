@@ -699,6 +699,7 @@ function StitchPageInner() {
   // Intent flags so async loadedmetadata play() (which is outside the click
   // gesture) can still honor mute preferences and recover from autoplay blocks.
   const previewWantPlayRef = useRef(false);
+  const timelineScrubbingRef = useRef(false);
   const previewMutedRef = useRef(previewMuted);
   useEffect(() => {
     previewMutedRef.current = previewMuted;
@@ -1772,6 +1773,9 @@ function StitchPageInner() {
   function handleTimelinePlayheadPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
+    // Keep playback running while scrubbing: moving the playhead should act
+    // like a live jog wheel, immediately seeking the playing video/audio.
+    timelineScrubbingRef.current = true;
     const timeline = e.currentTarget.parentElement;
     if (!timeline || totalVideoDuration <= 0) return;
     const updateFromPointer = (clientX: number) => {
@@ -1782,6 +1786,7 @@ function StitchPageInner() {
     updateFromPointer(e.clientX);
     const onMove = (event: PointerEvent) => updateFromPointer(event.clientX);
     const onUp = () => {
+      timelineScrubbingRef.current = false;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -1854,7 +1859,7 @@ function StitchPageInner() {
   // range is exhausted.
   function handleStageTimeUpdate() {
     const v = stageVideoRef.current;
-    if (!v || !previewPlaying) return;
+    if (!v || !previewPlaying || timelineScrubbingRef.current) return;
     const entry = videoTimelineEntries.find((e) => e.item.id === currentStageItemIdRef.current);
     if (!entry) {
       v.pause();
