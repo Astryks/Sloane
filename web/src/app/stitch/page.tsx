@@ -2935,9 +2935,9 @@ function StitchPageInner() {
                                 removeItem(itemIndex);
                               }}
                               title="Delete this clip"
-                              className="flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white"
+                              className="flex h-4 items-center justify-center rounded bg-black/70 px-1 text-[8px] font-semibold text-white"
                             >
-                              ×
+                              Delete
                             </button>
                           </div>
                           <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-[9px] text-white">{item.file.name}</span>
@@ -3076,9 +3076,9 @@ function StitchPageInner() {
                             removeAudioTrack(track.id);
                           }}
                           title="Delete this audio track"
-                          className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white"
+                          className="absolute right-0.5 top-0.5 z-10 flex h-4 items-center justify-center rounded bg-black/70 px-1 text-[8px] font-semibold text-white"
                         >
-                          ×
+                          Delete
                         </button>
                         <button
                           type="button"
@@ -3289,9 +3289,9 @@ function StitchPageInner() {
                             removeTextOverlay(overlay.id);
                           }}
                           title="Delete this text"
-                          className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
+                          className="pointer-events-auto flex h-3.5 items-center justify-center rounded bg-black/60 px-1 text-[7px] font-semibold text-white"
                         >
-                          ×
+                          Delete
                         </button>
                       </div>
                       <input
@@ -3386,9 +3386,9 @@ function StitchPageInner() {
                             removeImageOverlay(overlay.id);
                           }}
                           title="Delete this image"
-                          className="pointer-events-auto flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[7px] text-white"
+                          className="pointer-events-auto flex h-3.5 items-center justify-center rounded bg-black/60 px-1 text-[7px] font-semibold text-white"
                         >
-                          ×
+                          Delete
                         </button>
                       </div>
                       <div
