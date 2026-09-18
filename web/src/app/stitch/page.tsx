@@ -2905,16 +2905,18 @@ function StitchPageInner() {
                                   (v) => updateItemTrim(item.id, { start: Math.max(0, Math.min(v, trim.end - 0.2)) }),
                                   [...clipBoundaries, previewTime],
                                 )}
-                                className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
-                              />
+                                className="absolute inset-y-0 left-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/80 text-[11px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                                title="Drag this left edge to trim the start"
+                              ><span className="pointer-events-none">‹</span></div>
                               <div
                                 onPointerDown={makeAxisDragHandler(
                                   () => trim.end,
                                   (v) => updateItemTrim(item.id, { end: Math.max(trim.start + 0.2, Math.min(v, fullDuration)) }),
                                   [...clipBoundaries, previewTime],
                                 )}
-                                className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
-                              />
+                                className="absolute inset-y-0 right-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/80 text-[11px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                                title="Drag this right edge to trim the end"
+                              ><span className="pointer-events-none">›</span></div>
                               {/* Fade in/out (2026-09-16, per direct request
                                   - "give the ability to fade audio and
                                   video clips each"). The dark gradient is
@@ -3068,8 +3070,9 @@ function StitchPageInner() {
                               clipBoundaries,
                             )(e);
                           }}
-                          className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
-                        />
+                          className="absolute inset-y-0 left-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[11px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                          title="Drag this left edge to trim the audio start"
+                        ><span className="pointer-events-none">‹</span></div>
                         <div
                           onPointerDown={(e) => {
                             e.stopPropagation();
@@ -3079,8 +3082,9 @@ function StitchPageInner() {
                               clipBoundaries,
                             )(e);
                           }}
-                          className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-white/0 transition group-hover:bg-white/30 active:bg-white/50"
-                        />
+                          className="absolute inset-y-0 right-0 z-30 flex w-3 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[11px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                          title="Drag this right edge to trim the audio end"
+                        ><span className="pointer-events-none">›</span></div>
                         {/* Fade in/out (2026-09-16, per direct request -
                             "give the ability to fade audio and video clips
                             each") - same amber-dot convention as the video
@@ -3336,7 +3340,7 @@ function StitchPageInner() {
             </div>
           </div>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag a block&apos;s edges to trim (change how much is used), or its middle to mask/reposition which part of the source plays without changing the length. Video&apos;s grip strip (top) reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a transition button (fade/dissolve/wipe/slide - blends into that clip from the one before it). Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
+            Drag files onto either track above to add clips. Drag the amber handles on either side of a video or audio bar to cut off its start or end. Drag the middle to move the clip or choose a different source window without deleting the original. Video&apos;s top grip strip reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a transition button (fade/dissolve/wipe/slide - blends into that clip from the one before it). Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
