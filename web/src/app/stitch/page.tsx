@@ -3092,7 +3092,14 @@ function StitchPageInner() {
                             e.stopPropagation();
                             makeAxisDragHandler(
                               () => track.startSec,
-                              (v) => updateAudioTrack(track.id, { startSec: Math.max(0, Math.min(v, track.endSec - 0.2)) }),
+                              (v) => {
+                                const nextStart = Math.max(0, Math.min(v, track.endSec - 0.2));
+                                const duration = track.endSec - nextStart;
+                                updateAudioTrack(track.id, {
+                                  startSec: nextStart,
+                                  ...(nextStart > track.startSec ? { fadeIn: Math.min(Math.max(track.fadeIn, 1), duration / 2) } : {}),
+                                });
+                              },
                               clipBoundaries,
                             )(e);
                           }}
@@ -3105,7 +3112,14 @@ function StitchPageInner() {
                             e.stopPropagation();
                             makeAxisDragHandler(
                               () => track.endSec,
-                              (v) => updateAudioTrack(track.id, { endSec: Math.max(track.startSec + 0.2, v) }),
+                              (v) => {
+                                const nextEnd = Math.max(track.startSec + 0.2, v);
+                                const duration = nextEnd - track.startSec;
+                                updateAudioTrack(track.id, {
+                                  endSec: nextEnd,
+                                  ...(nextEnd < track.endSec ? { fadeOut: Math.min(Math.max(track.fadeOut, 1), duration / 2) } : {}),
+                                });
+                              },
                               clipBoundaries,
                             )(e);
                           }}
