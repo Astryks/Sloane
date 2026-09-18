@@ -910,8 +910,9 @@ function StitchPageInner() {
   // Reads each clip's real duration (cheap - metadata only, never decodes
   // or re-encodes anything) so the trim controls below can show/clamp
   // against a real per-clip length, and defaults each new clip's trim
-  // range to its full length (start=0, end=duration) the first time it's
-  // seen. Existing trims are preserved across re-runs (e.g. reordering, or
+  // range to a useful 10-second opening window (or the full length when
+  // shorter) the first time it's seen. Existing trims are preserved across
+  // re-runs (e.g. reordering, or
   // adding one more clip) rather than reset - only clips no longer in the
   // list get dropped from the map. Recomputed whenever the clip list
   // itself changes.
@@ -936,7 +937,7 @@ function StitchPageInner() {
         setItemTrims((prev) => {
           const next: Record<string, ItemTrim> = {};
           items.forEach((item, i) => {
-            next[item.id] = prev[item.id] ?? { start: 0, end: metas[i].duration, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
+            next[item.id] = prev[item.id] ?? { start: 0, end: Math.min(10, metas[i].duration), fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
           });
           return next;
         });
@@ -3437,7 +3438,7 @@ function StitchPageInner() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold">Edit source window</p>
-                  <p className="text-xs text-muted">The original file stays whole. Choose which section appears in this timeline block.</p>
+                  <p className="text-xs text-muted">The player above contains the full original file. Choose the section that appears in this timeline block; long uploads start with a 10-second window so they do not stretch the whole project.</p>
                 </div>
                 <button onClick={() => setSourceEditorId(null)} className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted">Done</button>
               </div>
@@ -3457,6 +3458,13 @@ function StitchPageInner() {
                   className="rounded-full border border-purple/30 px-2 py-1 font-semibold text-purple hover:bg-purple-wash"
                 >
                   Use first 10 seconds
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateItemTrim(sourceItem.id, { start: 0, end: sourceDuration })}
+                  className="rounded-full border border-border px-2 py-1 font-semibold text-muted hover:bg-slate-50"
+                >
+                  Use entire source
                 </button>
               </div>
             </div>
