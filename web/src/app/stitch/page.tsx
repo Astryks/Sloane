@@ -3119,9 +3119,10 @@ function StitchPageInner() {
                               (v) => updateAudioTrack(track.id, { fadeIn: Math.max(0, Math.min(v, (track.endSec - track.startSec) / 2)) }),
                             )(e);
                           }}
-                          title="Drag to fade in"
-                          className="absolute bottom-0.5 left-0.5 z-20 h-1.5 w-1.5 cursor-ew-resize rounded-full bg-amber-400"
-                        />
+                          title={`Drag to fade music in (${track.fadeIn.toFixed(1)}s)`}
+                          style={{ touchAction: "none" }}
+                          className="absolute bottom-0.5 left-0.5 z-40 flex h-4 min-w-12 cursor-ew-resize items-center justify-center rounded bg-amber-400 px-1 text-[8px] font-bold text-black shadow-sm"
+                        ><span className="pointer-events-none">Fade in {track.fadeIn > 0 ? `${track.fadeIn.toFixed(1)}s` : ""}</span></div>
                         <div
                           onPointerDown={(e) => {
                             e.stopPropagation();
@@ -3130,9 +3131,10 @@ function StitchPageInner() {
                               (v) => updateAudioTrack(track.id, { fadeOut: Math.max(0, Math.min(-v, (track.endSec - track.startSec) / 2)) }),
                             )(e);
                           }}
-                          title="Drag to fade out"
-                          className="absolute bottom-0.5 right-0.5 z-20 h-1.5 w-1.5 cursor-ew-resize rounded-full bg-amber-400"
-                        />
+                          title={`Drag to fade music out (${track.fadeOut.toFixed(1)}s)`}
+                          style={{ touchAction: "none" }}
+                          className="absolute bottom-0.5 right-0.5 z-40 flex h-4 min-w-12 cursor-ew-resize items-center justify-center rounded bg-amber-400 px-1 text-[8px] font-bold text-black shadow-sm"
+                        ><span className="pointer-events-none">Fade out {track.fadeOut > 0 ? `${track.fadeOut.toFixed(1)}s` : ""}</span></div>
                       </div>
                     </div>
                   );
@@ -3141,6 +3143,7 @@ function StitchPageInner() {
                   <input className="sr-only" type="file" accept="audio/*" onChange={(e) => e.target.files?.[0] && addAudioTrack(e.target.files[0])} />
                   {audioTracks.length === 0 ? "Drag audio files here, or click to add a track" : "+ Add another audio track"}
                 </label>
+                {audioTracks.length > 0 && <p className="px-1 text-[10px] text-white/45">On an audio bar, drag <span className="font-semibold text-amber-300">Fade in</span> or <span className="font-semibold text-amber-300">Fade out</span> sideways to control how gently the music starts and ends.</p>}
               </div>
 
               {/* Text titles/captions (2026-09-16, per direct request -
