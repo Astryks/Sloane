@@ -1508,7 +1508,7 @@ function StitchPageInner() {
     const id = `video-overlay-${Math.random().toString(36).slice(2)}`;
     setVideoOverlays((previous) => [...previous, {
       id, file, previewUrl: URL.createObjectURL(file), sourceDuration: meta.duration,
-      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 45,
+      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100,
     }]);
   }
 
@@ -1518,7 +1518,7 @@ function StitchPageInner() {
     const duration = trim ? effectiveClipDuration(trim) : Math.min(10, sourceDuration);
     const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
     const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
-    setVideoOverlays((previous) => [...previous, { id: `video-overlay-${Math.random().toString(36).slice(2)}`, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 45 }]);
+    setVideoOverlays((previous) => [...previous, { id: `video-overlay-${Math.random().toString(36).slice(2)}`, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100 }]);
   }
 
   function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
@@ -2442,12 +2442,13 @@ function StitchPageInner() {
             writtenFiles.push(name);
             pass2Args.push("-stream_loop", "-1", "-i", name);
             const inputIndex = pass2NextInputIndex++;
-            const overlayWidth = Math.max(2, Math.round((outputW * overlay.scalePercent) / 100 / 2) * 2);
-            const { x, y } = imageOverlayPositionExpr(overlay.position);
             const scaledLabel = `[vidscaled${i}]`;
             const nextLabel = `[vidout${i}]`;
-            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]setpts=PTS-STARTPTS,scale=w=${overlayWidth}:h=-2${scaledLabel}`;
-            pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=${x}:y=${y}:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
+            // A video overlay is a full-canvas cutaway, not picture-in-picture.
+            // `increase` fills every edge; crop then removes the overflow so the
+            // browser preview and exported MP4 both use the same cover behavior.
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]setpts=PTS-STARTPTS,scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=increase,crop=${outputW}:${outputH}${scaledLabel}`;
+            pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=0:y=0:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
             pass2VideoLabel = nextLabel;
           }
         }
@@ -2670,15 +2671,13 @@ function StitchPageInner() {
               <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
               {videoOverlays.map((overlay) => {
                 const active = previewTime >= overlay.startSec && previewTime < overlay.endSec;
-                const posClass = { "top-left": "left-2 top-2", "top-right": "right-2 top-2", "bottom-left": "bottom-2 left-2", "bottom-right": "bottom-2 right-2", center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" }[overlay.position];
                 return (
                   <video
                     key={overlay.id}
                     ref={(element) => { videoOverlayElRefs.current[overlay.id] = element; }}
                     src={overlay.previewUrl}
                     muted playsInline
-                    className={`absolute ${posClass} border-2 border-fuchsia-300 object-contain shadow-lg ${active ? "block" : "hidden"}`}
-                    style={{ width: `${overlay.scalePercent}%`, maxHeight: "90%" }}
+                    className={`absolute inset-0 h-full w-full object-cover ${active ? "block" : "hidden"}`}
                   />
                 );
               })}
