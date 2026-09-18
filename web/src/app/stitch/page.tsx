@@ -53,6 +53,8 @@ type AudioTrack = {
   file: File;
   previewUrl: string; // for in-browser playback only (the live preview player below) - never sent to ffmpeg
   sourceDuration: number; // the uploaded file's own real length
+  sourceStart?: number; // non-destructive source window start
+  sourceEnd?: number; // non-destructive source window end
   startSec: number; // where this track starts playing, in the FINAL video's timeline
   endSec: number; // where it stops - (endSec - startSec) is how long it plays for
   volume: number; // 0..1, applied locally during export and preview
@@ -676,6 +678,7 @@ function StitchPageInner() {
   // disturb the other.
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [sourceEditorId, setSourceEditorId] = useState<string | null>(null);
+  const [audioSourceEditorId, setAudioSourceEditorId] = useState<string | null>(null);
   // The full-edit "as you go" preview (2026-09-16, per direct request -
   // "give the ability to play the full audio and video as we go... make
   // sure this doesn't cost anything in server etc. and is fast"). Genuinely
@@ -777,7 +780,7 @@ function StitchPageInner() {
     try {
       await saveStitchProject({
         items: items.map(({ id, file }) => ({ id, file })),
-        audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
+      audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
         imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
         textOverlays,
         itemTrims,
@@ -802,7 +805,7 @@ function StitchPageInner() {
       revokeAllPreviewUrls(items, audioTracks, imageOverlays, resultUrl);
       setResultUrl(null);
       setItems(saved.items.map((item) => ({ ...item, previewUrl: URL.createObjectURL(item.file) })));
-      setAudioTracks(saved.audioTracks.map((track, index) => ({ ...track, kind: track.kind ?? (index === 0 ? "dialogue" : index === 1 ? "music" : "other"), previewUrl: URL.createObjectURL(track.file) })));
+      setAudioTracks(saved.audioTracks.map((track, index) => ({ ...track, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, kind: track.kind ?? (index === 0 ? "dialogue" : index === 1 ? "music" : "other"), previewUrl: URL.createObjectURL(track.file) })));
       setImageOverlays(saved.imageOverlays.map((overlay) => ({ ...overlay, previewUrl: URL.createObjectURL(overlay.file) })));
       setTextOverlays(saved.textOverlays);
       setItemTrims(saved.itemTrims);
@@ -1193,7 +1196,7 @@ function StitchPageInner() {
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
       setAudioTracks((prev) => {
         const kind: AudioTrack["kind"] = prev.length === 0 ? "dialogue" : prev.length === 1 ? "music" : "other";
-        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1, kind }];
+        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, sourceStart: 0, sourceEnd: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1, kind }];
       });
       // Waveform decode is best-effort and purely visual - a track that
       // fails to decode (unusual format) still works, its timeline block
@@ -1206,7 +1209,7 @@ function StitchPageInner() {
     }
   }
 
-  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "fadeIn" | "fadeOut" | "volume" | "kind">>) {
+  function updateAudioTrack(id: string, patch: Partial<Pick<AudioTrack, "startSec" | "endSec" | "sourceStart" | "sourceEnd" | "fadeIn" | "fadeOut" | "volume" | "kind">>) {
     setAudioTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }
 
@@ -1699,7 +1702,10 @@ function StitchPageInner() {
         continue;
       }
       const rawLocal = t - track.startSec;
-      const local = track.sourceDuration > 0 ? rawLocal % track.sourceDuration : rawLocal;
+      const sourceStart = track.sourceStart ?? 0;
+      const sourceEnd = track.sourceEnd ?? track.sourceDuration;
+      const sourceWindow = Math.max(0.1, sourceEnd - sourceStart);
+      const local = sourceStart + (sourceWindow > 0 ? rawLocal % sourceWindow : 0);
       if (Math.abs(el.currentTime - local) > 0.35) {
         try {
           el.currentTime = local;
@@ -2208,7 +2214,10 @@ function StitchPageInner() {
           const fade = fadeFilterFragment("afade", duration, trackFadeIn, trackFadeOut);
           const trackLabel = `[track${i}]`;
           const gain = Math.max(0, Math.min(1, track.volume ?? 1)) * 0.25;
-          filterComplex += `;[${inputIndex}:a]atrim=duration=${duration},${fade}volume=${gain},aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS${trackLabel}`;
+          const sourceStart = Math.max(0, Math.min(track.sourceStart ?? 0, track.sourceDuration));
+          const sourceEnd = Math.max(sourceStart + 0.05, Math.min(track.sourceEnd ?? track.sourceDuration, track.sourceDuration));
+          const sourceWindow = sourceEnd - sourceStart;
+          filterComplex += `;[${inputIndex}:a]atrim=start=${sourceStart}:duration=${sourceWindow},asetpts=PTS-STARTPTS,aloop=loop=-1:size=2e+09,atrim=duration=${duration},${fade}volume=${gain},aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${startMs}|${startMs},asetpts=PTS-STARTPTS${trackLabel}`;
           if (duckMusic && track.kind === "music") {
             const duckedLabel = `[ducked${i}]`;
             filterComplex += `;${trackLabel}[dialogue]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=300${duckedLabel}`;
@@ -2977,7 +2986,9 @@ function StitchPageInner() {
                     <div key={track.id} className="relative h-9 rounded-lg bg-white/5">
                       <div
                         style={{ marginLeft: track.startSec * timelinePixelsPerSecond, width: Math.max(24, (track.endSec - track.startSec) * timelinePixelsPerSecond) }}
-                        className="group absolute inset-y-0 overflow-hidden rounded-lg border border-emerald-300/40 bg-emerald-700/70 px-1"
+                        onClick={() => setAudioSourceEditorId(track.id)}
+                        title="Click to edit this audio mask"
+                        className="group absolute inset-y-0 cursor-pointer overflow-hidden rounded-lg border border-emerald-300/40 bg-emerald-700/70 px-1"
                       >
                         {/* Body drag = reposition (both start/end shift together,
                             duration unchanged) - the direct "drag a clip along
@@ -3017,6 +3028,15 @@ function StitchPageInner() {
                           className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[8px] text-white"
                         >
                           ×
+                        </button>
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); setAudioSourceEditorId(track.id); }}
+                          title="Edit which part of the original audio plays"
+                          className="absolute right-5 top-0.5 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white"
+                        >
+                          Edit mask
                         </button>
                         {/* Auto-sync to whichever video clip currently
                             sits under this track (2026-09-16, per direct
@@ -3352,6 +3372,36 @@ function StitchPageInner() {
                 >
                   Use first 10 seconds
                 </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {audioSourceEditorId && (() => {
+          const track = audioTracks.find((candidate) => candidate.id === audioSourceEditorId);
+          if (!track) return null;
+          const sourceStart = track.sourceStart ?? 0;
+          const sourceEnd = track.sourceEnd ?? track.sourceDuration;
+          return (
+            <div className="space-y-3 rounded-2xl border border-emerald-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">Edit audio mask</p>
+                  <p className="text-xs text-muted">Choose the part of the original audio that plays. The uploaded file stays whole.</p>
+                </div>
+                <button onClick={() => setAudioSourceEditorId(null)} className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted">Done</button>
+              </div>
+              <audio src={track.previewUrl} controls className="w-full" />
+              <div className="relative h-8 rounded-lg bg-emerald-100">
+                <div className="absolute inset-y-0 rounded-lg bg-emerald-500/35" style={{ left: `${(sourceStart / track.sourceDuration) * 100}%`, right: `${100 - (sourceEnd / track.sourceDuration) * 100}%` }} />
+                <input aria-label="Audio mask start" type="range" min="0" max={track.sourceDuration} step="0.1" value={sourceStart} onChange={(e) => updateAudioTrack(track.id, { sourceStart: Math.min(Number(e.target.value), sourceEnd - 0.2) })} className="absolute inset-x-0 top-0 h-4 w-full accent-emerald-600" />
+                <input aria-label="Audio mask end" type="range" min="0" max={track.sourceDuration} step="0.1" value={sourceEnd} onChange={(e) => updateAudioTrack(track.id, { sourceEnd: Math.max(Number(e.target.value), sourceStart + 0.2) })} className="absolute inset-x-0 bottom-0 h-4 w-full accent-emerald-600" />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+                <span>In {formatTime(sourceStart)}</span>
+                <span>Using {formatTime(sourceEnd - sourceStart)} of {formatTime(track.sourceDuration)}</span>
+                <span>Out {formatTime(sourceEnd)}</span>
+                <button type="button" onClick={() => updateAudioTrack(track.id, { sourceStart: 0, sourceEnd: track.sourceDuration })} className="rounded-full border border-emerald-300 px-2 py-1 font-semibold text-emerald-700 hover:bg-emerald-50">Use entire audio</button>
               </div>
             </div>
           );
