@@ -700,6 +700,7 @@ function StitchPageInner() {
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [sourceEditorId, setSourceEditorId] = useState<string | null>(null);
   const [audioSourceEditorId, setAudioSourceEditorId] = useState<string | null>(null);
+  const [selectedAudioTrackId, setSelectedAudioTrackId] = useState<string | null>(null);
   // The full-edit "as you go" preview (2026-09-16, per direct request -
   // "give the ability to play the full audio and video as we go... make
   // sure this doesn't cost anything in server etc. and is fast"). Genuinely
@@ -1165,6 +1166,7 @@ function StitchPageInner() {
   // "your video is currently ~1:47 long" line in the audio-tracks section
   // below. A plain derived value, not its own effect/state.
   const totalVideoDuration = videoTimelineEntries.length > 0 ? videoTimelineEntries[videoTimelineEntries.length - 1].timelineEnd : 0;
+  const previewTimelineEntry = videoTimelineEntries.find((entry) => previewTime >= entry.timelineStart && previewTime < entry.timelineEnd);
   // Fit keeps the entire project visible, even for a 30-minute source. Detail
   // restores a precise pixels-per-second view for close editing. The source
   // window editor below remains full-width and is independent of this view.
@@ -1200,6 +1202,10 @@ function StitchPageInner() {
   const totalFileBytes = items.reduce((sum, item) => sum + item.file.size, 0);
   const showSizeWarning = totalFileBytes > LARGE_PROJECT_WARNING_BYTES && !sizeWarningDismissed;
   const hasLargeSource = items.some((item) => item.file.size > LARGE_SOURCE_BYTES);
+  // A transparent local estimate before export. Actual size varies with
+  // content, but this is intentionally conservative enough to help users
+  // spot an unexpectedly huge download before encoding begins.
+  const estimatedOutputBytes = Math.round(totalVideoDuration * (exportQuality === "1080p" ? 8_200_000 : 3_200_000) / 8);
 
   // Every real cut point in the final video's timeline (2026-09-16, per
   // direct follow-up) - 0, the boundary between each pair of clips, and
@@ -1207,7 +1213,10 @@ function StitchPageInner() {
   // position onto a clip boundary when dragged close, the same way real
   // editors snap clips to cuts - see makeAxisDragHandler's `boundaries`
   // param and applyBoundarySnap.
-  const clipBoundaries: number[] = [0, ...videoTimelineEntries.map((e) => e.timelineEnd)];
+  // Overlay starts/ends are real edit boundaries too: audio and additional
+  // overlays magnetically snap to them, so a clip placed after a cutaway
+  // lands exactly at the pink overlay's end rather than near it.
+  const clipBoundaries: number[] = [0, ...videoTimelineEntries.map((e) => e.timelineEnd), ...videoOverlays.flatMap((overlay) => [overlay.startSec, overlay.endSec])];
 
   // Real transition simulation (2026-09-17, "simulate everything"): finds
   // whether final-timeline second `t` falls inside a clip-to-clip
@@ -2445,7 +2454,8 @@ function StitchPageInner() {
       );
 
       exportStep = "encoding the MP4";
-      await ffmpeg.exec(args);
+      const stage1ExitCode = await ffmpeg.exec(args);
+      if (stage1ExitCode !== 0) throw new Error("The local video engine could not write the first export pass. Try 720p or shorter selected windows; large originals can exceed browser memory.");
 
       // Image overlays (logos/watermarks/photos) and text titles/captions
       // (2026-09-16, per direct request - "how can they add images and
@@ -2569,7 +2579,8 @@ function StitchPageInner() {
           if (pass2AudioLabels.length > 1) pass2FilterComplex += `;${pass2AudioLabels.join("")}amix=inputs=${pass2AudioLabels.length}:duration=first:normalize=0${pass2AudioLabel}`;
           pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", pass2AudioLabel, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "final.mp4");
           exportStep = "applying overlays to the MP4";
-          await ffmpeg.exec(pass2Args);
+          const overlayExitCode = await ffmpeg.exec(pass2Args);
+          if (overlayExitCode !== 0) throw new Error("The local video engine could not write the overlay pass. Try 720p or shorten the selected windows.");
           finalOutputName = "final.mp4";
           writtenFiles.push("final.mp4");
         }
@@ -2710,7 +2721,7 @@ function StitchPageInner() {
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-muted">Live preview</p>
               <span className="text-xs text-muted">
-                {formatTime(previewTime)} / {formatTime(totalVideoDuration)}
+                {previewTimelineEntry ? `Clip ${videoTimelineEntries.indexOf(previewTimelineEntry) + 1} · ${formatTime(previewTime - previewTimelineEntry.timelineStart)}` : formatTime(previewTime)} / {formatTime(totalVideoDuration)}
               </span>
             </div>
             {/* Fixed-size stage, regardless of the source clips' own
@@ -2725,6 +2736,9 @@ function StitchPageInner() {
                 landscape clips) inside it instead. */}
             <div className="relative flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-black" style={{ aspectRatio: aspectPreset === "9:16" ? "9 / 16" : aspectPreset === "1:1" ? "1 / 1" : "16 / 9" }}>
               <video ref={stageVideoRef} onTimeUpdate={handleStageTimeUpdate} muted={previewMuted} playsInline className="h-full w-full object-contain" />
+              <div className="pointer-events-none absolute right-2 top-2 rounded bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white">
+                {formatTime(previewTime)} / {formatTime(totalVideoDuration)}
+              </div>
               {videoOverlays.map((overlay) => {
                 const active = previewTime >= overlay.startSec && previewTime < overlay.endSec;
                 return (
@@ -2996,7 +3010,7 @@ function StitchPageInner() {
                           className={`group relative h-16 shrink-0 overflow-hidden rounded-none border-y border-r border-white/35 bg-white/10 bg-cover bg-center first:rounded-l-lg last:rounded-r-lg ${itemIndex > 0 ? "border-l-2 border-l-emerald-300/80" : "border-l border-white/35"} ${isDragging ? "opacity-90 shadow-xl" : ""}`}
                         >
                           <div className="pointer-events-none absolute left-1 top-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-white">
-                            Video {itemIndex + 1} · {formatTime(timelineEntry?.timelineStart ?? 0)}
+                            Video {itemIndex + 1} · {formatTime(timelineEntry?.timelineStart ?? 0)}–{formatTime(timelineEntry?.timelineEnd ?? duration)}
                           </div>
                           {/* Clicking the play button below swaps this
                               static thumbnail for a real, briefly-playing
@@ -3221,8 +3235,8 @@ function StitchPageInner() {
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
-                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag right to cut off the beginning" className="absolute inset-y-0 left-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
-                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => { const nextEnd = Math.max(overlay.startSec + 0.2, v); const cut = overlay.endSec - nextEnd; updateVideoOverlay(overlay.id, { endSec: nextEnd, sourceEnd: Math.max(overlay.sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - cut)) }); }, clipBoundaries)(e); }} title="Drag left to cut off the end" className="absolute inset-y-0 right-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this narrow edge right to cut off the beginning" className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => { const nextEnd = Math.max(overlay.startSec + 0.2, v); const cut = overlay.endSec - nextEnd; updateVideoOverlay(overlay.id, { endSec: nextEnd, sourceEnd: Math.max(overlay.sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - cut)) }); }, clipBoundaries)(e); }} title="Drag this narrow edge left to cut off the end" className="absolute inset-y-0 right-0 z-20 w-2 cursor-ew-resize bg-fuchsia-300/80" />
                     </div>
                   </div>
                 ))}
@@ -3241,6 +3255,12 @@ function StitchPageInner() {
                   Lower music under dialogue
                 </label>
               </div>
+              {selectedAudioTrackId && (() => {
+                const selectedTrack = audioTracks.find((track) => track.id === selectedAudioTrackId);
+                if (!selectedTrack) return null;
+                const fadeLength = Math.min(1, (selectedTrack.endSec - selectedTrack.startSec) / 2);
+                return <div className="mb-1 flex items-center gap-2 text-[10px] text-emerald-100"><span className="truncate">Selected: {selectedTrack.file.name}</span><button type="button" onClick={() => updateAudioTrack(selectedTrack.id, { fadeIn: fadeLength })} className="rounded bg-emerald-300 px-2 py-1 font-semibold text-emerald-950">Fade in</button><button type="button" onClick={() => updateAudioTrack(selectedTrack.id, { fadeOut: fadeLength })} className="rounded bg-emerald-300 px-2 py-1 font-semibold text-emerald-950">Fade out</button></div>;
+              })()}
               <div onDragOver={(e) => e.preventDefault()} onDrop={handleAudioDrop} className="space-y-1">
                 {audioTracks.map((track) => {
                   const peaks = trackWaveforms[track.id];
@@ -3250,9 +3270,9 @@ function StitchPageInner() {
                     <div key={track.id} className="relative h-9 rounded-lg bg-white/5">
                       <div
                         style={{ marginLeft: track.startSec * timelinePixelsPerSecond, width: Math.max(24, (track.endSec - track.startSec) * timelinePixelsPerSecond) }}
-                        onClick={() => setAudioSourceEditorId(track.id)}
-                        title="Click to edit this audio mask"
-                        className="group absolute inset-y-0 cursor-pointer overflow-hidden rounded-lg border border-emerald-300/40 bg-emerald-700/70 px-1"
+                        onClick={() => setSelectedAudioTrackId(track.id)}
+                        title="Click this track, then use Fade in or Fade out above"
+                        className={`group absolute inset-y-0 cursor-pointer overflow-hidden rounded-lg border bg-emerald-700/70 px-1 ${selectedAudioTrackId === track.id ? "border-emerald-100 ring-2 ring-emerald-300/50" : "border-emerald-300/40"}`}
                       >
                         {/* Body drag = reposition (both start/end shift together,
                             duration unchanged) - the direct "drag a clip along
@@ -3752,6 +3772,7 @@ function StitchPageInner() {
         >
           {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Exporting ${exportQuality}… ${progress}%` : `Download ${exportQuality}`}
         </button>
+        {items.length > 0 && status !== "processing" && <span className="ml-2 text-xs text-muted">Estimated download: ~{formatBytes(estimatedOutputBytes)}</span>}
 
         {status === "processing" && (
           <button onClick={cancelCombine} className="ml-2 rounded-full border border-border px-4 py-3 text-sm font-semibold text-muted">
