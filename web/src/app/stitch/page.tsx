@@ -1512,11 +1512,13 @@ function StitchPageInner() {
     }]);
   }
 
-  function addItemAsVideoOverlay(item: VideoItem) {
+  function addItemAsVideoOverlay(item: VideoItem, startSec = 0, maxDuration?: number) {
     const trim = itemTrims[item.id];
     const sourceDuration = itemDurations[item.id] ?? 10;
     const duration = trim ? effectiveClipDuration(trim) : Math.min(10, sourceDuration);
-    setVideoOverlays((previous) => [...previous, { id: `video-overlay-${Math.random().toString(36).slice(2)}`, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec: 0, endSec: Math.min(duration, totalVideoDuration || duration), position: "center", scalePercent: 45 }]);
+    const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
+    const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
+    setVideoOverlays((previous) => [...previous, { id: `video-overlay-${Math.random().toString(36).slice(2)}`, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 45 }]);
   }
 
   function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
@@ -1634,6 +1636,15 @@ function StitchPageInner() {
         return;
       }
       const newCenter = centers[index] + (ev.clientX - startX);
+      // The central half of a clip is an intentional overlap target. Drop
+      // there to lay the dragged video over that base clip (muted); drop
+      // nearer either edge to retain the normal magnetic reorder behavior.
+      const overlapTargetIndex = centers.findIndex((center, candidateIndex) => candidateIndex !== index && Math.abs(newCenter - center) < widths[candidateIndex] * 0.25);
+      if (overlapTargetIndex >= 0) {
+        const base = videoTimelineEntries[overlapTargetIndex];
+        if (base) addItemAsVideoOverlay(item, base.timelineStart, base.timelineEnd - base.timelineStart);
+        return;
+      }
       let targetIndex = 0;
       for (let i = 0; i < centers.length; i++) {
         if (i !== index && centers[i] < newCenter) targetIndex++;
