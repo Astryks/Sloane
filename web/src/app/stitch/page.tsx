@@ -2980,7 +2980,10 @@ function StitchPageInner() {
               </div>
 
               <div className="mb-1 mt-3 flex items-center justify-between">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">Audio</p>
+                  <p className="mt-0.5 text-[10px] text-white/55">To finish music gently: drag the right edge to where it should end, then drag <span className="font-semibold text-amber-300">Fade out</span> left.</p>
+                </div>
                 <label className="flex items-center gap-1 text-[10px] text-white/60" title="Lower tracks after the first while the stitched dialogue is playing">
                   <input type="checkbox" checked={duckMusic} onChange={(e) => setDuckMusic(e.target.checked)} />
                   Lower music under dialogue
