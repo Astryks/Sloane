@@ -1233,7 +1233,8 @@ function StitchPageInner() {
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
       setAudioTracks((prev) => {
         const kind: AudioTrack["kind"] = prev.length === 0 ? "dialogue" : prev.length === 1 ? "music" : "other";
-        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, sourceStart: 0, sourceEnd: duration, startSec: 0, endSec: Math.round(duration), fadeIn: 0, fadeOut: 0, volume: 1, kind }];
+        const initialWindow = Math.min(duration, totalVideoDuration > 0 ? totalVideoDuration : 10);
+        return [...prev, { id, file, previewUrl: URL.createObjectURL(file), sourceDuration: duration, sourceStart: 0, sourceEnd: duration, startSec: 0, endSec: Math.max(0.2, initialWindow), fadeIn: 0, fadeOut: 0, volume: 1, kind }];
       });
       // Waveform decode is best-effort and purely visual - a track that
       // fails to decode (unusual format) still works, its timeline block
