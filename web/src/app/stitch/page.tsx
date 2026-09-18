@@ -92,9 +92,8 @@ type ImageOverlay = {
   scalePercent: number;
 };
 
-// A muted video layer displayed over the main sequential video. The base
-// timeline remains the audio source by default; this layer is for cutaways
-// and picture-in-picture without disturbing that mix.
+// A full-screen video layer over the main sequence. Its audio is independent
+// so a cutaway can keep its sound, or the editor can mute either source.
 type VideoOverlay = {
   id: string;
   file: File;
@@ -104,6 +103,7 @@ type VideoOverlay = {
   endSec: number;
   position: ImageOverlay["position"];
   scalePercent: number;
+  muted: boolean;
 };
 
 // Speed ramping and clip-to-clip transitions (2026-09-17, per direct
@@ -630,6 +630,7 @@ function StitchPageInner() {
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [imageOverlays, setImageOverlays] = useState<ImageOverlay[]>([]);
   const [videoOverlays, setVideoOverlays] = useState<VideoOverlay[]>([]);
+  const [selectedVideoOverlayId, setSelectedVideoOverlayId] = useState<string | null>(null);
   const [overlayError, setOverlayError] = useState("");
   // Soft large-project warning (2026-09-17, see LARGE_PROJECT_WARNING_BYTES'
   // own comment for why this is a dismissible warning, not a hard cap).
@@ -671,6 +672,7 @@ function StitchPageInner() {
   const historyReadyRef = useRef(false);
   const historyRestoringRef = useRef(false);
   const splitIdRef = useRef(0);
+  const videoOverlayIdRef = useRef(0);
   const [itemThumbnails, setItemThumbnails] = useState<Record<string, string>>({});
   const [trackWaveforms, setTrackWaveforms] = useState<Record<string, number[]>>({});
   // Live floating readout shown next to the cursor while dragging any
@@ -731,6 +733,10 @@ function StitchPageInner() {
       if (Math.abs(element.currentTime - localTime) > 0.35) {
         try { element.currentTime = localTime; } catch { /* metadata pending */ }
       }
+      element.muted = previewMutedRef.current || overlay.muted;
+      // This effect runs after the originating click. Browsers can reject
+      // unmuted autoplay here, so never let that rejection stop the base
+      // preview; the user can still mute/unmute the selected overlay.
       if (previewPlaying && element.paused) void element.play().catch(() => {});
       if (!previewPlaying && !element.paused) element.pause();
     }
@@ -1505,11 +1511,12 @@ function StitchPageInner() {
 
   async function addVideoOverlay(file: File) {
     const meta = await getVideoMeta(file);
-    const id = `video-overlay-${Math.random().toString(36).slice(2)}`;
+    const id = `video-overlay-${++videoOverlayIdRef.current}`;
     setVideoOverlays((previous) => [...previous, {
       id, file, previewUrl: URL.createObjectURL(file), sourceDuration: meta.duration,
-      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100,
+      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
     }]);
+    setSelectedVideoOverlayId(id);
   }
 
   function addItemAsVideoOverlay(item: VideoItem, startSec = 0, maxDuration?: number) {
@@ -1518,7 +1525,9 @@ function StitchPageInner() {
     const duration = trim ? effectiveClipDuration(trim) : Math.min(10, sourceDuration);
     const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
     const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
-    setVideoOverlays((previous) => [...previous, { id: `video-overlay-${Math.random().toString(36).slice(2)}`, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100 }]);
+    const id = `video-overlay-${++videoOverlayIdRef.current}`;
+    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: URL.createObjectURL(item.file), sourceDuration, startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100, muted: false }]);
+    setSelectedVideoOverlayId(id);
   }
 
   function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
@@ -1529,6 +1538,7 @@ function StitchPageInner() {
     setVideoOverlays((previous) => {
       const target = previous.find((overlay) => overlay.id === id);
       if (target) URL.revokeObjectURL(target.previewUrl);
+      if (target?.id === selectedVideoOverlayId) setSelectedVideoOverlayId(null);
       return previous.filter((overlay) => overlay.id !== id);
     });
   }
@@ -2430,6 +2440,7 @@ function StitchPageInner() {
         let pass2NextInputIndex = 1;
         let pass2FilterComplex = "";
         let pass2VideoLabel = "[0:v]";
+        const pass2AudioLabels = ["[0:a]"];
 
         if (hasRealVideoOverlay) {
           for (let i = 0; i < videoOverlays.length; i++) {
@@ -2450,6 +2461,16 @@ function StitchPageInner() {
             pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]setpts=PTS-STARTPTS,scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=increase,crop=${outputW}:${outputH}${scaledLabel}`;
             pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=0:y=0:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
             pass2VideoLabel = nextLabel;
+            // Overlay sound is opt-in by the user muting it, not silently
+            // discarded. Probe first because many visual cutaways have no
+            // audio stream at all. The source plays from its own start and
+            // is delayed onto its position in the final timeline.
+            if (!overlay.muted && await hasAudioStream(ffmpeg, name)) {
+              const audioLabel = `[vidaudio${i}]`;
+              const delayMs = Math.round(start * 1000);
+              pass2FilterComplex += `;[${inputIndex}:a]atrim=duration=${end - start},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100${audioLabel}`;
+              pass2AudioLabels.push(audioLabel);
+            }
           }
         }
 
@@ -2511,7 +2532,9 @@ function StitchPageInner() {
         }
 
         if (pass2FilterComplex) {
-          pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", "0:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "final.mp4");
+          const pass2AudioLabel = pass2AudioLabels.length > 1 ? "[overlaymix]" : "[0:a]";
+          if (pass2AudioLabels.length > 1) pass2FilterComplex += `;${pass2AudioLabels.join("")}amix=inputs=${pass2AudioLabels.length}:duration=first:normalize=0${pass2AudioLabel}`;
+          pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", pass2AudioLabel, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "final.mp4");
           exportStep = "applying overlays to the MP4";
           await ffmpeg.exec(pass2Args);
           finalOutputName = "final.mp4";
@@ -2676,7 +2699,7 @@ function StitchPageInner() {
                     key={overlay.id}
                     ref={(element) => { videoOverlayElRefs.current[overlay.id] = element; }}
                     src={overlay.previewUrl}
-                    muted playsInline
+                    muted={previewMuted || overlay.muted} playsInline
                     className={`absolute inset-0 h-full w-full object-cover ${active ? "block" : "hidden"}`}
                   />
                 );
@@ -3029,7 +3052,7 @@ function StitchPageInner() {
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => { e.stopPropagation(); addItemAsVideoOverlay(item); }}
-                              title="Place a muted copy of this video over the main sequence"
+                              title="Place this video over the main sequence; its audio stays on unless you mute it"
                               className="flex h-4 items-center justify-center rounded-full bg-fuchsia-700/90 px-1 text-[7px] font-bold text-white"
                             >
                               Overlay
@@ -3137,21 +3160,34 @@ function StitchPageInner() {
                 )}
               </div>
 
-              <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-fuchsia-200">Video overlay · muted</p>
+              {videoOverlays.length > 0 && !selectedVideoOverlayId && (
+                <button type="button" onClick={() => setSelectedVideoOverlayId(videoOverlays[videoOverlays.length - 1].id)} className="mb-2 mt-3 rounded-full border border-fuchsia-300/50 px-3 py-1 text-[10px] font-semibold text-fuchsia-100">
+                  Show overlay layer ({videoOverlays.length})
+                </button>
+              )}
+              {selectedVideoOverlayId && (
+                <div className="mt-3 rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 p-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-fuchsia-200">Video overlay · full screen</p>
+                    <button type="button" onClick={() => setSelectedVideoOverlayId(null)} className="text-[10px] text-fuchsia-100/70">Hide overlay</button>
+                  </div>
               <div className="space-y-1">
-                {videoOverlays.map((overlay) => (
+                {videoOverlays.filter((overlay) => overlay.id === selectedVideoOverlayId).map((overlay) => (
                   <div key={overlay.id} className="relative h-10 rounded-lg bg-fuchsia-500/10">
                     <div style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }} className="group absolute inset-y-0 overflow-hidden rounded-lg border-2 border-fuchsia-300 bg-fuchsia-700/80">
                       <div onPointerDown={makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)} className="absolute inset-0 cursor-grab" />
-                      <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · muted</span>
+                      <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
+                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => updateVideoOverlay(overlay.id, { startSec: Math.max(0, Math.min(v, overlay.endSec - 0.2)) }), clipBoundaries)(e); }} className="absolute inset-y-0 left-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => updateVideoOverlay(overlay.id, { endSec: Math.max(overlay.startSec + 0.2, v) }), clipBoundaries)(e); }} className="absolute inset-y-0 right-0 z-20 w-4 cursor-ew-resize bg-fuchsia-300/80" />
                     </div>
                   </div>
                 ))}
-                <label className="flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-fuchsia-300/40 text-[11px] text-fuchsia-100"><input className="sr-only" type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && void addVideoOverlay(e.target.files[0])} />Drag a video here to overlap it over the main video</label>
+                <label className="flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-fuchsia-300/40 text-[11px] text-fuchsia-100"><input className="sr-only" type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && void addVideoOverlay(e.target.files[0])} />Add another full-screen overlay</label>
               </div>
+                </div>
+              )}
 
               <div className="mb-1 mt-3 flex items-center justify-between">
                 <div>
