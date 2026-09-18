@@ -758,7 +758,7 @@ function StitchPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleFiles(fileList: FileList | null) {
+  async function handleFiles(fileList: FileList | null) {
     if (!fileList) return;
     setError("");
     const files = Array.from(fileList);
@@ -767,6 +767,8 @@ function StitchPageInner() {
     // known, in the JSX below) rather than silently skipping large files.
     const videoFiles = files.filter((file) => file.type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi)$/i.test(file.name));
     const audioFiles = files.filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name));
+    const imageFiles = files.filter((file) => file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name));
+    const textFiles = files.filter((file) => file.type.startsWith("text/") || /\.(txt|md)$/i.test(file.name));
     const added = videoFiles.map((file) => ({
       file,
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
@@ -774,7 +776,13 @@ function StitchPageInner() {
     }));
     setItems((prev) => [...prev, ...added]);
     audioFiles.forEach((file) => void addAudioTrack(file));
-    if (videoFiles.length === 0 && audioFiles.length === 0) setError("Choose a video (MP4, WebM, MOV) or audio file (MP3, WAV, M4A, AAC).");
+    imageFiles.forEach((file) => addImageOverlay(file));
+    for (const file of textFiles) {
+      const text = (await file.text()).trim();
+      if (!text) continue;
+      setTextOverlays((prev) => [...prev, { id: `text-${Math.random().toString(36).slice(2)}`, text, startSec: 0, endSec: Math.min(3, totalVideoDuration || 3), position: "bottom-center", size: "medium", color: "#ffffff" }]);
+    }
+    if (videoFiles.length === 0 && audioFiles.length === 0 && imageFiles.length === 0 && textFiles.length === 0) setError("Choose a video, audio, image, or text file.");
   }
 
   async function saveProjectLocally() {
@@ -832,16 +840,12 @@ function StitchPageInner() {
   function handleAudioDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
     e.stopPropagation();
-    Array.from(e.dataTransfer.files)
-      .filter((f) => f.type.startsWith("audio/"))
-      .forEach((f) => addAudioTrack(f));
+    void handleFiles(e.dataTransfer.files);
   }
   function handleImageDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
     e.stopPropagation();
-    Array.from(e.dataTransfer.files)
-      .filter((f) => f.type.startsWith("image/"))
-      .forEach((f) => addImageOverlay(f));
+    void handleFiles(e.dataTransfer.files);
   }
 
   // Real magnetic snap (2026-09-16, per direct follow-up) - if the raw
