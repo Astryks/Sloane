@@ -13,7 +13,7 @@ already done — this is the last step to make it live.
 3. Under the image source options, choose **GitHub Repo** (instead of Docker
    Registry — this avoids needing a separate Docker Hub account)
 4. Authorize RunPod's GitHub App if prompted, and grant it access to the
-   `Siddharth09/Sloane` repo
+   `Astryks/Sloane` repo
 5. Select that repo and the `main` branch. RunPod will find the `Dockerfile`
    at the repo root automatically.
 

@@ -197,7 +197,7 @@ wherever the code actually runs.)
 
 - **Web app + API scaffolded and pushed**: `web/` (Next.js) and `api/`
   (FastAPI, currently mocked pending real Chatterbox wiring) live in this
-  repo at github.com/Siddharth09/Sloane, both verified running locally.
+  repo at github.com/Astryks/Sloane, both verified running locally.
 - **SSH access**: RunPod's account-level SSH key (added under Settings → SSH
   Public Keys) does **not** reliably propagate into a pod's own
   `authorized_keys` if the pod was already running when the key was added —
