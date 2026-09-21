@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudio";
-import { expandCinematicPrompt, GENRE_STYLE_LIBRARY, ATMOSPHERE_LIBRARY, type GenreKey } from "@/lib/directorMode";
+import { expandCinematicPrompt, GENRE_STYLE_LIBRARY, ATMOSPHERE_LIBRARY, CAMERA_MOVEMENT_LIBRARY, type GenreKey } from "@/lib/directorMode";
 
 // Small shared drag-and-drop wrapper (2026-09-14, per direct request -
 // "would be nice to... drag and drop images") - wraps any existing
@@ -90,6 +90,20 @@ const CAMERA_MOVEMENT_GUIDE = [
   ["Orbit / arc", "Move around the subject only when the reference can support it; state the angle and keep the product visible."],
   ["Handheld", "Small natural phone movement, not random shaking. Use only when the casual UGC feel is intentional."],
 ] as const;
+
+// Display labels for CAMERA_MOVEMENT_LIBRARY's categories (directorMode.ts) -
+// groups the 55-entry library into <optgroup> sections in the Director Mode
+// camera-move picker below.
+const CAMERA_MOVE_CATEGORIES: Array<[string, string]> = [
+  ["framing", "Framing & Distance"],
+  ["angle", "Camera Angle"],
+  ["static", "Static & Push/Pull"],
+  ["panTilt", "Pan & Tilt"],
+  ["tracking", "Tracking & Following"],
+  ["aerial", "Crane & Aerial"],
+  ["rotation", "Orbit & Rotation"],
+  ["focusReveal", "Focus & Reveal"],
+];
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -464,15 +478,17 @@ function SlotCard({
   const [directorModeOn, setDirectorModeOn] = useState(false);
   const [genreOverride, setGenreOverride] = useState<GenreKey | "auto">("auto");
   const [atmosphereOverride, setAtmosphereOverride] = useState(2);
+  const [cameraMoveOverride, setCameraMoveOverride] = useState("auto");
   const directorResult = useMemo(
     () =>
       prompt.trim()
         ? expandCinematicPrompt(prompt, {
             genreOverride: genreOverride === "auto" ? undefined : genreOverride,
             atmosphereOverride,
+            cameraMoveOverride: cameraMoveOverride === "auto" ? undefined : cameraMoveOverride,
           })
         : null,
-    [prompt, genreOverride, atmosphereOverride],
+    [prompt, genreOverride, atmosphereOverride, cameraMoveOverride],
   );
 
   // "Build a cinematic scene" (2026-09-21) - character photo + location
@@ -762,6 +778,25 @@ function SlotCard({
                     />
                     <span className="w-16 text-muted">{directorResult ? ATMOSPHERE_LIBRARY[directorResult.atmosphere].label : ""}</span>
                   </label>
+                  <label className="flex items-center gap-1">
+                    <span className="text-muted">Camera move:</span>
+                    <select
+                      className="max-w-[160px] rounded-lg border border-border bg-white p-1 text-[10px]"
+                      value={cameraMoveOverride}
+                      onChange={(e) => setCameraMoveOverride(e.target.value)}
+                    >
+                      <option value="auto">Auto-detect{directorResult ? ` (${directorResult.cameraMove.label})` : ""}</option>
+                      {CAMERA_MOVE_CATEGORIES.map(([category, label]) => (
+                        <optgroup key={category} label={label}>
+                          {CAMERA_MOVEMENT_LIBRARY.filter((m) => m.category === category).map((move) => (
+                            <option key={move.id} value={move.id}>
+                              {move.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 {directorResult && (
                   <>
@@ -769,6 +804,7 @@ function SlotCard({
                       <span className="rounded-full bg-white px-2 py-0.5">Scale: {directorResult.scale}</span>
                       <span className="rounded-full bg-white px-2 py-0.5">Motion: {directorResult.kinetic}</span>
                       <span className="rounded-full bg-white px-2 py-0.5">Lens: {directorResult.lens.focalLength}</span>
+                      <span className="rounded-full bg-white px-2 py-0.5">Shot: {directorResult.cameraMove.label}</span>
                     </div>
                     <pre className="whitespace-pre-wrap rounded-lg bg-white p-2 text-[9px] leading-relaxed text-foreground">{directorResult.expandedPrompt}</pre>
                     <p className="text-[9px] text-muted">This expanded version is what actually gets sent to the model when you generate.</p>

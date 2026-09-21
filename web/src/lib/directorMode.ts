@@ -72,7 +72,7 @@ export const LENS_BY_SCALE: Record<Scale, LensSpec> = {
 export function detectScale(prompt: string): Scale {
   const text = prompt.toLowerCase();
   if (
-    /cr(y|ies|ying)|whisper|stare|staring|tears?|smil(e|ing)|laugh|dialogue|\bsays?\b|\bspeaks?\b|close-?up|face|eyes|expression|emotion|embrace|tender|reunite|longing|grief|heartbreak|confession|apology|forgive|goodbye|kiss|intimate|\blove\b/.test(
+    /cr(y|ies|ying)|whisper|stare|staring|tears?|smil(e|ing)|laugh|dialogue|\bsays?\b|\bspeaks?\b|close[\s-]?up|face|eyes|expression|emotion|embrace|tender|reunite|longing|grief|heartbreak|confession|apology|forgive|goodbye|kiss|intimate|\blove\b/.test(
       text,
     )
   ) {
@@ -101,6 +101,116 @@ export const RIG_BY_KINETIC: Record<Kinetic, RigSpec> = {
   },
 };
 
+// ---- Camera movement library: 55 real, named angles/movements ----
+// RIG_BY_KINETIC above is a coarse 2-bucket default; this is the real
+// depth layer on top of it - the same category of feature Higgsfield
+// ships as "Camera Controls" (50-80+ named presets, per
+// docs/higgsfield-competitive-research.md), built the same deterministic
+// way as everything else in this file: real, standard film-industry
+// terminology (a working DP or editor would recognize every name here),
+// not invented language. Auto-detected from the prompt via keyword
+// matching (first match wins), with a manual override for the UI picker.
+export type CameraMoveCategory = "framing" | "angle" | "static" | "panTilt" | "tracking" | "aerial" | "rotation" | "focusReveal";
+
+export type CameraMove = {
+  id: string;
+  label: string;
+  category: CameraMoveCategory;
+  kinetic: Kinetic; // which coarse motion-quality bucket (RIG_BY_KINETIC) this move's "how it feels" falls under
+  instruction: string; // inserted directly into [Shot Type]
+  keywords: RegExp;
+};
+
+export const CAMERA_MOVEMENT_LIBRARY: CameraMove[] = [
+  // -- Framing / subject distance --
+  { id: "extremeCloseUp", label: "Extreme Close-Up", category: "framing", kinetic: "static", instruction: "extreme close-up, the frame filled almost entirely by the subject's face", keywords: /extreme close[\s-]?up|\becu\b/ },
+  { id: "closeUpFace", label: "Close-Up on Face", category: "framing", kinetic: "static", instruction: "close-up on the face, head and shoulders filling the frame", keywords: /close[\s-]?up.{0,15}\bface\b|\bface\b.{0,15}close[\s-]?up/ },
+  { id: "closeUpEyes", label: "Close-Up on Eyes", category: "framing", kinetic: "static", instruction: "extreme close-up isolated on the eyes, every detail of the gaze sharp and legible", keywords: /close[\s-]?up.{0,15}\beyes?\b|\beyes?\b.{0,15}close[\s-]?up|\bstaring into (her|his|their) eyes\b/ },
+  { id: "closeUpHands", label: "Close-Up on Hands", category: "framing", kinetic: "static", instruction: "tight insert close-up on the hands, isolating the gesture or object", keywords: /close[\s-]?up.{0,15}\bhands?\b|\bhands?\b.{0,15}close[\s-]?up/ },
+  { id: "mediumCloseUp", label: "Medium Close-Up", category: "framing", kinetic: "static", instruction: "medium close-up, framed from the chest up", keywords: /medium close[\s-]?up/ },
+  { id: "mediumShot", label: "Medium Shot", category: "framing", kinetic: "static", instruction: "medium shot, framed from the waist up", keywords: /medium shot\b(?! close)/ },
+  { id: "mediumWideShot", label: "Medium Wide Shot", category: "framing", kinetic: "static", instruction: "medium wide shot, full body with a hint of surrounding environment", keywords: /medium wide shot/ },
+  { id: "wideShot", label: "Wide Shot", category: "framing", kinetic: "static", instruction: "wide shot, the full body visible against a clearly readable environment", keywords: /\bwide shot\b/ },
+  { id: "establishingShot", label: "Establishing / Extreme Wide Shot", category: "framing", kinetic: "static", instruction: "extreme wide establishing shot, the subject small against a large, fully-revealed environment", keywords: /establishing shot|extreme wide/ },
+  { id: "twoShot", label: "Two-Shot", category: "framing", kinetic: "static", instruction: "two-shot, both subjects framed together in balanced composition", keywords: /two[\s-]?shot|both (of )?them in (frame|the shot)/ },
+  { id: "overTheShoulder", label: "Over-the-Shoulder", category: "framing", kinetic: "static", instruction: "over-the-shoulder shot, a foreground shoulder and head framing the subject beyond", keywords: /over[\s-]?the[\s-]?shoulder|\bots\b/ },
+
+  // -- Angle --
+  { id: "eyeLevel", label: "Eye-Level", category: "angle", kinetic: "static", instruction: "neutral eye-level angle, camera height matched to the subject's eyeline", keywords: /eye[\s-]?level/ },
+  { id: "lowAngle", label: "Low Angle", category: "angle", kinetic: "static", instruction: "low angle, camera positioned below the subject looking up, lending a sense of power or scale", keywords: /low angle|looking up at (her|him|them)/ },
+  { id: "highAngle", label: "High Angle", category: "angle", kinetic: "static", instruction: "high angle, camera positioned above the subject looking down, lending a sense of vulnerability", keywords: /high angle|looking down (at|on) (her|him|them)/ },
+  { id: "birdsEye", label: "Bird's-Eye View", category: "angle", kinetic: "static", instruction: "bird's-eye view, camera directly overhead looking straight down", keywords: /birds?'?[\s-]?eye|overhead shot|directly above/ },
+  { id: "wormsEye", label: "Worm's-Eye View", category: "angle", kinetic: "static", instruction: "worm's-eye view, camera at ground level looking straight up", keywords: /worms?'?[\s-]?eye|from the ground looking up/ },
+  { id: "dutchAngle", label: "Dutch / Canted Angle", category: "angle", kinetic: "static", instruction: "Dutch angle, the horizon deliberately tilted for tension and disorientation", keywords: /dutch angle|canted angle|tilted (frame|horizon|camera)/ },
+  { id: "pov", label: "Point-of-View (POV)", category: "angle", kinetic: "dynamic", instruction: "first-person point-of-view shot, the camera itself is the subject's own eyes", keywords: /\bpov\b|point-of-view|first-person (shot|view)/ },
+  { id: "profileShot", label: "Profile Shot", category: "angle", kinetic: "static", instruction: "profile shot, the subject framed directly from the side", keywords: /profile shot|side profile/ },
+
+  // -- Static / locked movement --
+  { id: "staticLocked", label: "Static / Locked-Off", category: "static", kinetic: "static", instruction: "static, locked-off shot on a tripod, no camera movement at all", keywords: /static shot|locked[\s-]?off|fixed camera|tripod, no movement/ },
+  { id: "slowPushIn", label: "Slow Push-In (Dolly-In)", category: "static", kinetic: "static", instruction: "slow, motorized push-in on a dolly, gradually moving closer to the subject", keywords: /slow (push[\s-]?in|dolly[\s-]?in|approach)|\bpush[\s-]?in\b|dolly.{0,10}in\b/ },
+  { id: "pullBack", label: "Pull-Back / Dolly-Out", category: "static", kinetic: "static", instruction: "slow pull-back on a dolly, gradually moving away from the subject", keywords: /pull[\s-]?back|dolly[\s-]?out|dolly.{0,10}out\b/ },
+  { id: "slowRevealPullBack", label: "Slow Reveal Pull-Back", category: "static", kinetic: "static", instruction: "begins tight on the subject, then slowly pulls back to reveal the surrounding environment", keywords: /reveal.{0,20}pull.?back|pull.?back.{0,20}reveal/ },
+
+  // -- Pan / tilt --
+  { id: "panLeft", label: "Pan Left", category: "panTilt", kinetic: "static", instruction: "camera pans left, rotating horizontally to follow or reveal", keywords: /pans? (to the )?left/ },
+  { id: "panRight", label: "Pan Right", category: "panTilt", kinetic: "static", instruction: "camera pans right, rotating horizontally to follow or reveal", keywords: /pans? (to the )?right/ },
+  { id: "tiltUp", label: "Tilt Up", category: "panTilt", kinetic: "static", instruction: "camera tilts up, rotating vertically from a lower detail to a higher one", keywords: /tilts? up/ },
+  { id: "tiltDown", label: "Tilt Down", category: "panTilt", kinetic: "static", instruction: "camera tilts down, rotating vertically from a higher detail to a lower one", keywords: /tilts? down/ },
+
+  // -- Tracking / following movement --
+  { id: "trackingLateral", label: "Tracking Shot (Lateral)", category: "tracking", kinetic: "dynamic", instruction: "lateral tracking shot, the camera moving parallel alongside the subject", keywords: /tracking shot|dolly track|camera (moves|travels) alongside/ },
+  { id: "followingBehind", label: "Following Shot (Behind)", category: "tracking", kinetic: "dynamic", instruction: "following shot, the camera moving directly behind the subject as they walk or run", keywords: /follow(ing)? (shot|the subject|her|him|them) from behind|camera follows/ },
+  { id: "leadingInFront", label: "Leading Shot (In Front)", category: "tracking", kinetic: "dynamic", instruction: "leading shot, the camera moving backward just ahead of an approaching subject", keywords: /leading shot|camera (walks|moves) backward|walking toward (the )?camera/ },
+  { id: "steadicamFollow", label: "Steadicam Follow", category: "tracking", kinetic: "dynamic", instruction: "smooth, stabilized Steadicam follow, gliding alongside or behind the subject with no shake", keywords: /steadicam|gimbal (follow|tracking)/ },
+  { id: "handheldShakyRunning", label: "Handheld Shaky (Running)", category: "tracking", kinetic: "dynamic", instruction: "raw handheld camera, unstabilized and shaking in rhythm with the subject sprinting", keywords: /shak(e|y|ing) while running|handheld.{0,15}running|running.{0,15}handheld|chasing (camera|shot)/ },
+  { id: "whipPan", label: "Whip Pan", category: "tracking", kinetic: "dynamic", instruction: "whip pan, an extremely fast horizontal pan that blurs into a hard transition", keywords: /whip pan/ },
+  { id: "crashZoom", label: "Crash Zoom", category: "tracking", kinetic: "dynamic", instruction: "crash zoom, a fast, aggressive zoom rapidly closing in on the subject", keywords: /crash zoom/ },
+  { id: "snapZoom", label: "Snap Zoom", category: "tracking", kinetic: "dynamic", instruction: "snap zoom, a quick zoom punch in (or out) that settles immediately", keywords: /snap zoom/ },
+
+  // -- Crane / aerial / vertical --
+  { id: "craneUp", label: "Crane Up", category: "aerial", kinetic: "dynamic", instruction: "camera rises vertically on a crane, revealing more of the scene as it climbs", keywords: /crane up|jib up/ },
+  { id: "craneDown", label: "Crane Down", category: "aerial", kinetic: "dynamic", instruction: "camera descends vertically on a crane, narrowing from a wide view down to the subject", keywords: /crane down|jib down/ },
+  { id: "droneFlyover", label: "Drone Aerial Flyover", category: "aerial", kinetic: "dynamic", instruction: "high aerial drone shot, sweeping across the landscape above the scene", keywords: /drone (shot|flyover|aerial)|aerial (shot|flyover)/ },
+  { id: "fpvDrone", label: "FPV Drone Shot", category: "aerial", kinetic: "dynamic", instruction: "fast, immersive FPV drone movement, weaving through the space at speed", keywords: /fpv drone|fpv shot/ },
+  { id: "pedestalUp", label: "Pedestal Up", category: "aerial", kinetic: "static", instruction: "pedestal up, the camera rising vertically without changing angle, like an elevator", keywords: /pedestal up/ },
+  { id: "pedestalDown", label: "Pedestal Down", category: "aerial", kinetic: "static", instruction: "pedestal down, the camera descending vertically without changing angle", keywords: /pedestal down/ },
+
+  // -- Orbit / rotation --
+  { id: "orbitArc", label: "Orbit / Arc Shot", category: "rotation", kinetic: "dynamic", instruction: "arcing orbit shot, the camera circling partway around the subject", keywords: /orbit shot|arc shot|arcing (around|shot)/ },
+  { id: "fullRotation", label: "360-Degree Rotation", category: "rotation", kinetic: "dynamic", instruction: "a full 360-degree orbit, the camera circling completely around the subject", keywords: /360[\s-]?degree|full (rotation|orbit)/ },
+  { id: "dollyZoom", label: "Dolly Zoom (Vertigo Effect)", category: "rotation", kinetic: "dynamic", instruction: "dolly zoom (vertigo effect), the camera dollies in while the lens zooms out (or vice versa), warping the background", keywords: /dolly zoom|vertigo effect/ },
+  { id: "cameraRoll", label: "Roll", category: "rotation", kinetic: "dynamic", instruction: "camera roll, rotating around its own lens axis", keywords: /camera roll|barrel roll/ },
+
+  // -- Focus / reveal techniques --
+  { id: "rackFocus", label: "Rack Focus", category: "focusReveal", kinetic: "static", instruction: "rack focus, shifting focus from one plane to another within the same shot", keywords: /rack focus/ },
+  { id: "insertShot", label: "Insert Shot", category: "focusReveal", kinetic: "static", instruction: "insert shot, a tight cutaway isolating a specific detail or object", keywords: /insert shot/ },
+  { id: "revealShot", label: "Reveal Shot", category: "focusReveal", kinetic: "dynamic", instruction: "reveal shot, the camera moving to unveil something previously hidden from view", keywords: /reveal shot|camera (moves to )?reveals?/ },
+  { id: "throughFrame", label: "Through-Frame Shot", category: "focusReveal", kinetic: "dynamic", instruction: "the camera moves through a foreground element (a doorway, foliage, a crowd) into the scene beyond", keywords: /through (a |the )?(doorway|frame|foliage|crowd)/ },
+  { id: "silhouetteReveal", label: "Silhouette Reveal", category: "focusReveal", kinetic: "static", instruction: "the subject begins in silhouette, light slowly revealing their form and features", keywords: /silhouette reveal|starts? in silhouette/ },
+  { id: "slowMotionApproach", label: "Slow-Motion Approach", category: "focusReveal", kinetic: "static", instruction: "slow-motion approach, the subject or camera closing distance in dramatically slowed time", keywords: /slow[\s-]?motion approach|slow approach/ },
+  { id: "freezeFrame", label: "Freeze-Frame", category: "focusReveal", kinetic: "static", instruction: "freeze-frame, motion stopping entirely on a single held frame", keywords: /freeze[\s-]?frame/ },
+  { id: "matchCutMovement", label: "Match-Cut Movement", category: "focusReveal", kinetic: "static", instruction: "a movement composed to visually match the framing of the shot that follows it", keywords: /match cut|match[\s-]?cut movement/ },
+  { id: "overheadTable", label: "Overhead Table Shot", category: "focusReveal", kinetic: "static", instruction: "direct top-down overhead shot looking straight down onto a surface", keywords: /overhead table|top[\s-]?down (shot|view) (of|on) the table|flat lay/ },
+  { id: "slowOrbitCloseUp", label: "Slow Orbit Close-Up", category: "focusReveal", kinetic: "static", instruction: "a slow, tight orbit close-up circling just the face", keywords: /slow orbit.{0,15}face|orbit.{0,15}close[\s-]?up/ },
+];
+
+// First matching move wins (most specific phrasing first in the array
+// above), falling back to the coarse dynamic/static default when no
+// specific named move is mentioned - same "always fully specified"
+// philosophy as every other axis in this file.
+export function detectCameraMove(prompt: string): CameraMove {
+  const text = prompt.toLowerCase();
+  for (const move of CAMERA_MOVEMENT_LIBRARY) {
+    if (move.keywords.test(text)) return move;
+  }
+  const kinetic = detectKinetic(prompt);
+  return CAMERA_MOVEMENT_LIBRARY.find((m) => m.id === (kinetic === "dynamic" ? "handheldShakyRunning" : "slowPushIn"))!;
+}
+
+export function cameraMoveById(id: string): CameraMove | undefined {
+  return CAMERA_MOVEMENT_LIBRARY.find((m) => m.id === id);
+}
+
 export function detectKinetic(prompt: string): Kinetic {
   const text = prompt.toLowerCase();
   if (/chas(e|ing)|sprint|running|explo(de|sion|ding)|fight|fighting|jump|leap|crash|fast|flee(ing)?|escape/.test(text)) return "dynamic";
@@ -122,7 +232,7 @@ export type GenreStyle = {
 export const GENRE_STYLE_LIBRARY: Record<GenreKey, GenreStyle> = {
   sciFiNoir: {
     label: "Sci-Fi Noir",
-    keywords: /cyberpunk|cybernetic|sci-?fi|futuris|android|robot|neon|dystopia|space station|hologram|artificial intelligence|starship|spacecraft|\balien\b|\bmech(a|anical)?\b|augment|implant|synthetic human|replicant/,
+    keywords: /cyberpunk|cybernetic|sci[\s-]?fi|futuris|android|robot|neon|dystopia|space station|hologram|artificial intelligence|starship|spacecraft|\balien\b|\bmech(a|anical)?\b|augment|implant|synthetic human|replicant/,
     cameraFormat: "digital cinema camera, anamorphic lenses",
     filmStockOrColor: "cool-warm color-separated palette (amber highlights against deep blue-teal shadow), volumetric haze and practical light sources visible in frame",
     aspectRatio: "2.39:1",
@@ -338,6 +448,7 @@ export type DirectorModeResult = {
   atmosphere: Atmosphere;
   lens: LensSpec;
   rig: RigSpec;
+  cameraMove: CameraMove;
   style: GenreStyle;
   mood: AtmosphereStyle;
   colorToneHints: string[];
@@ -351,18 +462,26 @@ export type DirectorModeResult = {
 // around what the user wrote, it never rewrites or replaces their actual idea.
 // atmosphereOverride accepts the raw 0-4 gradient index too (not just the
 // named Atmosphere key), matching a UI slider directly without the caller
-// needing to know the enum names.
+// needing to know the enum names. cameraMoveOverride takes a
+// CAMERA_MOVEMENT_LIBRARY id directly (see cameraMoveById) for a picker UI.
 export function expandCinematicPrompt(
   userPrompt: string,
-  opts?: { genreOverride?: GenreKey; scaleOverride?: Scale; kineticOverride?: Kinetic; atmosphereOverride?: Atmosphere | number },
+  opts?: {
+    genreOverride?: GenreKey;
+    scaleOverride?: Scale;
+    kineticOverride?: Kinetic;
+    atmosphereOverride?: Atmosphere | number;
+    cameraMoveOverride?: string;
+  },
 ): DirectorModeResult {
   const scale = opts?.scaleOverride ?? detectScale(userPrompt);
-  const kinetic = opts?.kineticOverride ?? detectKinetic(userPrompt);
   const genre = opts?.genreOverride ?? detectGenre(userPrompt);
   const atmosphere =
     typeof opts?.atmosphereOverride === "number"
       ? ATMOSPHERE_ORDER[Math.max(0, Math.min(ATMOSPHERE_ORDER.length - 1, opts.atmosphereOverride))]
       : (opts?.atmosphereOverride ?? detectAtmosphere(userPrompt));
+  const cameraMove = (opts?.cameraMoveOverride ? cameraMoveById(opts.cameraMoveOverride) : undefined) ?? detectCameraMove(userPrompt);
+  const kinetic = opts?.kineticOverride ?? cameraMove.kinetic;
   const lens = LENS_BY_SCALE[scale];
   const rig = RIG_BY_KINETIC[kinetic];
   const style = GENRE_STYLE_LIBRARY[genre];
@@ -372,12 +491,12 @@ export function expandCinematicPrompt(
 
   const expandedPrompt = [
     `[Format]: Cinematic short film, 24fps, ${style.aspectRatio} aspect ratio.`,
-    `[Shot Type]: ${rig.rig}.`,
+    `[Shot Type]: ${cameraMove.instruction}.`,
     `[Subject]: ${userPrompt.trim()}`,
     `[Camera & Lens]: Shot on ${style.cameraFormat}, ${lens.focalLength} lens, ${lens.aperture}, ${lens.look}.`,
     `[Lighting & Atmosphere]: ${style.lighting}. ${mood.exposure}, ${mood.contrast}, ${mood.colorTemperature}. ${rig.motion}.`,
     `[Style & Grading]: ${gradingLine}`,
   ].join("\n");
 
-  return { scale, kinetic, genre, atmosphere, lens, rig, style, mood, colorToneHints, expandedPrompt };
+  return { scale, kinetic, genre, atmosphere, lens, rig, cameraMove, style, mood, colorToneHints, expandedPrompt };
 }
