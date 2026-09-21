@@ -540,6 +540,13 @@ export function expandCinematicPrompt(
     cultureCuisine ? `[Culture/Cuisine]: ${cultureCuisine.description}.` : "",
     musicMood ? `[Music]: ${musicMood.description}.` : "",
     language ? `[Dialogue Language]: spoken in ${language.label}.` : "",
+    // Real, explicit vendor recommendation (ByteDance's own Seedance 2.5
+    // prompt guide, "Negative control" section): "Do not add subtitles" is
+    // called out as a supported, commonly-needed negative constraint -
+    // spontaneous unwanted captions are a documented failure mode. Applied
+    // as a default here since most generated cinematic content doesn't
+    // want the model inventing on-screen text.
+    "[Constraints]: Do not add subtitles.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -781,9 +788,17 @@ export type TimedStoryboard = {
   formattedText: string;
 };
 
+// Real fix (2026-09-22): matches Seedance 2.5's own documented timestamp
+// syntax exactly (ByteDance's official "Dreamina Seedance 2.5 Prompt
+// Writing Guide," docs.byteplus.com/en/docs/ModelArk/2607689 -
+// "[1s-4s]....[4s-8s]" / "0-3 seconds...3-7 seconds") rather than an
+// invented "0:00-0:03" clock format - this string is sent directly to the
+// model, so matching its own documented convention is a real correctness
+// improvement, not cosmetic. The guide also warns this only works at
+// 1-second granularity and shouldn't be used for sub-second/high-frequency
+// timing, which is why beats are always rounded to whole seconds here.
 function formatTimestamp(totalSeconds: number): string {
-  const s = Math.max(0, Math.round(totalSeconds));
-  return `0:${String(s).padStart(2, "0")}`;
+  return `${Math.max(0, Math.round(totalSeconds))}s`;
 }
 
 // Splits a clip into real, timed beats instead of one flat paragraph.
@@ -830,7 +845,14 @@ export function buildTimedStoryboard(
 
   const weather = detectWeather(userPrompt);
   const setting = detectSetting(userPrompt);
-  const continuityLine = [`[Continuity]: ${background}`, weather ? `Weather/light throughout: ${weather.description}.` : "", setting ? `Setting: ${setting.description}.` : ""]
+  // "Do not add subtitles" - see expandCinematicPrompt's identical
+  // constraint line for why (ByteDance's own Seedance 2.5 prompt guide).
+  const continuityLine = [
+    `[Continuity]: ${background}.`,
+    weather ? `Weather/light throughout: ${weather.description}.` : "",
+    setting ? `Setting: ${setting.description}.` : "",
+    "Do not add subtitles.",
+  ]
     .filter(Boolean)
     .join(" ");
 
