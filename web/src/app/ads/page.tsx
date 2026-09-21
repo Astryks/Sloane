@@ -2,10 +2,11 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudio";
+import { expandCinematicPrompt, GENRE_STYLE_LIBRARY, ATMOSPHERE_LIBRARY, type GenreKey } from "@/lib/directorMode";
 
 // Small shared drag-and-drop wrapper (2026-09-14, per direct request -
 // "would be nice to... drag and drop images") - wraps any existing
@@ -453,6 +454,27 @@ function SlotCard({
   const [error, setError] = useState("");
   const uploadDropzone = useDropzone((file) => uploadImage(file));
 
+  // Director Mode (2026-09-21) - expands the same free-text prompt above
+  // into a structured, technically-specific cinematic prompt (see
+  // docs/director-mode-cinematography-research.md), the same idea
+  // Higgsfield ships as its own prompt-expansion layer. Auto-detects genre/
+  // scale/kinetic/atmosphere from the prompt live as the user types;
+  // "auto"/-1 lets the user override any axis explicitly instead of trusting
+  // detection, so this is a guide, not a black box.
+  const [directorModeOn, setDirectorModeOn] = useState(false);
+  const [genreOverride, setGenreOverride] = useState<GenreKey | "auto">("auto");
+  const [atmosphereOverride, setAtmosphereOverride] = useState(2);
+  const directorResult = useMemo(
+    () =>
+      prompt.trim()
+        ? expandCinematicPrompt(prompt, {
+            genreOverride: genreOverride === "auto" ? undefined : genreOverride,
+            atmosphereOverride,
+          })
+        : null,
+    [prompt, genreOverride, atmosphereOverride],
+  );
+
   function toggleRef(id: string) {
     setSelectedRefs((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
   }
@@ -498,8 +520,13 @@ function SlotCard({
     if (!prompt.trim()) return;
     setBusy(true);
     setError("");
+    // Send the expanded structured prompt when Director Mode is on, but
+    // keep the user's own short text as what's saved/shown as slot.prompt -
+    // expansion is a submission-time enrichment, not a rewrite of what they
+    // typed.
+    const submittedPrompt = directorModeOn && directorResult ? directorResult.expandedPrompt : prompt;
     try {
-      await postJson("/api/grid-storyboard/slot/generate-video", { slotId: slot.id, prompt, videoModel: model });
+      await postJson("/api/grid-storyboard/slot/generate-video", { slotId: slot.id, prompt: submittedPrompt, videoModel: model });
       onUpdate({ status: "pending_video", prompt, video_model: model });
       for (;;) {
         await wait(3000);
@@ -632,6 +659,57 @@ function SlotCard({
               <li>Reusing the same reference image and a similarly-worded prompt keeps a character&apos;s voice consistent across scenes - changing the location or wording can shift it.</li>
             </ul>
           </details>
+          <div className="rounded-xl border border-purple/20 bg-purple-wash/40 p-2">
+            <label className="flex items-center gap-2 text-[11px] font-semibold text-purple">
+              <input type="checkbox" checked={directorModeOn} onChange={(e) => setDirectorModeOn(e.target.checked)} />
+              🎬 Director Mode — expand this into a full cinematic prompt (lens, camera move, lighting, film look)
+            </label>
+            {directorModeOn && (
+              <div className="mt-2 space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                  <label className="flex items-center gap-1">
+                    <span className="text-muted">Genre:</span>
+                    <select
+                      className="rounded-lg border border-border bg-white p-1 text-[10px]"
+                      value={genreOverride}
+                      onChange={(e) => setGenreOverride(e.target.value as GenreKey | "auto")}
+                    >
+                      <option value="auto">Auto-detect{directorResult ? ` (${GENRE_STYLE_LIBRARY[directorResult.genre].label})` : ""}</option>
+                      {(Object.keys(GENRE_STYLE_LIBRARY) as GenreKey[]).map((key) => (
+                        <option key={key} value={key}>
+                          {GENRE_STYLE_LIBRARY[key].label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <span className="text-muted">Atmosphere:</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={4}
+                      step={1}
+                      value={atmosphereOverride}
+                      onChange={(e) => setAtmosphereOverride(Number(e.target.value))}
+                      className="accent-purple"
+                    />
+                    <span className="w-16 text-muted">{directorResult ? ATMOSPHERE_LIBRARY[directorResult.atmosphere].label : ""}</span>
+                  </label>
+                </div>
+                {directorResult && (
+                  <>
+                    <div className="flex flex-wrap gap-1 text-[9px] text-muted">
+                      <span className="rounded-full bg-white px-2 py-0.5">Scale: {directorResult.scale}</span>
+                      <span className="rounded-full bg-white px-2 py-0.5">Motion: {directorResult.kinetic}</span>
+                      <span className="rounded-full bg-white px-2 py-0.5">Lens: {directorResult.lens.focalLength}</span>
+                    </div>
+                    <pre className="whitespace-pre-wrap rounded-lg bg-white p-2 text-[9px] leading-relaxed text-foreground">{directorResult.expandedPrompt}</pre>
+                    <p className="text-[9px] text-muted">This expanded version is what actually gets sent to the model when you generate.</p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <select className="rounded-lg border border-border p-1.5 text-xs" value={model} onChange={(e) => setModel(e.target.value)}>
               {AD_STUDIO_MODELS.map((m) => (

@@ -13,7 +13,14 @@ import {
 import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from "@/lib/adStudio";
 import { hasEnoughFalBalanceToGenerate, submitFalJob } from "@/lib/fal";
 
-const MAX_PROMPT_LENGTH = 500;
+// Real, confirmed limit (2026-09-13 live test, see productAdStoryboard.ts's
+// identical constant): fal-ai/kling-video's endpoints reject any prompt
+// over 2500 characters with a 422. Raised from an arbitrary 500 (2026-09-21)
+// to make room for Director Mode's expanded structured prompt
+// (directorMode.ts's 6-block format routinely runs 600-800 characters) -
+// 500 was blocking a real, valuable feature against a limit that was never
+// tied to an actual vendor constraint in the first place.
+const MAX_PROMPT_LENGTH = 2500;
 
 // Real payment, per direct request ("they pay to create one video at a
 // time") - reuses the exact same video-credit mechanism video_paygo_jobs
