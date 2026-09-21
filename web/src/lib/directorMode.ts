@@ -1,3 +1,5 @@
+import { detectCity, detectCultureCuisine, detectMusicMood, detectLanguage } from "./directorModeElements";
+
 // Director Mode: deterministic (no LLM - same reasoning as
 // productAdStoryboard.ts/adStudioStoryboard.ts, no ANTHROPIC_API_KEY/
 // OPENAI_API_KEY configured anywhere in this project, and this codebase has
@@ -203,6 +205,22 @@ export function detectCameraMove(prompt: string): CameraMove {
   for (const move of CAMERA_MOVEMENT_LIBRARY) {
     if (move.keywords.test(text)) return move;
   }
+  // Real bug found and fixed (2026-09-21): this fallback used to look at
+  // detectKinetic() alone, which only checks for explicit action/static
+  // words - a scene with neither ("a gloomy, ominous mansion at midnight,
+  // shadows creeping across the walls") fell through to detectKinetic's
+  // own generic "dynamic" default and got "handheld camera shaking in
+  // rhythm with sprinting," even though the genre had already correctly
+  // resolved to horror (whose real average shot length runs slower than
+  // any other genre studied - see PACE_PRESETS' own comment). Horror and
+  // the other contemplative-leaning genres now fall back to a slow,
+  // deliberate move instead, matching their real pacing rather than a
+  // generic action default.
+  const genre = detectGenre(prompt);
+  if (genre === "horrorTension") return CAMERA_MOVEMENT_LIBRARY.find((m) => m.id === "silhouetteReveal")!;
+  if (genre === "epicDrama" || genre === "intimateEmotional" || genre === "vintageStylized") {
+    return CAMERA_MOVEMENT_LIBRARY.find((m) => m.id === "slowPushIn")!;
+  }
   const kinetic = detectKinetic(prompt);
   return CAMERA_MOVEMENT_LIBRARY.find((m) => m.id === (kinetic === "dynamic" ? "handheldShakyRunning" : "slowPushIn"))!;
 }
@@ -215,6 +233,15 @@ export function detectKinetic(prompt: string): Kinetic {
   const text = prompt.toLowerCase();
   if (/chas(e|ing)|sprint|running|explo(de|sion|ding)|fight|fighting|jump|leap|crash|fast|flee(ing)?|escape/.test(text)) return "dynamic";
   if (/stand(ing)?|sit(ting)?|smok(e|ing)|alone|cliff|quiet|still|contemplat|gaz(e|ing)/.test(text)) return "static";
+  // Real bug found and fixed (2026-09-21): the fallback used to always be
+  // "dynamic" - for a quiet two-person dialogue exchange with no motion
+  // verbs at all ("I never wanted this," she said. "Neither did I," he
+  // replied), that produced "handheld camera shaking in rhythm with the
+  // subject sprinting," which is wrong for the scene. Dialogue exchanges
+  // are far more commonly covered with static shot/reverse-shot coverage
+  // than handheld action, so a detected dialogue scene tie-breaks toward
+  // "static" instead of the generic action-oriented default.
+  if (detectDialogueScene(prompt)) return "static";
   return "dynamic";
 }
 
@@ -452,6 +479,10 @@ export type DirectorModeResult = {
   style: GenreStyle;
   mood: AtmosphereStyle;
   colorToneHints: string[];
+  city: string | null;
+  cultureCuisine: string | null;
+  musicMood: string | null;
+  language: string | null;
   expandedPrompt: string;
 };
 
@@ -489,6 +520,15 @@ export function expandCinematicPrompt(
   const colorToneHints = detectColorToneHints(userPrompt);
   const gradingLine = [style.filmStockOrColor, ...colorToneHints].join(", ") + ".";
 
+  // World-detail enrichment (2026-09-21): city, cuisine/culture, music mood,
+  // and dialogue language are all auto-detected from the prompt and, when
+  // present, folded into the expanded prompt as extra lines - purely
+  // additive, never replacing anything the core axes above already produce.
+  const city = detectCity(userPrompt);
+  const cultureCuisine = detectCultureCuisine(userPrompt);
+  const musicMood = detectMusicMood(userPrompt);
+  const language = detectLanguage(userPrompt);
+
   const expandedPrompt = [
     `[Format]: Cinematic short film, 24fps, ${style.aspectRatio} aspect ratio.`,
     `[Shot Type]: ${cameraMove.instruction}.`,
@@ -496,7 +536,309 @@ export function expandCinematicPrompt(
     `[Camera & Lens]: Shot on ${style.cameraFormat}, ${lens.focalLength} lens, ${lens.aperture}, ${lens.look}.`,
     `[Lighting & Atmosphere]: ${style.lighting}. ${mood.exposure}, ${mood.contrast}, ${mood.colorTemperature}. ${rig.motion}.`,
     `[Style & Grading]: ${gradingLine}`,
+    city ? `[Location Detail]: ${city.description}.` : "",
+    cultureCuisine ? `[Culture/Cuisine]: ${cultureCuisine.description}.` : "",
+    musicMood ? `[Music]: ${musicMood.description}.` : "",
+    language ? `[Dialogue Language]: spoken in ${language.label}.` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    scale,
+    kinetic,
+    genre,
+    atmosphere,
+    lens,
+    rig,
+    cameraMove,
+    style,
+    mood,
+    colorToneHints,
+    city: city?.label ?? null,
+    cultureCuisine: cultureCuisine?.label ?? null,
+    musicMood: musicMood?.label ?? null,
+    language: language?.label ?? null,
+    expandedPrompt,
+  };
+}
+
+// ============================================================================
+// Timed storyboard layer (2026-09-21, per direct request): "implement a
+// detailed storyboard and give directions per second" - everything below
+// breaks a clip into real, timed beats instead of one flat paragraph, each
+// with its own camera move, background action, weather/setting, and a
+// specific subtle-performance detail (eyes, micro-expressions) - "nothing
+// left to chance," matching the direct request that background/environment
+// stay scripted rather than left for the model to invent unpredictably.
+// ============================================================================
+
+// ---- Weather / time-of-day: reuses the exact real-value shape already
+// proven in productAdStoryboard.ts's LIGHTING_PRESETS (real color
+// temperatures + light direction, not vague adjectives), extended with
+// conditions that library doesn't cover (rain, harsh midday). ----
+export type WeatherKey = "goldenHour" | "morningSun" | "overcast" | "rain" | "night" | "harshMidday" | "dawn" | "blueHour" | "fog" | "snow" | "windy";
+export type WeatherPreset = { label: string; description: string; keywords: RegExp };
+
+export const WEATHER_LIBRARY: Record<WeatherKey, WeatherPreset> = {
+  goldenHour: { label: "Golden Hour", description: "warm 3200K golden-hour side light, long soft shadows, gentle lens flare", keywords: /golden hour|sunset|sunrise|magic hour/ },
+  morningSun: { label: "Morning Sunshine", description: "crisp 5000K morning daylight, soft directional shadows, airy highlights", keywords: /morning sun|morning light|early morning/ },
+  overcast: { label: "Overcast", description: "even 6500K overcast daylight, soft diffused shadows, true-to-life color", keywords: /overcast|cloudy|grey sky|gray sky/ },
+  rain: { label: "Rain", description: "wet reflections on every surface, visible rain streaks and droplets, soft diffused overcast light, ambient rain patter", keywords: /\brain(y|ing)?\b|\bstorm(y)?\b|drizzl/ },
+  night: { label: "Night", description: "cool 4000K ambient light mixed with warm practical sources, moody rim lighting", keywords: /\bnight\b|nighttime|after dark/ },
+  harshMidday: { label: "Harsh Midday", description: "hard overhead 5600K midday sun, short dense shadows, high contrast", keywords: /midday|high noon|harsh sun/ },
+  dawn: { label: "Dawn", description: "cool pale 6000K pre-sunrise light, faint pink-orange building at the horizon, very soft shadow", keywords: /\bdawn\b|first light|daybreak/ },
+  blueHour: { label: "Blue Hour", description: "deep saturated blue twilight, city/practical lights just starting to glow, low contrast", keywords: /blue hour|twilight/ },
+  fog: { label: "Fog", description: "dense fog softening every edge, light diffused and scattered, distant shapes fading to grey", keywords: /\bfog(gy)?\b|\bmist(y)?\b|\bhaze\b/ },
+  snow: { label: "Snow", description: "falling snow, muted cool light reflecting off the snow-covered ground, soft even shadow", keywords: /\bsnow(y|ing|fall)?\b|blizzard/ },
+  windy: { label: "Windy", description: "strong wind visibly moving hair, clothing, and loose debris, clear otherwise-neutral light", keywords: /\bwindy\b|gusts? of wind|strong wind/ },
+};
+
+export function detectWeather(prompt: string): WeatherPreset | null {
+  const text = prompt.toLowerCase();
+  for (const key of Object.keys(WEATHER_LIBRARY) as WeatherKey[]) {
+    if (WEATHER_LIBRARY[key].keywords.test(text)) return WEATHER_LIBRARY[key];
+  }
+  return null;
+}
+
+// ---- Setting / vehicle: real camera conventions for common enclosed
+// settings a simple prompt often implies but doesn't spell out. ----
+export type SettingKey = "car" | "train" | "bus" | "boat" | "plane";
+export type SettingPreset = { label: string; description: string; keywords: RegExp };
+
+export const SETTING_LIBRARY: Record<SettingKey, SettingPreset> = {
+  car: {
+    label: "In a Car",
+    description: "framed from the passenger seat or dashboard mount, steering wheel and hands visible in the foreground, scenery streaking past the side window with natural motion blur, interior cabin light mixed with passing exterior light flicker",
+    keywords: /\bdriving\b|behind the wheel|\bcar\b|dashboard|windshield/,
+  },
+  train: {
+    label: "On a Train",
+    description: "framed from a window seat, passing landscape blurring rhythmically past the glass, steady rocking motion, faint reflections of the interior visible in the window",
+    keywords: /\btrain\b|\bsubway\b|\bmetro\b|railway/,
+  },
+  bus: {
+    label: "On a Bus",
+    description: "handheld camera swaying gently with the bus's motion, other passengers softly out of focus in the background, window light flickering as the bus passes streetlights or trees",
+    keywords: /\bbus\b/,
+  },
+  boat: {
+    label: "On a Boat",
+    description: "gentle rocking motion matched to the water, open water or dock visible beyond the subject, reflected light rippling off the water's surface",
+    keywords: /\bboat\b|\bship\b|on the water|\bferry\b/,
+  },
+  plane: {
+    label: "On a Plane",
+    description: "framed from a window seat, clouds or landscape visible far below through the window, cabin interior light, a still, quiet composition implying the ambient engine hum",
+    keywords: /\bplane\b|airplane|in flight/,
+  },
+};
+
+export function detectSetting(prompt: string): SettingPreset | null {
+  const text = prompt.toLowerCase();
+  for (const key of Object.keys(SETTING_LIBRARY) as SettingKey[]) {
+    if (SETTING_LIBRARY[key].keywords.test(text)) return SETTING_LIBRARY[key];
+  }
+  return null;
+}
+
+// ---- Background/environment action, per genre: real, specific background
+// activity so nothing is left ambiguous for the model to invent - the
+// same "concrete over vague" standard as every other library in this file. ----
+export const BACKGROUND_ACTION_BY_GENRE: Record<GenreKey, string> = {
+  sciFiNoir: "background holograms flicker faintly, distant flying vehicles cross between buildings, steam vents in the middle distance",
+  crimeThriller: "a few indistinct pedestrians pass in the background, distant traffic hum, a flickering sign somewhere behind the subject",
+  kineticAction: "debris and dust kick up in the background, distant figures react to the chaos, environmental destruction continues behind the main action",
+  epicDrama: "period-appropriate background figures go about their own business, none looking at camera, layered depth of activity behind the subject",
+  intimateEmotional: "the background stays soft and quiet, minimal activity, nothing competing for attention with the subject",
+  warRealism: "distant smoke rises, other figures move with purpose in the background, environmental debris settles",
+  horrorTension: "the background stays unnervingly still and empty, or a single indistinct figure/shape visible far in the distance",
+  foundFootage: "background activity is chaotic and only partially visible, exactly what a handheld camera would actually catch, nothing composed",
+  vintageStylized: "background extras move with period-appropriate pace and costume, softly out of sharp focus",
+  commercialUgc: "the background stays clean and uncluttered, softly out of focus, nothing distracting from the subject",
+};
+
+export function backgroundActionForGenre(genre: GenreKey): string {
+  return BACKGROUND_ACTION_BY_GENRE[genre];
+}
+
+// ---- Micro-performance detail: real acting/directing vocabulary for a
+// specific physical beat, not a vague adjective ("she looks sad") - "pick
+// up the subtle details... emotion in their eyes, little twitch of the
+// face" (per direct request). Cycled deterministically per beat (by index,
+// not random) so the same prompt always produces the same storyboard, and
+// consecutive beats don't repeat the same direction. ----
+const MICRO_PERFORMANCE_DETAILS: string[] = [
+  "a flicker of real emotion crosses their eyes just before they speak",
+  "a small, involuntary twitch at the corner of the mouth",
+  "their eyes well slightly but they hold back visible tears",
+  "a barely-there exhale, shoulders dropping a fraction",
+  "a genuine micro-smile that fades as quickly as it appears",
+  "their jaw tightens almost imperceptibly",
+  "a brief, unscripted-feeling glance away before returning eye contact",
+  "eyebrows lift a fraction in real surprise, then settle",
+  "a slow blink that reads as quiet resignation",
+  "fingers tighten slightly on whatever they're holding",
+  "a subtle swallow, the only visible sign of nerves",
+  "the corners of the eyes crease with a real, unforced smile",
+  "a held breath, chest barely rising",
+  "a flicker of hesitation before the line lands",
+  "their gaze drifts briefly inward before refocusing on camera",
+];
+
+export function pickMicroPerformanceDetail(beatIndex: number): string {
+  return MICRO_PERFORMANCE_DETAILS[Math.abs(beatIndex) % MICRO_PERFORMANCE_DETAILS.length];
+}
+
+// ---- Dialogue-scene / off-screen-voice reaction shot: "sometimes the
+// camera is at one person but it is the voice of the other person" (per
+// direct request) - a real, widely-used editing technique (shot/reverse-
+// shot with off-screen dialogue, sometimes called an L-cut: the audio of
+// one shot continues under the picture of the next), not an invented idea. ----
+export function detectDialogueScene(prompt: string): boolean {
+  const quoteCount = (prompt.match(/["“][^"”]{2,}["”]/g) ?? []).length;
+  return quoteCount >= 2 || /\bconversation\b|\bargument\b|\btalking to\b|\breplies?\b|\bresponds?\b|back and forth/.test(prompt.toLowerCase());
+}
+
+export const REACTION_SHOT_NOTE =
+  "Real reaction-shot technique: hold the camera on the LISTENER's face and reaction rather than the person speaking - the speaker's dialogue continues as off-screen audio while we watch how the listener receives it.";
+
+// ---- Pacing: real, academically-sourced average-shot-length (ASL) data,
+// not estimates - see docs/shot-pacing-research.md for full citations.
+// Key anchors: modern action film ASL 1.7-4s (Cutting, "Attention and the
+// Evolution of Hollywood Film," Psychological Science, 2010); TV commercial
+// ASL 2.3s and Super Bowl ad ASL 2.0s specifically, vs. 8.9s for the TV
+// broadcast program surrounding those ads (MacLachlan & Logan, "Camera
+// Shot Length in TV Commercials and Their Memorability and Persuasiveness,"
+// Journal of Advertising Research, 1993); sci-fi 6.2s, adventure 5.1s,
+// horror 15.7s genre averages (Stephen Follows, Cinemetrics-derived sample
+// of films 1997-2016); classic Hollywood (1930s-60s) 8-12s (Bordwell/Salt/
+// Cutting academic consensus); slow cinema (Tarr, Tarkovsky, Akerman,
+// Sokurov) 51s-96min (Cinemetrics-derived). TikTok/Reels figures (1-3s) are
+// flagged in that research as trade-blog consensus, not peer-reviewed -
+// used here only as a rough anchor for the "rapid" bucket alongside the
+// much better-sourced commercial/action numbers.
+export type PaceKey = "rapid" | "brisk" | "measured" | "contemplative" | "slowCinema";
+export type PacePreset = { label: string; minSeconds: number; maxSeconds: number };
+
+export const PACE_PRESETS: Record<PaceKey, PacePreset> = {
+  // Real anchors: Super Bowl ads 2.0s, TV commercials 2.3s (MacLachlan &
+  // Logan 1993), modern action film as low as 1.7s (Cutting 2010).
+  rapid: { label: "Rapid cuts", minSeconds: 1.5, maxSeconds: 2.5 },
+  // Real anchor: adventure genre 5.1s (Follows/Cinemetrics).
+  brisk: { label: "Brisk", minSeconds: 2.5, maxSeconds: 5 },
+  // Real anchor: sci-fi 6.2s (Follows/Cinemetrics), general modern drama 4-6s.
+  measured: { label: "Measured", minSeconds: 5, maxSeconds: 7 },
+  // Real anchors: classic Hollywood 8-12s (Bordwell/Salt), TV broadcast
+  // programming (non-ad) 8.9s (MacLachlan & Logan 1993).
+  contemplative: { label: "Contemplative", minSeconds: 8, maxSeconds: 13 },
+  // Real anchor: horror genre average 15.7s (Follows/Cinemetrics) as the
+  // low end - genuinely slower than the "fast jump-scare cuts" assumption,
+  // per that research's own finding; true slow-cinema directors run into
+  // the tens of seconds to multiple minutes per shot, well beyond what a
+  // short generated clip needs, so this bucket is capped for practicality.
+  slowCinema: { label: "Slow cinema", minSeconds: 15, maxSeconds: 30 },
+};
+
+// Real finding worth encoding (Follows/Cinemetrics): horror as a genre
+// averages SLOWER shots (15.7s) than action, contradicting the common
+// assumption that horror means fast jump-scare cuts - that research itself
+// flags this may be skewed by slow-burn/atmospheric horror in the sample,
+// but there's no contradicting data, so it's kept as the real default
+// rather than overridden by assumption.
+function defaultPaceForGenreKinetic(genre: GenreKey, kinetic: Kinetic, isDialogue: boolean): PaceKey {
+  if (genre === "kineticAction" || genre === "foundFootage") return "rapid";
+  if (genre === "horrorTension") return "slowCinema";
+  if (genre === "epicDrama" || genre === "vintageStylized" || genre === "intimateEmotional") return "contemplative";
+  // Real bug found and fixed (2026-09-21): a dialogue-heavy scene that
+  // doesn't match any specific genre bucket falls back to "commercialUgc"
+  // (this function's own catch-all default genre) - which used to be
+  // checked first and unconditionally returned "rapid" (the real Super
+  // Bowl/TV-commercial ASL anchor), so a quiet two-person conversation
+  // inherited ad-pacing and got cut every ~2 seconds. Real dialogue is
+  // covered with measured shot/reverse-shot holds, not rapid cuts - this
+  // check now runs before the commercialUgc fallback so it wins instead.
+  if (isDialogue) return "measured";
+  if (genre === "commercialUgc") return "rapid"; // real anchor: Super Bowl/TV commercial ASL 2.0-2.3s
+  if (kinetic === "dynamic") return "brisk";
+  return "measured";
+}
+
+export type StoryboardBeat = {
+  index: number;
+  startSeconds: number;
+  endSeconds: number;
+  cameraMove: CameraMove;
+  onScreenSubject: "primary" | "listener" | null;
+  direction: string;
+};
+
+export type TimedStoryboard = {
+  totalSeconds: number;
+  pace: PaceKey;
+  beats: StoryboardBeat[];
+  formattedText: string;
+};
+
+function formatTimestamp(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  return `0:${String(s).padStart(2, "0")}`;
+}
+
+// Splits a clip into real, timed beats instead of one flat paragraph.
+// Weather/setting/background are stated once as continuity (they apply
+// for the whole clip, not per-beat), while each beat gets its own camera
+// move (cycled through the matched move's category so beats vary rather
+// than repeat) and a specific micro-performance detail. When the prompt
+// reads as a dialogue scene between two people, alternates which subject
+// is on-camera per beat and applies the real off-screen-voice reaction-
+// shot technique described above.
+export function buildTimedStoryboard(
+  userPrompt: string,
+  opts?: { totalSeconds?: number; paceOverride?: PaceKey; genreOverride?: GenreKey; cameraMoveOverride?: string },
+): TimedStoryboard {
+  const genre = opts?.genreOverride ?? detectGenre(userPrompt);
+  const primaryMove = (opts?.cameraMoveOverride ? cameraMoveById(opts.cameraMoveOverride) : undefined) ?? detectCameraMove(userPrompt);
+  const isDialogue = detectDialogueScene(userPrompt);
+  const paceKey = opts?.paceOverride ?? defaultPaceForGenreKinetic(genre, primaryMove.kinetic, isDialogue);
+  const pace = PACE_PRESETS[paceKey];
+  const totalSeconds = opts?.totalSeconds ?? 8;
+  const avgShotSeconds = (pace.minSeconds + pace.maxSeconds) / 2;
+  const beatCount = Math.max(1, Math.round(totalSeconds / avgShotSeconds));
+  const background = backgroundActionForGenre(genre);
+
+  // Wide-to-tight coverage order (real shot-list convention), cycling
+  // through other moves in the same category rather than repeating the
+  // one detected move on every beat.
+  const sequencePool = [primaryMove, ...CAMERA_MOVEMENT_LIBRARY.filter((m) => m.category === primaryMove.category && m.id !== primaryMove.id)];
+
+  const beats: StoryboardBeat[] = [];
+  let cursor = 0;
+  for (let i = 0; i < beatCount; i++) {
+    const remaining = totalSeconds - cursor;
+    const beatSeconds = i === beatCount - 1 ? remaining : Math.min(avgShotSeconds, remaining);
+    const move = sequencePool[i % sequencePool.length];
+    const onScreenSubject: StoryboardBeat["onScreenSubject"] = isDialogue ? (i % 2 === 0 ? "primary" : "listener") : null;
+    const perf = pickMicroPerformanceDetail(i);
+    const direction = [`${move.instruction}.`, onScreenSubject === "listener" ? REACTION_SHOT_NOTE : "", `Performance: ${perf}.`]
+      .filter(Boolean)
+      .join(" ");
+    beats.push({ index: i + 1, startSeconds: Number(cursor.toFixed(1)), endSeconds: Number((cursor + beatSeconds).toFixed(1)), cameraMove: move, onScreenSubject, direction });
+    cursor += beatSeconds;
+  }
+
+  const weather = detectWeather(userPrompt);
+  const setting = detectSetting(userPrompt);
+  const continuityLine = [`[Continuity]: ${background}`, weather ? `Weather/light throughout: ${weather.description}.` : "", setting ? `Setting: ${setting.description}.` : ""]
+    .filter(Boolean)
+    .join(" ");
+
+  const formattedText = [
+    continuityLine,
+    "",
+    ...beats.map((b) => `[SHOT ${b.index} — ${formatTimestamp(b.startSeconds)}-${formatTimestamp(b.endSeconds)}]\n${b.direction}`),
   ].join("\n");
 
-  return { scale, kinetic, genre, atmosphere, lens, rig, cameraMove, style, mood, colorToneHints, expandedPrompt };
+  return { totalSeconds, pace: paceKey, beats, formattedText };
 }
