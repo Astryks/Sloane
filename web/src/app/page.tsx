@@ -413,6 +413,17 @@ function PresetVoiceSection() {
   );
 }
 
+// Real, exact copy of the server's own check (clone-voice/route.ts's
+// CONSENT_TEXT) - kept as a single source of truth would require a shared
+// import, but that route is server-only; duplicated here deliberately, same
+// as how this app already accepts small duplication over a cross-boundary
+// import in a few other spots. Keep these two in sync if either changes.
+const CLONE_CONSENT_TEXT = "I confirm this is my own voice, or I have the explicit permission of the person speaking, to clone this voice.";
+
+function normalizeConsentInput(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.,!?]+$/g, "");
+}
+
 function CloneVoiceSection() {
   const { token } = useAccessToken();
   const freeTierId = useFreeTierId();
@@ -420,14 +431,15 @@ function CloneVoiceSection() {
   const [text, setText] = useState("");
   const [file, setFile] = useState<Blob | File | null>(null);
   const [delivery, setDelivery] = useState<Delivery>(DEFAULT_DELIVERY);
-  const [consent, setConsent] = useState(false);
+  const [consentInput, setConsentInput] = useState("");
   const isPodMode = useIsPodMode();
   const { generate, loading, error, audioBase64, statusMessage, showWaitingUi } = useAudioGeneration("/api/clone-voice");
 
   const quotaExhausted = !!usage && usage.charactersUsed >= usage.charactersLimit;
+  const consentMatches = normalizeConsentInput(consentInput) === normalizeConsentInput(CLONE_CONSENT_TEXT);
 
   async function handleGenerate() {
-    if (!file) return;
+    if (!file || !token) return;
     const form = new FormData();
     form.append("text", text);
     // Match the filename's extension to the real recorded/uploaded type
@@ -438,11 +450,27 @@ function CloneVoiceSection() {
     form.append("reference_audio", file, referenceFilename);
     form.append("exaggeration", String(delivery.expressiveness));
     form.append("speed", String(delivery.speed));
-    form.append("consent", String(consent));
-    if (token) form.append("access_token", token);
-    else if (freeTierId) form.append("free_tier_id", freeTierId);
+    form.append("consent_statement", consentInput);
+    form.append("access_token", token);
     await generate(form);
     refreshUsage();
+  }
+
+  // Real restriction (2026-09-21, matching ElevenLabs' own gating): voice
+  // cloning is paid-tier only now, not available to anonymous/free-tier
+  // visitors - see clone-voice/route.ts's CONSENT_TEXT comment for why.
+  if (!token) {
+    return (
+      <Card wash="bg-blue-wash/90" iconColor="text-blue" icon="🎙" title="Clone any voice" subtitle="Available on a paid plan.">
+        <p className="text-sm text-muted">
+          Voice cloning is a paid-plan feature - it needs stronger consent verification and abuse controls than the free preset voices do.{" "}
+          <a href="/billing" className="font-semibold text-blue underline">
+            See plans
+          </a>{" "}
+          to get started, then come back here with your access code.
+        </p>
+      </Card>
+    );
   }
 
   return (
@@ -463,10 +491,19 @@ function CloneVoiceSection() {
         onChange={(e) => setText(e.target.value)}
       />
       <DeliverySliders value={delivery} onChange={setDelivery} accentColor="text-blue" />
-      <label className="flex items-start gap-2 text-xs text-muted">
-        <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-        <span>I confirm this is my own voice, or I have the explicit permission of the person speaking, to clone this voice.</span>
-      </label>
+      <div className="space-y-1">
+        <p className="text-xs text-muted">
+          Type the following exactly to confirm you have the right to clone this voice:
+          <br />
+          <span className="font-semibold text-foreground">&quot;{CLONE_CONSENT_TEXT}&quot;</span>
+        </p>
+        <input
+          className="w-full rounded-2xl border border-border bg-white p-3 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-blue"
+          placeholder="Type the consent statement above..."
+          value={consentInput}
+          onChange={(e) => setConsentInput(e.target.value)}
+        />
+      </div>
       {!isPodMode && (
         <p className="text-xs text-muted">Generation usually takes under a minute, but can take up to a few minutes after a quiet period while the voice engine wakes up.</p>
       )}
@@ -481,7 +518,7 @@ function CloneVoiceSection() {
           to keep going now.
         </p>
       ) : (
-        <GenerateButton loading={loading} disabled={!text || !file || !consent || loading} onClick={handleGenerate} colorClassName="bg-blue" />
+        <GenerateButton loading={loading} disabled={!text || !file || !consentMatches || loading} onClick={handleGenerate} colorClassName="bg-blue" />
       )}
       {showWaitingUi && (
         <>

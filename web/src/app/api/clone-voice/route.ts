@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSubscriberByToken, checkQuota, reserveCharacterUsage, checkFreeQuota, recordFreeUsage, createPendingGeneration, initSchema, recordConsent } from "@/lib/db";
+import { getSubscriberByToken, checkQuota, reserveCharacterUsage, createPendingGeneration, initSchema, recordConsent } from "@/lib/db";
 import { getInferenceBackend, generateViaPod, generateViaCascade, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
 import { saveGenerationAudio } from "@/lib/generationHistory";
@@ -10,12 +10,28 @@ import { PLANS } from "@/lib/plans";
 export const maxDuration = 60;
 
 // Real legal-risk mitigation, matching ElevenLabs' own actual approach
-// (researched earlier this project - not ID-document upload, a required
-// consent attestation + an audit log). Voice cloning without the
-// speaker's permission is a real, growing legal exposure (voice is
-// increasingly treated as biometric data) - this is the floor, not a
-// complete solution, but it's what the real-world comparable does.
+// (researched, 2026-09-21 - confirmed via their current documented policy:
+// Instant Voice Cloning is gated to a paid plan, and requires a recorded
+// verbal consent statement, not just a checkbox). Two real restrictions
+// follow from that, both applied below:
+//   1. Paid tier only - see the access_token requirement in POST below.
+//      Free-tier/anonymous cloning is removed entirely; this endpoint no
+//      longer accepts a free_tier_id at all.
+//   2. A typed, exact-match consent statement in place of a bare checkbox -
+//      the practical web equivalent of "record a specific statement": it
+//      forces a deliberate, individually-typed affirmation instead of one
+//      click that's trivial to blow through without reading. Full audio-
+//      verified verbal consent (transcribing the reference clip itself and
+//      checking it contains this statement) would be closer still to
+//      ElevenLabs' actual mechanism, but needs a real STT pass on the
+//      reference audio before generation - flagged as a stronger follow-up,
+//      not built here to avoid rushing new inference-pipeline surface area
+//      in the same pass as this gating change.
 const CONSENT_TEXT = "I confirm this is my own voice, or I have the explicit permission of the person speaking, to clone this voice.";
+
+function normalizeConsent(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.,!?]+$/g, "");
+}
 
 // RunPod's /run input cap is 10MB - a base64-encoded reference clip much
 // past a minute or two of decent-quality audio could exceed that. The UI
@@ -35,7 +51,6 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const text = String(form.get("text") ?? "").trim();
     const accessToken = String(form.get("access_token") ?? "");
-    const freeTierId = String(form.get("free_tier_id") ?? "");
     const referenceAudio = form.get("reference_audio");
     // Real fix (security audit, 2026-09-16): see generate-preset/route.ts's
     // identical check - empty text otherwise sails through every quota
@@ -44,26 +59,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Enter some text to generate." }, { status: 400 });
     }
 
-    if (accessToken) {
-      const sub = await getSubscriberByToken(accessToken);
-      if (!sub) {
-        return NextResponse.json({ error: "Access code not recognized" }, { status: 401 });
-      }
-      // Atomic reservation - see generate-preset/route.ts for the same fix
-      // and why checkQuota alone isn't enough enforcement.
-      const quotaError = checkQuota(sub, text.length);
-      if (quotaError) {
-        return NextResponse.json({ error: quotaError }, { status: 402 });
-      }
-      const reserved = await reserveCharacterUsage(accessToken, text.length, PLANS[sub.plan].charactersPerMonth);
-      if (!reserved) {
-        return NextResponse.json({ error: quotaError ?? "This would put you over your plan's character limit." }, { status: 402 });
-      }
-    } else {
-      const freeError = await checkFreeQuota(freeTierId, text.length);
-      if (freeError) {
-        return NextResponse.json({ error: freeError }, { status: 402 });
-      }
+    // Real restriction (2026-09-21, follow-up request): voice cloning is
+    // now paid-tier only, matching ElevenLabs' own gating - see CONSENT_TEXT's
+    // comment above for why. No free_tier_id path at all anymore; an
+    // anonymous/free visitor is turned away here before touching any quota
+    // or GPU resource.
+    if (!accessToken) {
+      return NextResponse.json({ error: "Voice cloning is available on a paid plan - see /billing to subscribe." }, { status: 402 });
+    }
+    const sub = await getSubscriberByToken(accessToken);
+    if (!sub) {
+      return NextResponse.json({ error: "Access code not recognized" }, { status: 401 });
+    }
+    // Atomic reservation - see generate-preset/route.ts for the same fix
+    // and why checkQuota alone isn't enough enforcement.
+    const quotaError = checkQuota(sub, text.length);
+    if (quotaError) {
+      return NextResponse.json({ error: quotaError }, { status: 402 });
+    }
+    const reserved = await reserveCharacterUsage(accessToken, text.length, PLANS[sub.plan].charactersPerMonth);
+    if (!reserved) {
+      return NextResponse.json({ error: quotaError ?? "This would put you over your plan's character limit." }, { status: 402 });
     }
 
     if (!(referenceAudio instanceof Blob)) {
@@ -75,8 +91,10 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    if (String(form.get("consent") ?? "") !== "true") {
-      return NextResponse.json({ error: "Please confirm you have the right to clone this voice before continuing." }, { status: 400 });
+    // Real restriction (2026-09-21): a typed, exact-match statement instead
+    // of a bare checkbox - see CONSENT_TEXT's comment above.
+    if (normalizeConsent(String(form.get("consent_statement") ?? "")) !== normalizeConsent(CONSENT_TEXT)) {
+      return NextResponse.json({ error: "Please type the consent statement exactly as shown before continuing." }, { status: 400 });
     }
     const exaggeration = form.get("exaggeration");
     const speed = form.get("speed");
@@ -150,10 +168,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Subscriber usage was already recorded atomically above, before
-    // generation started - only the free tier still records usage here.
-    if (!accessToken) {
-      await recordFreeUsage(freeTierId, text.length);
-    }
+    // generation started - no free-tier path exists anymore to record here.
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(

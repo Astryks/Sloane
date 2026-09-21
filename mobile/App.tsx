@@ -385,6 +385,16 @@ function PresetVoiceSection() {
   );
 }
 
+// Real, exact copy of the server's own check (web/src/app/api/clone-voice/
+// route.ts's CONSENT_TEXT) - see that file's comment for why voice cloning
+// requires a paid plan + a typed consent statement now (2026-09-21, matching
+// ElevenLabs' own gating), not just a checkbox.
+const CLONE_CONSENT_TEXT = "I confirm this is my own voice, or I have the explicit permission of the person speaking, to clone this voice.";
+
+function normalizeConsentInput(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.,!?]+$/g, "");
+}
+
 function CloneVoiceSection() {
   const { token } = useAccessToken();
   const freeTierId = useFreeTierId();
@@ -393,7 +403,9 @@ function CloneVoiceSection() {
   const [text, setText] = useState("");
   const [file, setFile] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
   const [delivery, setDelivery] = useState<Delivery>(DEFAULT_DELIVERY);
+  const [consentInput, setConsentInput] = useState("");
   const { generate, loading, error, audioUri, statusMessage, showWaitingUi } = useAudioGeneration("/api/clone-voice");
+  const consentMatches = normalizeConsentInput(consentInput) === normalizeConsentInput(CLONE_CONSENT_TEXT);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
 
@@ -425,7 +437,7 @@ function CloneVoiceSection() {
   }
 
   async function handleGenerate() {
-    if (!file) return;
+    if (!file || !token) return;
     const form = new FormData();
     form.append("text", text);
     // React Native's fetch/FormData accepts this {uri, name, type} shape for
@@ -437,10 +449,26 @@ function CloneVoiceSection() {
     } as unknown as Blob);
     form.append("exaggeration", String(delivery.expressiveness));
     form.append("speed", String(delivery.speed));
-    if (token) form.append("access_token", token);
-    else if (freeTierId) form.append("free_tier_id", freeTierId);
+    form.append("consent_statement", consentInput);
+    form.append("access_token", token);
     await generate(form);
     refreshUsage();
+  }
+
+  // Real restriction (2026-09-21, matching ElevenLabs' own gating): voice
+  // cloning is paid-tier only now - see clone-voice/route.ts's CONSENT_TEXT
+  // comment for why.
+  if (!token) {
+    return (
+      <Card icon="🎙" title="Clone any voice" subtitle="Available on a paid plan.">
+        <Text style={styles.helperText}>
+          Voice cloning needs stronger consent verification and abuse controls than the free preset voices do, so it&apos;s a paid-plan feature.
+        </Text>
+        <Pressable onPress={() => Linking.openURL(`${WEB_BASE}/billing`).catch(() => {})}>
+          <Text style={styles.exhaustedLink}>See plans →</Text>
+        </Pressable>
+      </Card>
+    );
   }
 
   return (
@@ -485,6 +513,18 @@ function CloneVoiceSection() {
 
       <DeliverySliders value={delivery} onChange={setDelivery} accentColor={COLORS.blue} />
 
+      <Text style={styles.helperText}>
+        Type the following exactly to confirm you have the right to clone this voice:{"\n"}
+        <Text style={{ fontWeight: "700", color: COLORS.foreground }}>&quot;{CLONE_CONSENT_TEXT}&quot;</Text>
+      </Text>
+      <TextInput
+        style={styles.textArea}
+        placeholder="Type the consent statement above..."
+        placeholderTextColor={COLORS.muted}
+        value={consentInput}
+        onChangeText={setConsentInput}
+      />
+
       {!isPodMode && (
         <Text style={styles.helperText}>
           Generation usually takes under a minute, but can take up to a few minutes after a quiet period while the voice engine wakes up.
@@ -504,7 +544,7 @@ function CloneVoiceSection() {
       ) : (
         <GradientButton
           onPress={handleGenerate}
-          disabled={!text || !file || loading}
+          disabled={!text || !file || !consentMatches || loading}
           loading={loading}
           label="Generate"
         />
