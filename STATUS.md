@@ -1,5 +1,14 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-22 - aligned Director Mode with ByteDance's official Seedance 2.5 prompt guide
+
+- Found and read the real, official "Dreamina Seedance 2.5 Prompt Writing Guide" (ByteDance's own vendor docs, publicly mirrored at docs.byteplus.com/en/docs/ModelArk/2607689) - materially more authoritative than the third-party research this was previously built on. Full learnings in `docs/seedance-2.5-official-prompt-guide-learnings.md`.
+- **Two concrete correctness fixes**: `buildTimedStoryboard`'s timestamps now match Seedance's own documented syntax exactly (`"0s-3s"`, not an invented `"0:00-0:03"` clock format - this string is sent directly to the model); added the vendor's own explicitly-recommended default negative constraint, "Do not add subtitles," to both output functions (also fixed a run-on sentence this surfaced).
+- **Validated, not changed**: the existing "Build a cinematic scene" composite prompt and camera-move library already matched the guide's own recommended patterns (asset-binding phrasing, pairing niche technical terms with plain-language explanations).
+- **Two real next-step candidates flagged, not built**: native storyboard/keyframe image input (Seedance natively accepts a sequence of images as strict keyframes or a loose-reference storyboard - materially different from text-only beat descriptions), and ByteDance's own official prompt-optimization skill (installable via npx, not run without the user's awareness).
+
+## Previous update, 2026-09-21, later - timed per-second storyboards, real shot-pacing data, 550+ entry world library
+
 ## Latest update, 2026-09-21, later - timed per-second storyboards, real shot-pacing data, 550+ entry world library
 
 - **`buildTimedStoryboard()`** (`web/src/lib/directorMode.ts`) - splits a clip into real, timed beats (per direct request: "give directions per second"), each with its own camera move, a specific micro-performance detail (real acting vocabulary - eye emotion, micro-expressions), and dialogue-scene detection that applies the real off-screen-voice reaction-shot/L-cut technique when the prompt reads as a two-person exchange.
