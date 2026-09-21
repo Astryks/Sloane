@@ -475,6 +475,39 @@ function SlotCard({
     [prompt, genreOverride, atmosphereOverride],
   );
 
+  // "Build a cinematic scene" (2026-09-21) - character photo + location
+  // photo + a simple prompt describing the theme/mood, composited into one
+  // hyper-realistic reference image server-side (generate-cinematic-scene/
+  // route.ts), then handed straight into the existing prompt box with
+  // Director Mode pre-filled from the same simple prompt.
+  const [sceneCharacterFile, setSceneCharacterFile] = useState<File | null>(null);
+  const [sceneLocationFile, setSceneLocationFile] = useState<File | null>(null);
+  const [scenePrompt, setScenePrompt] = useState("");
+
+  async function buildCinematicScene() {
+    if (!sceneCharacterFile || !sceneLocationFile || !scenePrompt.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.append("slotId", slot.id);
+      form.append("characterImage", sceneCharacterFile);
+      form.append("locationImage", sceneLocationFile);
+      form.append("prompt", scenePrompt);
+      form.append("engine", genEngine);
+      const res = await fetch("/api/grid-storyboard/slot/generate-cinematic-scene", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not build this scene");
+      onUpdate({ image_url: data.imageUrl, status: "image_ready" });
+      setPrompt(data.suggestedPrompt);
+      setDirectorModeOn(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not build this scene");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function toggleRef(id: string) {
     setSelectedRefs((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
   }
@@ -559,6 +592,40 @@ function SlotCard({
             Upload an image, or drag one here
             <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
           </label>
+
+          <details className="rounded-xl border border-purple/20 bg-purple-wash/40 p-2 text-[10px]">
+            <summary className="cursor-pointer font-semibold text-purple">✨ Or build a cinematic scene from a character + location photo</summary>
+            <div className="mt-2 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border bg-white p-2 text-center">
+                  {sceneCharacterFile ? sceneCharacterFile.name : "Character photo"}
+                  <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && setSceneCharacterFile(e.target.files[0])} />
+                </label>
+                <label className="block cursor-pointer rounded-xl border-2 border-dashed border-border bg-white p-2 text-center">
+                  {sceneLocationFile ? sceneLocationFile.name : "Location photo"}
+                  <input className="sr-only" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && setSceneLocationFile(e.target.files[0])} />
+                </label>
+              </div>
+              <textarea
+                className="w-full rounded-xl border border-border p-2 text-[10px] placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+                rows={2}
+                placeholder="Describe the theme or mood - e.g. a summer day in Greece, warm and joyful"
+                value={scenePrompt}
+                onChange={(e) => setScenePrompt(e.target.value)}
+              />
+              <p className="text-muted">
+                We&apos;ll regenerate the character hyper-realistically and embed them in the location, matching its
+                light and color to your description - then set up the video prompt for you.
+              </p>
+              <button
+                onClick={buildCinematicScene}
+                disabled={busy || !sceneCharacterFile || !sceneLocationFile || !scenePrompt.trim()}
+                className="w-full rounded-full bg-purple px-3 py-1.5 font-bold text-white disabled:opacity-50"
+              >
+                {busy ? "Building the scene… (30-90s)" : "Build this scene"}
+              </button>
+            </div>
+          </details>
 
           {references.length > 0 && (
             <div className="space-y-1 rounded-xl border border-border p-2">
