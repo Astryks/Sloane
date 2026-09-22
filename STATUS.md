@@ -1,6 +1,15 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-22 - aligned Director Mode with ByteDance's official Seedance 2.5 prompt guide
+## Latest update, 2026-09-23 - generator-first homepage, no-signup video checkout, GPT-6 Astra prompt director, clone requirements
+
+- **Homepage reordered** (per direct request): 1) the video generator - prompt box, model picker (all 7 engines, Popular first), "$3.99 per video, no signup", Pay & generate; 2) prompt guide (steps, rules, templates, style examples, JoJo case study); 3) Harper; 4) cinematic examples (moon shot, Kling dub, 4-shot breakdown); then the free editor; voice (text to speech, then clone) last. Duration/ratio/photo/audio moved behind "More options".
+- **Pay-as-you-go video needs no account.** `/api/video-paygo/checkout` creates a guest `users` row (`is_guest`, placeholder `@guest.lucylabs.invalid` email) + session cookie when nobody is signed in, so the existing webhook -> `client_reference_id` credit path is unchanged. `getSessionUser()` never returns a guest (every other feature keeps its old meaning); only the paygo routes + paygo downloads use `getPaygoSessionUser()`. Signing in later merges the guest's credits, jobs and grant ledger into the real account (`mergeGuestIntoUser`). Checkout now returns to `/?video_credits=1#pay-as-you-go`; the prompt/model/settings are saved in sessionStorage across the redirect and the paid video auto-starts once the credit lands (photos/audio can't survive the redirect, so those drafts ask to re-attach instead).
+- **GPT-6 Astra prompt director** (`web/src/lib/promptDirector.ts`, optional checkbox). Astra is text-only (OpenAI's docs list video output as unsupported), so it can't be a video engine - it rewrites the user's idea into a shot brief before submission, via fal's `openrouter/router` + existing `FAL_KEY` (model `openai/gpt-6-astra`), ~$0.03/video, runs only after the credit is spent, falls back to the user's prompt on any failure. Sora 2 deliberately not added - its API shuts down 2026-09-24.
+- **Voice cloning requirements shown before signup**: account (new server-side requirement in `/api/clone-voice`), paid plan (existing), and per clone: whose voice it is (own / named person with permission, recorded in `consent_records`) + the typed consent statement. A Stripe Identity ID-check step was built and then removed per direct request - no ID check.
+- Verified: `next build` + `tsc` clean, eslint at the pre-existing baseline; the new SQL (guest creation, credit grant replay, guest->account merge, non-guest safety) run against a real in-memory Postgres (PGlite); checkout return / cancel / media-draft / auto-generate flows driven in a browser with mocked APIs. **Not yet verified against production services** (no env on this machine): first real guest purchase, and the Astra call through fal.
+- **Known follow-up**: the mobile app has no web session, so its clone-voice screen now gets "Create an account or sign in" - needs its own sign-in flow to clone.
+
+## Previous update, 2026-09-22 - aligned Director Mode with ByteDance's official Seedance 2.5 prompt guide
 
 - Found and read the real, official "Dreamina Seedance 2.5 Prompt Writing Guide" (ByteDance's own vendor docs, publicly mirrored at docs.byteplus.com/en/docs/ModelArk/2607689) - materially more authoritative than the third-party research this was previously built on. Full learnings in `docs/seedance-2.5-official-prompt-guide-learnings.md`.
 - **Two concrete correctness fixes**: `buildTimedStoryboard`'s timestamps now match Seedance's own documented syntax exactly (`"0s-3s"`, not an invented `"0:00-0:03"` clock format - this string is sent directly to the model); added the vendor's own explicitly-recommended default negative constraint, "Do not add subtitles," to both output functions (also fixed a run-on sentence this surfaced).
@@ -32,5 +41,5 @@
 - **Emotion & Prosody:** Downward pitch contour applied at sentence ends; emotion tag mapping enabled.
 
 ## Legal Guardrails & Business
-- **Voice Cloning:** Gated behind any paid tier (`starter`/`plus`/`video` - this project has no `pro`/`enterprise` tiers) with a typed, exact-match consent statement.
+- **Voice Cloning:** Requires a signed-in account + any paid tier (`starter`/`plus`/`video` - this project has no `pro`/`enterprise` tiers), a declared voice owner, and a typed, exact-match consent statement.
 - **Unit Economics:** Cost per video minute modeled at ~$0.097 maintaining >65% margins.

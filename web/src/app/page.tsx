@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Footer } from "@/components/Footer";
-import { SiteHeader } from "@/components/SiteHeader";
+import Link from "next/link";
+import { LogoMark } from "@/components/LogoMark";
 import { RecordOrUpload } from "@/components/RecordOrUpload";
 import { ShareButtons } from "@/components/ShareButtons";
 import { VoicePicker, PRESET_VOICES } from "@/components/VoicePicker";
@@ -10,7 +11,14 @@ import { DeliverySliders, DEFAULT_DELIVERY, type Delivery } from "@/components/D
 import { WaitingGame } from "@/components/WaitingGame";
 import { useAccessToken } from "@/lib/useAccessToken";
 import { useFreeTierId } from "@/lib/useFreeTierId";
-import { VIDEO_PAYGO_ENGINES, VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS, VIDEO_CREDIT_PACKS, type VideoEngine } from "@/lib/videoPaygo";
+import {
+  VIDEO_PAYGO_ENGINES,
+  VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
+  VIDEO_CREDIT_PACKS,
+  VIDEO_PAYGO_PRICE_USD_CENTS,
+  type VideoEngine,
+} from "@/lib/videoPaygo";
+import { PROMPT_DIRECTOR_LABEL } from "@/lib/promptDirector";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
 
@@ -424,22 +432,69 @@ function normalizeConsentInput(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.,!?]+$/g, "");
 }
 
+// One row of the clone-voice requirements checklist - shown to everyone,
+// before they sign up, so nobody creates an account and only then finds
+// out what's involved.
+function RequirementRow({ done, title, detail, action }: { done: boolean; title: string; detail: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-3 rounded-2xl bg-white/80 p-3">
+      <span
+        aria-hidden
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+          done ? "bg-blue text-white" : "border border-border bg-white text-muted"
+        }`}
+      >
+        {done ? "✓" : ""}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-foreground">
+          {title}
+          <span className="sr-only">{done ? " (done)" : " (to do)"}</span>
+        </p>
+        <div className="mt-0.5 text-xs text-muted">{detail}</div>
+      </div>
+      {!done && action}
+    </li>
+  );
+}
+
+// Voice cloning (2026-09-23): account + paid plan + per-voice permission
+// and consent, modeled on ElevenLabs' gating - see clone-voice/route.ts
+// for the server-side enforcement of the same list.
 function CloneVoiceSection() {
   const { token } = useAccessToken();
   const freeTierId = useFreeTierId();
   const { usage, refresh: refreshUsage } = useUsage(token, freeTierId);
+  const [signedIn, setSignedIn] = useState(false);
   const [text, setText] = useState("");
   const [file, setFile] = useState<Blob | File | null>(null);
   const [delivery, setDelivery] = useState<Delivery>(DEFAULT_DELIVERY);
   const [consentInput, setConsentInput] = useState("");
+  const [voiceOwner, setVoiceOwner] = useState<"self" | "other" | null>(null);
+  const [speakerName, setSpeakerName] = useState("");
   const isPodMode = useIsPodMode();
   const { generate, loading, error, audioBase64, statusMessage, showWaitingUi } = useAudioGeneration("/api/clone-voice");
 
   const quotaExhausted = !!usage && usage.charactersUsed >= usage.charactersLimit;
   const consentMatches = normalizeConsentInput(consentInput) === normalizeConsentInput(CLONE_CONSENT_TEXT);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/account")
+      .then((res) => {
+        if (!cancelled) setSignedIn(res.ok);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasPlan = !!token;
+  const ready = signedIn && hasPlan;
+
   async function handleGenerate() {
-    if (!file || !token) return;
+    if (!file || !token || !voiceOwner) return;
     const form = new FormData();
     form.append("text", text);
     // Match the filename's extension to the real recorded/uploaded type
@@ -451,83 +506,139 @@ function CloneVoiceSection() {
     form.append("exaggeration", String(delivery.expressiveness));
     form.append("speed", String(delivery.speed));
     form.append("consent_statement", consentInput);
+    form.append("voice_owner", voiceOwner);
+    if (voiceOwner === "other") form.append("speaker_name", speakerName);
     form.append("access_token", token);
     await generate(form);
     refreshUsage();
   }
 
-  // Real restriction (2026-09-21, matching ElevenLabs' own gating): voice
-  // cloning is paid-tier only now, not available to anonymous/free-tier
-  // visitors - see clone-voice/route.ts's CONSENT_TEXT comment for why.
-  if (!token) {
-    return (
-      <Card wash="bg-blue-wash/90" iconColor="text-blue" icon="🎙" title="Clone any voice" subtitle="Available on a paid plan.">
-        <p className="text-sm text-muted">
-          Voice cloning is a paid-plan feature - it needs stronger consent verification and abuse controls than the free preset voices do.{" "}
-          <a href="/billing" className="font-semibold text-blue underline">
-            See plans
-          </a>{" "}
-          to get started, then come back here with your access code.
-        </p>
-      </Card>
-    );
-  }
-
+  const pill = "shrink-0 rounded-full bg-blue px-3 py-1.5 text-xs font-bold text-white shadow-soft disabled:opacity-50";
   return (
     <Card
+      id="clone-voice"
       wash="bg-blue-wash/90"
       iconColor="text-blue"
       icon="🎙"
       title="Clone any voice"
-      subtitle="Record or upload ~10-20 seconds of a voice, then type what it should say."
-      headerRight={<UsageBadge usage={usage} />}
+      subtitle="Record or upload ~10-20 seconds of a voice, then type what it should say. Requires an account and a paid plan."
+      headerRight={ready ? <UsageBadge usage={usage} /> : undefined}
     >
-      <RecordOrUpload kind="audio" onChange={setFile} />
-      <textarea
-        className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-blue"
-        rows={4}
-        placeholder="Type what you want read back in that voice..."
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <DeliverySliders value={delivery} onChange={setDelivery} accentColor="text-blue" />
-      <div className="space-y-1">
-        <p className="text-xs text-muted">
-          Type the following exactly to confirm you have the right to clone this voice:
-          <br />
-          <span className="font-semibold text-foreground">&quot;{CLONE_CONSENT_TEXT}&quot;</span>
+      <div>
+        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-blue">What you&apos;ll need before cloning</p>
+        <ol className="space-y-2">
+          <RequirementRow
+            done={signedIn}
+            title="1. A Lucy Labs account"
+            detail="Free to create with your email or Google - so every clone is tied to a real, contactable person."
+            action={
+              <a href="/account" className={pill}>
+                Sign up
+              </a>
+            }
+          />
+          <RequirementRow
+            done={hasPlan}
+            title="2. A paid plan"
+            detail="Cloning uses your plan's monthly character allowance, same as text to speech."
+            action={
+              <a href="/billing" className={pill}>
+                See plans
+              </a>
+            }
+          />
+          <RequirementRow
+            done={false}
+            title="3. Permission for every voice you clone"
+            detail="Each time: say whose voice it is (yours, or a named person who gave you permission) and type a short consent statement. We keep a timestamped record of each one."
+          />
+        </ol>
+        <p className="mt-2 text-[11px] italic text-muted">
+          Cloning a voice without the speaker&apos;s permission - including public figures - isn&apos;t allowed and gets
+          accounts closed. Text to speech with our preset voices above needs none of this.
         </p>
-        <input
-          className="w-full rounded-2xl border border-border bg-white p-3 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-blue"
-          placeholder="Type the consent statement above..."
-          value={consentInput}
-          onChange={(e) => setConsentInput(e.target.value)}
-        />
       </div>
-      {!isPodMode && (
-        <p className="text-xs text-muted">Generation usually takes under a minute, but can take up to a few minutes after a quiet period while the voice engine wakes up.</p>
-      )}
-      {quotaExhausted ? (
-        <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">
-          You&apos;ve used your {usage!.isFree ? "free" : usage!.planName} {usage!.charactersLimit.toLocaleString()}{" "}
-          characters this month. Resets{" "}
-          {new Date(usage!.periodEnd).toLocaleDateString("en-US", { month: "long", day: "numeric" })} — or{" "}
-          <a href="/billing" className="font-semibold underline">
-            {usage!.isFree ? "see plans" : "upgrade"}
-          </a>{" "}
-          to keep going now.
-        </p>
-      ) : (
-        <GenerateButton loading={loading} disabled={!text || !file || !consentMatches || loading} onClick={handleGenerate} colorClassName="bg-blue" />
-      )}
-      {showWaitingUi && (
+
+      {ready && (
         <>
-          <p className="text-sm text-muted">{statusMessage}</p>
-          <WaitingGame />
+          <RecordOrUpload kind="audio" onChange={setFile} />
+          <div className="rounded-2xl bg-white/80 p-3">
+            <p className="text-xs font-semibold text-foreground">Whose voice is this?</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {(["self", "other"] as const).map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  aria-pressed={voiceOwner === o}
+                  onClick={() => setVoiceOwner(o)}
+                  className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                    voiceOwner === o ? "border-blue bg-blue text-white shadow-soft" : "border-border bg-white text-muted"
+                  }`}
+                >
+                  {o === "self" ? "My own voice" : "Someone who gave me permission"}
+                </button>
+              ))}
+            </div>
+            {voiceOwner === "other" && (
+              <input
+                className="mt-2 w-full rounded-2xl border border-border bg-white p-3 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-blue"
+                placeholder="Their full name"
+                value={speakerName}
+                onChange={(e) => setSpeakerName(e.target.value)}
+              />
+            )}
+          </div>
+          <textarea
+            className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-blue"
+            rows={4}
+            placeholder="Type what you want read back in that voice..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <DeliverySliders value={delivery} onChange={setDelivery} accentColor="text-blue" />
+          <div className="space-y-1">
+            <p className="text-xs text-muted">
+              Type the following exactly to confirm you have the right to clone this voice:
+              <br />
+              <span className="font-semibold text-foreground">&quot;{CLONE_CONSENT_TEXT}&quot;</span>
+            </p>
+            <input
+              className="w-full rounded-2xl border border-border bg-white p-3 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-blue"
+              placeholder="Type the consent statement above..."
+              value={consentInput}
+              onChange={(e) => setConsentInput(e.target.value)}
+            />
+          </div>
+          {!isPodMode && (
+            <p className="text-xs text-muted">Generation usually takes under a minute, but can take up to a few minutes after a quiet period while the voice engine wakes up.</p>
+          )}
+          {quotaExhausted ? (
+            <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">
+              You&apos;ve used your {usage!.planName} {usage!.charactersLimit.toLocaleString()} characters this month. Resets{" "}
+              {new Date(usage!.periodEnd).toLocaleDateString("en-US", { month: "long", day: "numeric" })} — or{" "}
+              <a href="/billing" className="font-semibold underline">
+                upgrade
+              </a>{" "}
+              to keep going now.
+            </p>
+          ) : (
+            <GenerateButton
+              loading={loading}
+              disabled={!text || !file || !consentMatches || !voiceOwner || (voiceOwner === "other" && !speakerName.trim()) || loading}
+              onClick={handleGenerate}
+              colorClassName="bg-blue"
+            />
+          )}
+          {showWaitingUi && (
+            <>
+              <p className="text-sm text-muted">{statusMessage}</p>
+              <WaitingGame />
+            </>
+          )}
+          {error && <p className="text-sm text-coral-dark">{error}</p>}
+          <AudioResultPlayer audioBase64={audioBase64} />
         </>
       )}
-      {error && <p className="text-sm text-coral-dark">{error}</p>}
-      <AudioResultPlayer audioBase64={audioBase64} />
     </Card>
   );
 }
@@ -1203,53 +1314,51 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
   },
 ];
 
-function CinematicSceneSection({ onTryItYourself }: { onTryItYourself: (prompt: string, imageBlob: Blob | null) => void }) {
-  const storyboardDetailsRef = useRef<HTMLDetailsElement | null>(null);
+// Prompt guide (2026-09-23 layout) - sits right under the generator, per
+// direct request: the how-to (steps, rules, templates, style examples) plus
+// the real JoJo case study, before any of our own example videos.
+function PromptGuideSection() {
+  const jojoDetailsRef = useRef<HTMLDetailsElement | null>(null);
 
-  // Same pattern as ProductAdSection's jojo-case-study auto-open - lets a
-  // link from elsewhere on the site land here already expanded.
+  // Auto-opens the JoJo storyboard disclosure when arriving via a direct
+  // link to it (e.g. the "See a real example" link on /ads).
   useEffect(() => {
-    if (window.location.hash === "#cinematic-storyboard" && storyboardDetailsRef.current) {
-      storyboardDetailsRef.current.open = true;
+    if (window.location.hash === "#jojo-case-study" && jojoDetailsRef.current) {
+      jojoDetailsRef.current.open = true;
     }
   }, []);
 
   return (
     <Card
-      wash="bg-purple-wash/90"
+      id="prompt-guide"
+      wash="bg-surface/90"
       iconColor="text-purple"
-      icon="🎬"
-      title="Create a cinematic scene"
-      subtitle="Your own photo, dropped into a fully new scene from a detailed text prompt - no green screen, no set."
+      icon="📝"
+      title="Our prompt guide"
+      subtitle="How to write prompts that look directed, not generated - one scene at a time."
     >
-      <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
-        <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/kirsty-moon-veo-audio.mp4" controls loop muted playsInline />
-        <p className="mt-1.5 text-xs text-muted">
-          A photo dropped into a fully new scene, generated by Veo from a detailed text prompt - strong, reliable
-          cinematic quality when you don&apos;t need to keep your exact background.
-        </p>
-        <div className="mt-1.5 rounded-xl bg-cream p-2">
-          <p className="text-[11px] font-semibold text-muted">We uploaded a photo and used this prompt:</p>
-          <p className="mt-0.5 text-[11px] italic text-muted">{MODEL_SHOWCASE_PROMPT}</p>
-        </div>
-      </div>
+      <ol className="space-y-1.5 text-sm text-muted">
+        <li>
+          <strong className="text-foreground">1. Study a scene you love.</strong> Watch a movie scene or ad and pay
+          attention to each camera angle, movement, expression and subtle detail.
+        </li>
+        <li>
+          <strong className="text-foreground">2. Write one detailed prompt per shot.</strong> Try Seedance, Veo and
+          the other models above - describe the lighting, the camera move and what&apos;s actually happening, like a
+          real shoot brief.
+        </li>
+        <li>
+          <strong className="text-foreground">3. Stitch the shots together.</strong> Make a few scenes and combine
+          them in our <a href="/stitch" className="font-semibold text-purple underline">free video editor</a> - the
+          result is a short film or an ad for your product.
+        </li>
+      </ol>
 
-      <div className="rounded-2xl bg-white/70 p-3">
-        <p className="mb-2 text-xs font-semibold text-muted">Want to try your own version of that moon shot?</p>
-        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} onTryItYourself={onTryItYourself} />
-      </div>
-
-      <p className="text-xs italic text-muted">
-        The more specific the prompt, the better the result - describe the lighting, the camera move, and what&apos;s
-        actually happening in the scene, the same way you would for a real shoot brief.
-      </p>
-
-      <div id="cinematic-storyboard" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
-        <p className="text-xs font-bold uppercase tracking-wide text-purple">Want a full short film, not just one shot?</p>
+      <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-purple">The rules that make the biggest difference</p>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          Every engine we use only takes one photo and one prompt per generation, so a real short film - not just a
-          single clip - means breaking it into a proper shot list first, the same way an actual film crew would,
-          then generating each shot on its own and combining them in our <a href="/stitch" className="font-semibold text-purple underline">free video editor</a>.
+          Every model only takes one photo and one prompt per generation, so a real short film means breaking it into
+          a shot list first - the same way a film crew would - then generating each shot on its own.
         </p>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           A few rules that make a real difference: keep to <strong>one camera move per shot</strong> (a push, a pan,
@@ -1257,35 +1366,6 @@ function CinematicSceneSection({ onTryItYourself }: { onTryItYourself: (prompt: 
           same specific way every time so they stay consistent shot to shot, and show emotion through a physical
           detail (a dropped shoulder, an exhale, a small smile) instead of just naming the feeling.
         </p>
-        <details ref={storyboardDetailsRef} className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-purple">See it applied: the moon shot above, turned into a 4-shot short</summary>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[480px] border-collapse text-xs">
-              <thead>
-                <tr className="text-left text-muted">
-                  <th className="w-28 border-b border-border pb-1 pr-2 font-semibold">Shot</th>
-                  <th className="w-1/3 border-b border-border pb-1 pr-3 font-semibold">Camera</th>
-                  <th className="border-b border-border pb-1 font-semibold">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {CINEMATIC_STORYBOARD.map((s, i) => (
-                  <tr key={i} className="align-top">
-                    <td className="border-b border-border py-2 pr-2 font-semibold text-foreground">{s.shot}</td>
-                    <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-muted">{s.camera}</td>
-                    <td className="whitespace-pre-line border-b border-border py-2 text-muted">{s.action}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-[11px] italic text-muted">
-            The single prompt above compresses all of this into one shot. Written as 4 separate shots instead, each
-            generated on its own and stitched together, it reads as a real short film with a beginning, a quiet
-            middle beat, and an ending - not just one clip.
-          </p>
-        </details>
-
         <details className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-purple">The full template: how to describe a character, a shot, a scene</summary>
           <div className="mt-3 space-y-3 text-xs leading-relaxed text-muted">
@@ -1354,6 +1434,168 @@ no subtitles/logos/watermarks unless wanted + a style anchor`}
           </p>
         </details>
       </div>
+
+      <div id="jojo-case-study" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-purple">Real case study</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          We spoke with a film director about how she actually plans an ad, using a real one she directed as the
+          example: a launch spot for JoJo, a Philippines crowdshipping startup - regular people request local
+          deliveries, and other regular people who are already headed that way opt in to fulfill them for extra
+          cash. Her ad went on to get <strong>1.7M views on Facebook</strong>.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          Her storyboard broke the ad into clear beats, the same shape a lot of strong short ads follow: a fun cold
+          open, introduce two ordinary people who each have half of a problem, show the problem, introduce the app
+          as the thing that connects them, show the transaction actually happening, back it up with trust signals
+          (ratings, live tracking), then close on a bigger mission (less traffic and pollution) plus a clear call
+          to download. Every scene has its own shot description and its own line of narration - a storyboard, not
+          just a script.
+        </p>
+        <details ref={jojoDetailsRef} className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">View the full storyboard (her actual document, scene by scene)</summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[480px] border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="w-10 border-b border-border pb-1 pr-2 font-semibold">#</th>
+                  <th className="w-28 border-b border-border pb-1 pr-2 font-semibold">Image</th>
+                  <th className="border-b border-border pb-1 pr-3 font-semibold">Audio</th>
+                  <th className="border-b border-border pb-1 font-semibold">Video</th>
+                </tr>
+              </thead>
+              <tbody>
+                {JOJO_STORYBOARD.map((scene, i) => (
+                  <tr key={i} className="align-top">
+                    <td className="border-b border-border py-2 pr-2 text-muted">{i + 1}</td>
+                    <td className="border-b border-border py-2 pr-2">
+                      {scene.image && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={scene.image} alt={`Scene ${i + 1} storyboard image`} className="h-24 w-24 rounded-lg border border-border object-cover bg-white" />
+                      )}
+                    </td>
+                    <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-foreground">{scene.audio}</td>
+                    <td className="whitespace-pre-line border-b border-border py-2 text-muted">{scene.video}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] italic text-muted">
+            Shared with us directly by the director - her real storyboard, transcribed here scene by scene. On
+            scenes 1, 17, and 18 the image is JoJo&apos;s own brand asset (logo, app badges, end card). Everywhere
+            else, her original reference was licensed stock photography, so instead of reproducing that, we
+            generated a new illustration from the same shot description - a real example of a storyboard image for
+            each scene, just not her actual photo.
+          </p>
+        </details>
+
+        <div className="mx-auto mt-3 max-w-md overflow-hidden rounded-2xl border border-border">
+          <iframe
+            // Real fix (live QA find, 2026-09-17): the descriptive slug
+            // ("jojo-pasabay-delivery") in the href's video permalink isn't
+            // something the video.php plugin resolves - it silently failed
+            // to embed and fell through to a broken/blank iframe instead.
+            // Facebook's own embed-code generator for this exact video
+            // (confirmed by opening its Embed panel directly) omits the
+            // slug entirely, so match that canonical form.
+            src="https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2F2521431254554554%2F&show_text=false&width=560&t=0"
+            width="100%"
+            height="314"
+            style={{ border: "none", overflow: "hidden" }}
+            scrolling="no"
+            frameBorder="0"
+            allowFullScreen
+            title="JoJo Pasabay Delivery ad on Facebook"
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          That&apos;s the real, finished ad, embedded directly from JoJo&apos;s own Facebook page - not made by us,
+          shown here purely as a real example of a storyboard becoming a finished ad.
+        </p>
+      </div>
+
+    </Card>
+  );
+}
+
+// Cinematic examples (2026-09-23 layout) - real clips we generated, each
+// with the exact prompt used, plus the 4-shot breakdown. The how-to rules
+// themselves moved up into PromptGuideSection.
+function CinematicExamplesSection({ onTryItYourself }: { onTryItYourself: (prompt: string, imageBlob: Blob | null) => void }) {
+  const storyboardDetailsRef = useRef<HTMLDetailsElement | null>(null);
+
+  // Lets a link from elsewhere on the site land here already expanded.
+  useEffect(() => {
+    if (window.location.hash === "#cinematic-storyboard" && storyboardDetailsRef.current) {
+      storyboardDetailsRef.current.open = true;
+    }
+  }, []);
+
+  return (
+    <Card
+      id="cinematic-examples"
+      wash="bg-purple-wash/90"
+      iconColor="text-purple"
+      icon="🎬"
+      title="Cinematic video examples"
+      subtitle="Real clips made with the generator above - your own photo dropped into a brand-new scene, no green screen, no set."
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
+          <video className="mx-auto w-full rounded-xl" src="/trailers/kirsty-moon-veo-audio.mp4" controls loop muted playsInline />
+          <p className="mt-1.5 text-xs font-semibold text-foreground">Veo · photo into a new scene</p>
+          <div className="mt-1.5 rounded-xl bg-cream p-2">
+            <p className="text-[11px] font-semibold text-muted">We uploaded a photo and used this prompt:</p>
+            <p className="mt-0.5 text-[11px] italic text-muted">{MODEL_SHOWCASE_PROMPT}</p>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
+          <video className="mx-auto w-full rounded-xl" src="/trailers/kirsty-kling-dub.mp4" controls loop muted playsInline />
+          <p className="mt-1.5 text-xs font-semibold text-foreground">Kling · real photo, dubbed with a Lucy voice</p>
+          <p className="mt-1 text-[11px] text-muted">
+            Our pick for keeping your exact face, not a lookalike. Honest caveat: even Kling&apos;s lip-sync isn&apos;t
+            perfect every time, which is why you can also skip lip-sync and play your audio as a plain voiceover.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-white/70 p-3">
+        <p className="mb-2 text-xs font-semibold text-muted">Want to try your own version of that moon shot?</p>
+        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} onTryItYourself={onTryItYourself} />
+      </div>
+
+      <div id="cinematic-storyboard" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-purple">From one shot to a short film</p>
+        <details ref={storyboardDetailsRef} className="mt-2 rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">See it applied: the moon shot above, turned into a 4-shot short</summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[480px] border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="w-28 border-b border-border pb-1 pr-2 font-semibold">Shot</th>
+                  <th className="w-1/3 border-b border-border pb-1 pr-3 font-semibold">Camera</th>
+                  <th className="border-b border-border pb-1 font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {CINEMATIC_STORYBOARD.map((s, i) => (
+                  <tr key={i} className="align-top">
+                    <td className="border-b border-border py-2 pr-2 font-semibold text-foreground">{s.shot}</td>
+                    <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-muted">{s.camera}</td>
+                    <td className="whitespace-pre-line border-b border-border py-2 text-muted">{s.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] italic text-muted">
+            The single prompt above compresses all of this into one shot. Written as 4 separate shots instead, each
+            generated on its own and stitched together, it reads as a real short film with a beginning, a quiet
+            middle beat, and an ending - not just one clip.
+          </p>
+        </details>
+
+      </div>
     </Card>
   );
 }
@@ -1361,25 +1603,13 @@ no subtitles/logos/watermarks unless wanted + a style anchor`}
 function ProductAdSection() {
   const [modelId, setModelId] = useState(PRODUCT_AD_MODELS[0].id);
   const model = PRODUCT_AD_MODELS.find((m) => m.id === modelId)!;
-  const storyboardDetailsRef = useRef<HTMLDetailsElement | null>(null);
-
-  // Auto-opens the storyboard disclosure when arriving via a direct link
-  // to it (e.g. the "See a real example" link on /ads) - a plain #anchor
-  // scrolls to the right place on its own, but a <details> element still
-  // needs to be told to open; without this, landing here would show a
-  // collapsed summary with nothing visible below the fold.
-  useEffect(() => {
-    if (window.location.hash === "#jojo-case-study" && storyboardDetailsRef.current) {
-      storyboardDetailsRef.current.open = true;
-    }
-  }, []);
-
   return (
     <Card
+      id="harper"
       wash="bg-purple-wash/90"
       iconColor="text-purple"
       icon="🥤"
-      title="Create an ad for your product"
+      title="Meet Harper: an AI-made product ad"
       subtitle="A real, spoken, multi-scene ad - built with our AI character Harper, run through five engines to see which one could pull it off."
     >
       <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
@@ -1464,85 +1694,6 @@ function ProductAdSection() {
         Honest caveat: a snapshot from 2026-09-12, not a permanent ranking - these models change constantly.
       </p>
 
-      <div id="jojo-case-study" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
-        <p className="text-xs font-bold uppercase tracking-wide text-purple">Real case study</p>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          We spoke with a film director about how she actually plans an ad, using a real one she directed as the
-          example: a launch spot for JoJo, a Philippines crowdshipping startup - regular people request local
-          deliveries, and other regular people who are already headed that way opt in to fulfill them for extra
-          cash. Her ad went on to get <strong>1.7M views on Facebook</strong>.
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          Her storyboard broke the ad into clear beats, the same shape a lot of strong short ads follow: a fun cold
-          open, introduce two ordinary people who each have half of a problem, show the problem, introduce the app
-          as the thing that connects them, show the transaction actually happening, back it up with trust signals
-          (ratings, live tracking), then close on a bigger mission (less traffic and pollution) plus a clear call
-          to download. Every scene has its own shot description and its own line of narration - a storyboard, not
-          just a script.
-        </p>
-        <details ref={storyboardDetailsRef} className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-purple">View the full storyboard (her actual document, scene by scene)</summary>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[480px] border-collapse text-xs">
-              <thead>
-                <tr className="text-left text-muted">
-                  <th className="w-10 border-b border-border pb-1 pr-2 font-semibold">#</th>
-                  <th className="w-28 border-b border-border pb-1 pr-2 font-semibold">Image</th>
-                  <th className="border-b border-border pb-1 pr-3 font-semibold">Audio</th>
-                  <th className="border-b border-border pb-1 font-semibold">Video</th>
-                </tr>
-              </thead>
-              <tbody>
-                {JOJO_STORYBOARD.map((scene, i) => (
-                  <tr key={i} className="align-top">
-                    <td className="border-b border-border py-2 pr-2 text-muted">{i + 1}</td>
-                    <td className="border-b border-border py-2 pr-2">
-                      {scene.image && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={scene.image} alt={`Scene ${i + 1} storyboard image`} className="h-24 w-24 rounded-lg border border-border object-cover bg-white" />
-                      )}
-                    </td>
-                    <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-foreground">{scene.audio}</td>
-                    <td className="whitespace-pre-line border-b border-border py-2 text-muted">{scene.video}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-[11px] italic text-muted">
-            Shared with us directly by the director - her real storyboard, transcribed here scene by scene. On
-            scenes 1, 17, and 18 the image is JoJo&apos;s own brand asset (logo, app badges, end card). Everywhere
-            else, her original reference was licensed stock photography, so instead of reproducing that, we
-            generated a new illustration from the same shot description - a real example of a storyboard image for
-            each scene, just not her actual photo.
-          </p>
-        </details>
-
-        <div className="mx-auto mt-3 max-w-md overflow-hidden rounded-2xl border border-border">
-          <iframe
-            // Real fix (live QA find, 2026-09-17): the descriptive slug
-            // ("jojo-pasabay-delivery") in the href's video permalink isn't
-            // something the video.php plugin resolves - it silently failed
-            // to embed and fell through to a broken/blank iframe instead.
-            // Facebook's own embed-code generator for this exact video
-            // (confirmed by opening its Embed panel directly) omits the
-            // slug entirely, so match that canonical form.
-            src="https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2F2521431254554554%2F&show_text=false&width=560&t=0"
-            width="100%"
-            height="314"
-            style={{ border: "none", overflow: "hidden" }}
-            scrolling="no"
-            frameBorder="0"
-            allowFullScreen
-            title="JoJo Pasabay Delivery ad on Facebook"
-          />
-        </div>
-        <p className="mt-2 text-xs text-muted">
-          That&apos;s the real, finished ad, embedded directly from JoJo&apos;s own Facebook page - not made by us,
-          shown here purely as a real example of a storyboard becoming a finished ad.
-        </p>
-      </div>
-
       <div className="rounded-2xl border border-purple/20 bg-white/80 p-4 text-center">
         <p className="text-sm font-bold text-foreground">Want to build an ad like this yourself?</p>
         <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted">
@@ -1567,6 +1718,51 @@ const PAYGO_PROMPT_PLACEHOLDER =
   'talks to the camera, camera slowly pans across a bright modern sunlit room, energetic, playful, confident, ' +
   'cinematic commercial ad, photorealistic, 4k"';
 
+// Draft saved across the Stripe redirect (2026-09-23) - checkout is now the
+// "Pay & generate" step itself, so without this the visitor would come back
+// to an empty box. sessionStorage, not localStorage: it's one tab's
+// in-flight purchase, not a preference. Blobs (photo/audio) can't survive
+// the round trip, so hadMedia stops auto-generate and asks to re-attach.
+const PAYGO_DRAFT_KEY = "lucy_paygo_draft";
+
+type PaygoDraft = {
+  prompt: string;
+  engine: VideoEngine;
+  useDirector: boolean;
+  durationSeconds: number | null;
+  aspectRatio: string | null;
+  audioMode: PaygoAudioMode;
+  lipSyncMode: "lipsync" | "voiceover";
+  presetVoiceId: string;
+  hadMedia: boolean;
+  autoGenerate: boolean;
+};
+
+function saveDraft(draft: PaygoDraft) {
+  try {
+    sessionStorage.setItem(PAYGO_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // Private mode / blocked storage - checkout still works, the prompt just won't be restored.
+  }
+}
+
+function takeDraft(): PaygoDraft | null {
+  try {
+    const raw = sessionStorage.getItem(PAYGO_DRAFT_KEY);
+    sessionStorage.removeItem(PAYGO_DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as PaygoDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+const PAYGO_PRICE_LABEL = `$${(VIDEO_PAYGO_PRICE_USD_CENTS / 100).toFixed(2)}`;
+
+// The homepage's first screen (2026-09-23 layout change, per direct
+// request): prompt box -> model picker -> price -> pay & generate, with no
+// signup. Everything that used to sit above the controls (demo clip,
+// caveats) moved into the examples sections further down; the less-common
+// controls (duration, ratio, photo, audio) live behind "More options".
 function PayAsYouGoVideoSection({
   seedPrompt,
   seedImageBlob,
@@ -1578,13 +1774,12 @@ function PayAsYouGoVideoSection({
 }) {
   const [signedIn, setSignedIn] = useState(false);
   const [balance, setBalance] = useState(0);
-  const [authChecked, setAuthChecked] = useState(false);
+  const [balanceLoaded, setBalanceLoaded] = useState(false);
   const [engine, setEngine] = useState<VideoEngine>("veo");
+  const [useDirector, setUseDirector] = useState(false);
   // Duration/aspect ratio choices (2026-09-15) - null means "use the
-  // engine's own default", same as before either control existed. Reset
-  // whenever the engine changes since each engine's real bounds/options
-  // differ (see videoPaygo.ts's VIDEO_PAYGO_ENGINES) - a value valid on one
-  // engine may not even be offered on the next.
+  // engine's own default". Reset whenever the engine changes since each
+  // engine's real bounds/options differ (see videoPaygo.ts).
   const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
   const [aspectRatio, setAspectRatio] = useState<string | null>(null);
   const media = useReferenceMedia();
@@ -1597,22 +1792,30 @@ function PayAsYouGoVideoSection({
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [result, setResult] = useState<{ videoUrl: string; jobId: string; silentVideoUrl: string | null } | null>(null);
+  const [directedPrompt, setDirectedPrompt] = useState<string | null>(null);
   const [buyingPack, setBuyingPack] = useState<string | null>(null);
+  const [waitingForCredit, setWaitingForCredit] = useState(false);
+  const pendingAutoGenerateRef = useRef(false);
+  const optionsRef = useRef<HTMLDetailsElement | null>(null);
 
-  // Picks up a prompt/photo handed down from CinematicSceneSection's "try
-  // it yourself" box (see TryYourOwnPromptCTA) - keyed on seedVersion so
-  // it only fires on an actual new handoff, not every render.
+  const engineDef = VIDEO_PAYGO_ENGINES[engine];
+  const directorAvailable = audioMode !== "lucy";
+
+  // Picks up a prompt/photo handed down from the examples' "try it
+  // yourself" box (see TryYourOwnPromptCTA) - keyed on seedVersion so it
+  // only fires on an actual new handoff, not every render.
   useEffect(() => {
     if (seedVersion === 0) return;
     if (seedPrompt) setPrompt(seedPrompt);
-    if (seedImageBlob) media.addItem(seedImageBlob);
+    if (seedImageBlob) {
+      media.addItem(seedImageBlob);
+      if (optionsRef.current) optionsRef.current.open = true;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedVersion]);
 
-  // Same shared-<audio>-element click-to-preview pattern as VoicePicker.tsx
-  // and the character/model-showcase pickers above - click a voice to hear
-  // its sample, click again to stop, click again to replay.
   function togglePreview(id: string) {
     const el = previewAudioRef.current;
     if (!el) return;
@@ -1631,36 +1834,107 @@ function PayAsYouGoVideoSection({
 
   // Matches the server's real rule (video-paygo/generate/route.ts): Kling
   // Avatar's own uploaded audio already carries every word, so it's the
-  // only case a text prompt can be skipped - a Lucy voice still needs the
-  // prompt (it's the TTS script) same as every other path.
+  // only case a text prompt can be skipped.
   const promptSkippable = engine === "kling" && audioMode === "own" && !!audio.selectedBlob;
 
-  async function refreshBalance() {
+  async function refreshBalance(): Promise<number> {
     try {
       const res = await fetch("/api/video-paygo/balance");
       const data = await res.json();
       setSignedIn(data.signedIn);
       setBalance(data.balance);
+      return data.balance as number;
+    } catch {
+      return balance;
     } finally {
-      // Real bug fixed here (2026-09-15, per direct report - "this section
-      // doesn't always load on time"): `signedIn` defaulted to false, so a
-      // genuinely signed-in visitor briefly saw "Sign in to buy video
-      // credits" - the wrong message, not just a loading flicker - until
-      // this fetch resolved, then the real engine picker/credit balance
-      // popped in late. authChecked gates on knowing the REAL status
-      // first, showing a neutral loading state instead of guessing signed-
-      // out, so nothing misleading ever flashes on screen while a cold
-      // serverless function or DB connection is still warming up.
-      setAuthChecked(true);
+      setBalanceLoaded(true);
     }
   }
 
+  // Coming back from Stripe: restore the draft, then wait for the webhook
+  // to land the credit (usually a second or two, occasionally longer)
+  // before auto-starting the video that was just paid for.
+  async function resumeFromCheckout() {
+    const params = new URLSearchParams(window.location.search);
+    const paid = params.get("video_credits") === "1";
+    const canceled = params.get("canceled") === "1";
+    if (paid || canceled) window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+    const draft = paid || canceled ? takeDraft() : null;
+    await refreshBalance();
+    if (!paid && !canceled) return;
+    if (draft) {
+      setPrompt(draft.prompt);
+      if (VIDEO_PAYGO_ENGINES[draft.engine]) setEngine(draft.engine);
+      setUseDirector(draft.useDirector);
+      setDurationSeconds(draft.durationSeconds);
+      setAspectRatio(draft.aspectRatio);
+      setAudioMode(draft.audioMode === "own" ? "none" : draft.audioMode);
+      setLipSyncMode(draft.lipSyncMode);
+      setPresetVoiceId(draft.presetVoiceId);
+    }
+    if (canceled) {
+      setNotice("Checkout canceled - nothing was charged. Your prompt is still here.");
+      return;
+    }
+    setWaitingForCredit(true);
+    if (draft?.hadMedia) {
+      setNotice("Payment received. Photos and audio can't carry over through checkout - re-add yours under More options, then hit Generate.");
+      if (optionsRef.current) optionsRef.current.open = true;
+    } else {
+      setNotice("Payment received - starting your video…");
+      if (draft?.autoGenerate && draft.prompt.trim()) pendingAutoGenerateRef.current = true;
+    }
+  }
+
+  // One-time sync from external state (the URL + sessionStorage draft
+  // Stripe redirected back with) - the case effects exist for.
   useEffect(() => {
-    refreshBalance().catch(() => {});
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    resumeFromCheckout().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleBuy(packId: string) {
+  useEffect(() => {
+    if (!waitingForCredit) return;
+    let cancelled = false;
+    const startedAt = Date.now();
+    (async () => {
+      while (!cancelled && Date.now() - startedAt < 60_000) {
+        if ((await refreshBalance()) >= 1) break;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (!cancelled) setWaitingForCredit(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingForCredit]);
+
+  // Runs after the render that restored the draft, so handleGenerate sees
+  // the restored prompt/engine rather than the empty initial state.
+  useEffect(() => {
+    if (!pendingAutoGenerateRef.current || balance < 1 || loading) return;
+    pendingAutoGenerateRef.current = false;
+    handleGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balance, prompt]);
+
+  async function handleBuy(packId: string, autoGenerate: boolean) {
     setBuyingPack(packId);
+    setError(null);
+    saveDraft({
+      prompt,
+      engine,
+      useDirector,
+      durationSeconds,
+      aspectRatio,
+      audioMode,
+      lipSyncMode,
+      presetVoiceId,
+      hadMedia: !!media.imageBlob || audioMode === "own",
+      autoGenerate,
+    });
     try {
       const res = await fetch("/api/video-paygo/checkout", {
         method: "POST",
@@ -1670,6 +1944,8 @@ function PayAsYouGoVideoSection({
       const data = await res.json();
       if (data.url) window.location.href = data.url;
       else setError(data.error ?? "Checkout failed");
+    } catch {
+      setError("Checkout failed - please try again.");
     } finally {
       setBuyingPack(null);
     }
@@ -1679,16 +1955,18 @@ function PayAsYouGoVideoSection({
     setLoading(true);
     setError(null);
     setResult(null);
+    setDirectedPrompt(null);
     try {
       const form = new FormData();
       form.append("engine", engine);
       form.append("prompt", prompt);
       form.append("audio_mode", audioMode);
+      if (useDirector && directorAvailable) form.append("director", "astra");
       if (audioMode !== "none") form.append("lip_sync_mode", lipSyncMode);
-      if (durationSeconds != null && VIDEO_PAYGO_ENGINES[engine].supportsDurationChoice) {
+      if (durationSeconds != null && engineDef.supportsDurationChoice) {
         form.append("duration_seconds", String(durationSeconds));
       }
-      if (aspectRatio && VIDEO_PAYGO_ENGINES[engine].aspectRatioOptions?.includes(aspectRatio)) {
+      if (aspectRatio && engineDef.aspectRatioOptions?.includes(aspectRatio)) {
         form.append("aspect_ratio", aspectRatio);
       }
       if (media.imageBlob) form.append("reference_image", media.imageBlob, "reference.jpg");
@@ -1697,6 +1975,8 @@ function PayAsYouGoVideoSection({
       const res = await fetch("/api/video-paygo/generate", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Generation failed");
+      setNotice(null);
+      if (data.directedPrompt) setDirectedPrompt(data.directedPrompt as string);
       const jobId = data.jobId as string;
       const { videoUrl, silentVideoUrl } = await pollVideoJob("/api/video-paygo/status", jobId);
       setResult({ videoUrl, jobId, silentVideoUrl });
@@ -1708,273 +1988,312 @@ function PayAsYouGoVideoSection({
     }
   }
 
+  const missingInput = (!prompt.trim() && !promptSkippable) || (audioMode === "own" && !audio.selectedBlob);
+  const hasCredit = balance >= 1;
+
+  const engineEntries = Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][];
+  const orderedEngines = [...engineEntries.filter(([, e]) => e.popular), ...engineEntries.filter(([, e]) => !e.popular)];
+
   return (
-    <Card
+    <section
       id="pay-as-you-go"
-      wash="bg-purple-wash/90"
-      iconColor="text-purple"
-      icon="🎟"
-      title="Generate any video with leading models"
-      subtitle="Any prompt, plus an optional photo/video and audio - pick your engine, no subscription, pay per video."
+      className="shadow-soft-lg scroll-mt-6 rounded-[28px] border border-white/60 bg-purple-wash/90 p-5 backdrop-blur-xl sm:p-7"
     >
-      <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
-        <video className="mx-auto w-full max-w-xs rounded-xl" src="/trailers/kirsty-kling-dub.mp4" controls loop muted playsInline />
-        <p className="mt-1.5 text-xs text-muted">
-          A real photo, dubbed with a Lucy voice via Kling - our pick for keeping your exact face, not a
-          lookalike. Honest caveat: even Kling&apos;s lip-sync isn&apos;t perfect every time, which is why you can
-          also skip lip-sync entirely below and just play your audio as a plain voiceover instead.
-        </p>
-        <p className="mt-1.5 text-xs text-muted">
-          For dialogue, pick a Lucy voice or upload your own audio for Kling to sync to - Veo is the only engine
-          here that can generate its own native voice with no audio input at all. Kling, Grok, MiniMax, and
-          Seedance all need a Lucy voice or your own audio to say anything.
-        </p>
-        <p className="mt-1.5 text-xs italic text-muted">
-          With AI models constantly improving, be careful of deepfakes and never use someone&apos;s face or voice
-          without their permission.
+      <div className="text-center">
+        <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Make a video from one prompt</h2>
+        <p className="mt-1 text-sm text-muted">
+          Pick any leading model · <strong className="text-foreground">{PAYGO_PRICE_LABEL} per video</strong> · no signup, no subscription
         </p>
       </div>
 
-      {!authChecked ? (
-        <div className="space-y-2" aria-busy="true">
-          <div className="h-4 w-40 animate-pulse rounded-full bg-white/70" />
-          <div className="h-24 animate-pulse rounded-2xl bg-white/70" />
-        </div>
-      ) : !signedIn ? (
-        <p className="rounded-2xl bg-white/70 p-3 text-sm text-muted">
-          <a href="/account" className="font-semibold text-purple underline">
-            Sign in
-          </a>{" "}
-          to buy video credits and generate.
-        </p>
-      ) : (
-        <>
-          <p className="text-sm text-muted">
-            Credit balance: <span className="font-bold text-foreground">{balance}</span>
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {VIDEO_CREDIT_PACKS.map((pack) => (
+      <div className="mt-5 flex flex-col gap-4">
+        <textarea
+          aria-label="Describe your video"
+          className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+          rows={4}
+          maxLength={600}
+          placeholder={audioMode === "lucy" ? "What should the voice say?" : PAYGO_PROMPT_PLACEHOLDER}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+
+        <div>
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">Choose your model</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {orderedEngines.map(([id, e]) => (
               <button
-                key={pack.id}
-                onClick={() => handleBuy(pack.id)}
-                disabled={buyingPack !== null}
-                className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-purple shadow-soft disabled:opacity-50"
+                key={id}
+                type="button"
+                aria-pressed={engine === id}
+                onClick={() => {
+                  setEngine(id);
+                  setDurationSeconds(null);
+                  setAspectRatio(null);
+                }}
+                className={`relative w-full rounded-2xl border p-2 text-center text-xs transition ${
+                  engine === id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted hover:border-purple/40"
+                }`}
               >
-                {buyingPack === pack.id
-                  ? "Redirecting…"
-                  : `${pack.credits} video${pack.credits > 1 ? "s" : ""} - $${(pack.priceUsdCents / 100).toFixed(2)}`}
+                {e.popular && (
+                  <span className={`absolute right-1.5 top-1.5 text-[9px] font-bold uppercase ${engine === id ? "text-white/80" : "text-purple"}`}>
+                    Popular
+                  </span>
+                )}
+                <div className="font-bold">{e.label}</div>
+                <div className={`mt-0.5 text-[11px] leading-snug ${engine === id ? "text-white/90" : "text-muted"}`}>{e.pickerNote}</div>
               </button>
             ))}
           </div>
+          <p className="mt-1.5 text-[11px] text-muted">
+            Running <strong className="text-foreground">{engineDef.versionLabel}</strong> ·{" "}
+            <a href={engineDef.exampleUrl} target="_blank" rel="noopener noreferrer" className="text-purple underline">
+              see its example gallery ↗
+            </a>
+          </p>
+        </div>
 
-          {(["popular", "other"] as const).map((group) => {
-            const entries = (Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][]).filter(
-              ([, e]) => (group === "popular" ? e.popular : !e.popular),
-            );
-            if (entries.length === 0) return null;
-            return (
-              <div key={group}>
-                <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
-                  {group === "popular" ? "Popular" : "More models"}
-                </p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {entries.map(([id, e]) => (
-                    <div key={id}>
-                      <button
-                        onClick={() => {
-                          setEngine(id);
-                          setDurationSeconds(null);
-                          setAspectRatio(null);
-                        }}
-                        className={`w-full rounded-2xl border p-2 text-center text-xs transition ${
-                          engine === id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
-                        }`}
-                      >
-                        <div className="font-bold">{e.label}</div>
-                        <div className={`mt-0.5 text-[11px] ${engine === id ? "text-white/90" : "text-muted"}`}>{e.pickerNote}</div>
-                      </button>
-                      <a
-                        href={e.exampleUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 block text-center text-[11px] text-purple underline"
-                      >
-                        See examples ↗
-                      </a>
-                    </div>
+        <label
+          className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 transition ${
+            useDirector && directorAvailable ? "border-purple bg-white" : "border-border bg-white/70"
+          } ${directorAvailable ? "" : "cursor-not-allowed opacity-60"}`}
+        >
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-purple"
+            checked={useDirector && directorAvailable}
+            disabled={!directorAvailable}
+            onChange={(e) => setUseDirector(e.target.checked)}
+          />
+          <span className="text-xs text-muted">
+            <span className="font-bold text-foreground">✨ Direct my prompt with {PROMPT_DIRECTOR_LABEL}</span>{" "}
+            <span className="rounded-full bg-purple/10 px-1.5 py-0.5 text-[10px] font-bold text-purple">OpenAI&apos;s latest · included</span>
+            <br />
+            GPT-6 Astra is a text model, so it doesn&apos;t make the video itself - it rewrites your idea into a proper
+            shot brief (one camera move, specific subject, lighting, style) before it goes to {engineDef.label}.
+            {!directorAvailable && " Not used with a Lucy voice, since your text is the exact script."}
+          </span>
+        </label>
+
+        <details ref={optionsRef} className="rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">
+            More options - duration, aspect ratio, your own photo, voice or audio
+          </summary>
+          <div className="mt-3 flex flex-col gap-3">
+            {engineDef.supportsDurationChoice && (
+              <div className="rounded-2xl bg-white p-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-muted">
+                    Duration: <span className="text-foreground">{durationSeconds ?? engineDef.durationSeconds}s</span>
+                  </label>
+                  <span className="text-[11px] text-muted">
+                    {VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}-{engineDef.durationSeconds}s, same {PAYGO_PRICE_LABEL}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}
+                  max={engineDef.durationSeconds}
+                  step={1}
+                  value={durationSeconds ?? engineDef.durationSeconds}
+                  onChange={(e) => setDurationSeconds(Number(e.target.value))}
+                  className="mt-2 w-full accent-purple"
+                  disabled={audioMode !== "none"}
+                />
+                {audioMode !== "none" && (
+                  <p className="mt-1 text-[11px] italic text-muted">
+                    Locked while audio is set - the clip is matched to your audio&apos;s real length instead.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!!engineDef.aspectRatioOptions?.length && (
+              <div className="rounded-2xl bg-white p-3">
+                <label className="text-xs font-semibold text-muted">Aspect ratio</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {engineDef.aspectRatioOptions!.map((ratio) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      onClick={() => setAspectRatio(ratio)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        (aspectRatio ?? "16:9") === ratio ? "border-purple bg-purple text-white" : "border-border bg-white text-muted"
+                      }`}
+                    >
+                      {ratio === "16:9" ? "16:9 · landscape" : ratio === "9:16" ? "9:16 · vertical" : "1:1 · square"}
+                    </button>
                   ))}
                 </div>
               </div>
-            );
-          })}
+            )}
 
-          <p className="text-xs text-muted">
-            Only Veo can speak on its own with no audio given - every other engine renders silent unless you add
-            your own audio or pick a Lucy voice below.
-          </p>
+            <ReferenceMediaField media={media} label="Add photo(s) or video(s) (optional)" />
 
-          {VIDEO_PAYGO_ENGINES[engine].supportsDurationChoice && (
-            <div className="rounded-2xl bg-white/70 p-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-muted">
-                  Duration: <span className="text-foreground">{durationSeconds ?? VIDEO_PAYGO_ENGINES[engine].durationSeconds}s</span>
-                </label>
-                <span className="text-[11px] text-muted">
-                  {VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}-{VIDEO_PAYGO_ENGINES[engine].durationSeconds}s, same $3.99 price
-                </span>
-              </div>
-              <input
-                type="range"
-                min={VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}
-                max={VIDEO_PAYGO_ENGINES[engine].durationSeconds}
-                step={1}
-                value={durationSeconds ?? VIDEO_PAYGO_ENGINES[engine].durationSeconds}
-                onChange={(e) => setDurationSeconds(Number(e.target.value))}
-                className="mt-2 w-full accent-purple"
-                disabled={audioMode !== "none"}
-              />
-              {audioMode !== "none" && (
-                <p className="mt-1 text-[11px] italic text-muted">
-                  Locked while audio is set - the clip is matched to your audio&apos;s real length instead.
-                </p>
-              )}
-            </div>
-          )}
-
-          {!!VIDEO_PAYGO_ENGINES[engine].aspectRatioOptions?.length && (
-            <div className="rounded-2xl bg-white/70 p-3">
-              <label className="text-xs font-semibold text-muted">Aspect ratio</label>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {VIDEO_PAYGO_ENGINES[engine].aspectRatioOptions!.map((ratio) => (
+            <div>
+              <p className="mb-1.5 text-xs font-semibold text-muted">Sound</p>
+              <div className="grid grid-cols-3 gap-2">
+                {(["none", "own", "lucy"] as const).map((m) => (
                   <button
-                    key={ratio}
-                    onClick={() => setAspectRatio(ratio)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                      (aspectRatio ?? "16:9") === ratio ? "border-purple bg-purple text-white" : "border-border bg-white text-muted"
+                    key={m}
+                    type="button"
+                    onClick={() => setAudioMode(m)}
+                    className={`rounded-2xl border p-2 text-center text-xs font-semibold transition ${
+                      audioMode === m ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
                     }`}
                   >
-                    {ratio === "16:9" ? "16:9 · landscape" : ratio === "9:16" ? "9:16 · vertical" : "1:1 · square"}
+                    {m === "none" ? "No extra audio" : m === "own" ? "My own audio" : "A Lucy voice"}
                   </button>
                 ))}
               </div>
-            </div>
-          )}
-
-          <ReferenceMediaField media={media} label="Add photo(s) or video(s) (optional)" />
-
-          <div className="grid grid-cols-3 gap-2">
-            {(["none", "own", "lucy"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setAudioMode(m)}
-                className={`rounded-2xl border p-2 text-center text-xs font-semibold transition ${
-                  audioMode === m ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
-                }`}
-              >
-                {m === "none" ? "No extra audio" : m === "own" ? "My own audio" : "A Lucy voice"}
-              </button>
-            ))}
-          </div>
-
-          {audioMode === "own" && <MultiAudioField audio={audio} />}
-
-          {audioMode === "lucy" && (
-            <div className="flex items-center gap-2">
-              <audio ref={previewAudioRef} onEnded={() => setPreviewingVoiceId(null)} className="hidden" />
-              <select
-                value={presetVoiceId}
-                onChange={(e) => setPresetVoiceId(e.target.value)}
-                className="flex-1 rounded-2xl border border-border bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple"
-              >
-                {PRESET_VOICES.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => togglePreview(presetVoiceId)}
-                className="rounded-full border border-border bg-white px-3 py-2.5 text-xs font-semibold text-purple shadow-soft"
-              >
-                {previewingVoiceId === presetVoiceId ? "⏸ Stop" : "▶ Preview"}
-              </button>
-            </div>
-          )}
-
-          {(audioMode === "own" || audioMode === "lucy") && (
-            <div className="space-y-2 rounded-2xl border border-border bg-white/70 p-3">
-              <p className="text-xs font-semibold text-foreground">Should the mouth try to match this audio?</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setLipSyncMode("lipsync")}
-                  className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
-                    lipSyncMode === "lipsync" ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
-                  }`}
-                >
-                  Lip-sync it
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLipSyncMode("voiceover")}
-                  className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
-                    lipSyncMode === "voiceover" ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
-                  }`}
-                >
-                  Just play it as a voiceover
-                </button>
-              </div>
-              <p className="text-xs italic leading-relaxed text-muted">
-                {lipSyncMode === "lipsync"
-                  ? engine === "kling"
-                    ? "Kling lip-syncs your photo directly to this audio in one step - real mouth movement, but not guaranteed to land perfectly."
-                    : `${VIDEO_PAYGO_ENGINES[engine].label} renders the scene first, then a separate lip-sync pass matches the mouth movements afterward - two steps instead of one, and honestly the weaker of the two options here.`
-                  : "The most reliable choice: your audio plays under the video with no attempt to match mouth movements - nothing to look uncanny if it misses."}
+              <p className="mt-1.5 text-[11px] text-muted">
+                Only Veo can speak on its own with no audio given - every other model renders silent unless you add
+                your own audio or pick a Lucy voice.
               </p>
             </div>
+
+            {audioMode === "own" && <MultiAudioField audio={audio} />}
+
+            {audioMode === "lucy" && (
+              <div className="flex items-center gap-2">
+                <audio ref={previewAudioRef} onEnded={() => setPreviewingVoiceId(null)} className="hidden" />
+                <select
+                  value={presetVoiceId}
+                  onChange={(e) => setPresetVoiceId(e.target.value)}
+                  className="flex-1 rounded-2xl border border-border bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple"
+                >
+                  {PRESET_VOICES.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => togglePreview(presetVoiceId)}
+                  className="rounded-full border border-border bg-white px-3 py-2.5 text-xs font-semibold text-purple shadow-soft"
+                >
+                  {previewingVoiceId === presetVoiceId ? "⏸ Stop" : "▶ Preview"}
+                </button>
+              </div>
+            )}
+
+            {(audioMode === "own" || audioMode === "lucy") && (
+              <div className="space-y-2 rounded-2xl border border-border bg-white p-3">
+                <p className="text-xs font-semibold text-foreground">Should the mouth try to match this audio?</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLipSyncMode("lipsync")}
+                    className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                      lipSyncMode === "lipsync" ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
+                    }`}
+                  >
+                    Lip-sync it
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLipSyncMode("voiceover")}
+                    className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                      lipSyncMode === "voiceover" ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted"
+                    }`}
+                  >
+                    Just play it as a voiceover
+                  </button>
+                </div>
+                <p className="text-xs italic leading-relaxed text-muted">
+                  {lipSyncMode === "lipsync"
+                    ? engine === "kling"
+                      ? "Kling lip-syncs your photo directly to this audio in one step - real mouth movement, but not guaranteed to land perfectly."
+                      : `${engineDef.label} renders the scene first, then a separate lip-sync pass matches the mouth movements afterward - two steps instead of one, and honestly the weaker of the two options here.`
+                    : "The most reliable choice: your audio plays under the video with no attempt to match mouth movements - nothing to look uncanny if it misses."}
+                </p>
+              </div>
+            )}
+          </div>
+        </details>
+
+        <div className="rounded-2xl bg-white/80 p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-sm text-foreground">
+              <span className="text-2xl font-extrabold">{PAYGO_PRICE_LABEL}</span>{" "}
+              <span className="text-muted">
+                per video · {engineDef.label} · {durationSeconds ?? engineDef.durationSeconds}s clip
+              </span>
+            </p>
+            {balanceLoaded && hasCredit && (
+              <p className="text-xs font-semibold text-purple">
+                {balance} credit{balance === 1 ? "" : "s"} ready
+              </p>
+            )}
+          </div>
+          <p className="mt-0.5 text-[11px] text-muted">Same price on every model - clip length is what differs between them.</p>
+        </div>
+
+        <button
+          type="button"
+          onClick={hasCredit ? handleGenerate : () => handleBuy("single", true)}
+          disabled={loading || missingInput || buyingPack !== null || (waitingForCredit && !hasCredit)}
+          className="w-full rounded-2xl bg-purple py-4 text-base font-bold text-white shadow-soft disabled:opacity-50"
+        >
+          {loading
+            ? useDirector && directorAvailable
+              ? "Directing & generating… (usually 30-90s)"
+              : "Generating… (usually 30-90s)"
+            : waitingForCredit && !hasCredit
+              ? "Confirming your payment…"
+              : hasCredit
+                ? "Generate my video (1 credit)"
+                : buyingPack === "single"
+                  ? "Opening secure checkout…"
+                  : `Pay ${PAYGO_PRICE_LABEL} & generate →`}
+        </button>
+
+        <div className="-mt-1 flex flex-col items-center gap-1 text-center text-[11px] text-muted">
+          <p>Secure checkout by Stripe · card, Apple Pay or Google Pay · no account needed</p>
+          <p>
+            Making a few?{" "}
+            {VIDEO_CREDIT_PACKS.filter((p) => p.credits > 1).map((pack, i) => (
+              <span key={pack.id}>
+                {i > 0 && " · "}
+                <button
+                  type="button"
+                  onClick={() => handleBuy(pack.id, false)}
+                  disabled={buyingPack !== null}
+                  className="font-semibold text-purple underline disabled:opacity-50"
+                >
+                  {buyingPack === pack.id ? "Redirecting…" : `${pack.credits} for $${(pack.priceUsdCents / 100).toFixed(0)}`}
+                </button>
+              </span>
+            ))}
+          </p>
+          {balanceLoaded && hasCredit && !signedIn && (
+            <p>
+              Your credits are saved in this browser.{" "}
+              <a href="/account" className="font-semibold text-purple underline">
+                Sign in
+              </a>{" "}
+              any time to keep them across devices.
+            </p>
           )}
+        </div>
 
-          <textarea
-            className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-            rows={3}
-            placeholder={audioMode === "lucy" ? "What should the voice say?" : PAYGO_PROMPT_PLACEHOLDER}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
+        {notice && <p className="rounded-2xl bg-white/80 p-3 text-sm text-foreground">{notice}</p>}
+        {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
+        {directedPrompt && (
+          <div className="rounded-2xl bg-white/80 p-3">
+            <p className="text-[11px] font-semibold text-muted">{PROMPT_DIRECTOR_LABEL} sent this prompt to {engineDef.label}:</p>
+            <p className="mt-1 text-xs italic text-muted">{directedPrompt}</p>
+          </div>
+        )}
+        {result && (
+          <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="paygo" silentVideoUrl={result.silentVideoUrl} />
+        )}
 
-          <button
-            onClick={balance < 1 ? () => handleBuy("single") : handleGenerate}
-            disabled={
-              loading ||
-              (balance >= 1 && !prompt.trim() && !promptSkippable) ||
-              (audioMode === "own" && !audio.selectedBlob) ||
-              buyingPack !== null
-            }
-            className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft disabled:opacity-50"
-          >
-            {loading
-              ? "Generating… (usually 30-90s)"
-              : balance < 1
-                ? buyingPack === "single"
-                  ? "Redirecting…"
-                  : "Generate my video"
-                : "Generate (1 credit)"}
-          </button>
-
-          {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
-          {result && (
-            <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="paygo" silentVideoUrl={result.silentVideoUrl} />
-          )}
-        </>
-      )}
-
-      <p className="text-xs italic leading-relaxed text-muted">
-        Same flat price per video regardless of engine - real clip length differs (Kling is a hard 5s, the other four are 8s).
-        When you add audio, you choose: a real lip-sync attempt, or a plain voiceover with no mouth-matching at all -
-        your call, honestly labeled either way.
-      </p>
-    </Card>
+        <p className="text-center text-[11px] italic text-muted">
+          Never use someone&apos;s face or voice without their permission. Failed or blocked generations are refunded automatically.
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -2039,7 +2358,7 @@ export default function Home() {
     fetch("/api/warm-inference", { method: "POST" }).catch(() => {});
   }, []);
 
-  // Lets CinematicSceneSection's "try it yourself" box hand its prompt/photo
+  // Lets CinematicExamplesSection's "try it yourself" box hand its prompt/photo
   // down into the real generator above instead of losing them - seedVersion
   // increments on every handoff so PayAsYouGoVideoSection's effect can tell
   // a brand-new handoff apart from the same prompt/blob being passed again.
@@ -2053,45 +2372,50 @@ export default function Home() {
     setSeedVersion((v) => v + 1);
   }
 
+  // Page order (2026-09-23, per direct request): 1) the generator - prompt,
+  // model, price, pay with no signup; 2) our prompt guide incl. JoJo;
+  // 3) Harper; 4) cinematic examples; then the free editor; and voice
+  // (text to speech, then cloning with its up-front requirements) last.
   return (
-    <div className="min-h-screen px-6 py-20">
-      <main className="mx-auto flex max-w-2xl flex-col gap-10">
-        <SiteHeader
-          title="Lucy Labs"
-          subtitle={
-            <>
-              <p className="font-semibold text-foreground">All things AI voice and video.</p>
-              <p className="mt-1">
-                <strong className="text-foreground">Step 1</strong> - Watch a movie scene or ad that you love, really pay attention to each camera angle, movement, expressions and subtle details.
-                <br />
-                <strong className="text-foreground">Step 2</strong> - Try Seedance, Veo and leading models, give a detailed prompt and create a scene.
-                <br />
-                <strong className="text-foreground">Step 3</strong> - Create a few scenes and use our free editor to stitch it together.
-                <br />
-                <strong className="text-foreground">Result</strong> - you have a short movie or an incredible ad for your product!
-                <br />
-                Try it out and create something, one scene at a time!
-              </p>
-            </>
-          }
-          current="home"
-          logoSize={64}
-        />
-        <PresetVoiceSection />
-        <CloneVoiceSection />
+    <div className="min-h-screen px-4 py-10 sm:px-6 sm:py-16">
+      <main className="mx-auto flex max-w-2xl flex-col gap-8">
+        <header className="flex flex-col items-center gap-2 text-center">
+          <Link href="/" className="inline-flex items-center gap-2">
+            <LogoMark size={40} />
+            <span className="text-xl font-extrabold tracking-tight text-foreground">Lucy Labs</span>
+          </Link>
+          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-muted">
+            <a href="#prompt-guide" className="hover:text-foreground">Prompt guide</a>
+            <a href="#harper" className="hover:text-foreground">Examples</a>
+            <a href="#voice" className="hover:text-foreground">Voice</a>
+            <a href="/stitch" className="hover:text-foreground">Free editor</a>
+            <a href="/billing" className="hover:text-foreground">Plans</a>
+            <a href="/account" className="hover:text-foreground">My account</a>
+          </nav>
+        </header>
 
         <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedVersion={seedVersion} />
-        <CinematicSceneSection onTryItYourself={handleTryItYourself} />
+        <PromptGuideSection />
         <ProductAdSection />
+        <CinematicExamplesSection onTryItYourself={handleTryItYourself} />
 
         <VideoOptionCard
           icon="🧵"
           title="Free video editor"
-          description="Stitch different scenes together to create one video here for free. Combine your generated clips (from any section above, or your storyboard) in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
+          description="Stitch different scenes together to create one video here for free. Combine your generated clips (from the generator above, or your storyboard) in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
           href="/stitch"
           cta="Combine my videos"
           imageSrc="/vintage-camera.jpg"
         />
+
+        <div id="voice" className="flex scroll-mt-6 flex-col gap-8">
+          <div className="text-center">
+            <h2 className="text-xl font-extrabold tracking-tight">Voice</h2>
+            <p className="text-sm text-muted">Text to speech with our voices, or clone a voice with an account.</p>
+          </div>
+          <PresetVoiceSection />
+          <CloneVoiceSection />
+        </div>
 
         <Footer />
       </main>

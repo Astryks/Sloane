@@ -525,6 +525,13 @@ export async function initSchema() {
   // 2026-09-17) - this route never had an atomic claim at all until now,
   // unlike every other paygo/subscription path's merge/lipsync step.
   await sql`ALTER TABLE product_ad_jobs ADD COLUMN IF NOT EXISTS lipsync_claimed_at TIMESTAMPTZ`;
+  // Guest checkout (2026-09-23): pay-as-you-go video no longer needs an
+  // account. A guest is a real users row (so video_credits/
+  // video_paygo_jobs/stripe_credit_grants all keep their existing FKs
+  // unchanged) with a placeholder, never-emailed address - see
+  // createGuestUser. getSessionUser deliberately never returns a guest;
+  // only the paygo routes use getPaygoSessionUser, which does.
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT false`;
 }
 
 // Every claim*ForFalSubmit/claim*ForMergeSubmit function below uses this
@@ -887,6 +894,7 @@ export type User = {
   email: string;
   google_id: string | null;
   created_at: string;
+  is_guest?: boolean;
 };
 
 export type Generation = {
@@ -987,6 +995,50 @@ export async function createSessionRow(userId: string): Promise<string> {
   const id = generateOpaqueToken();
   await sql`INSERT INTO sessions (id, user_id, expires_at) VALUES (${id}, ${userId}, now() + interval '30 days')`;
   return id;
+}
+
+// Guest checkout (2026-09-23) - see the is_guest column comment in
+// initSchema. The placeholder address uses the reserved `.invalid` TLD
+// (RFC 2606) so it can never collide with or deliver to a real inbox, and
+// satisfies users.email's existing NOT NULL UNIQUE without a schema change.
+export async function createGuestUser(): Promise<User> {
+  const rows = await sql`
+    INSERT INTO users (email, is_guest)
+    VALUES ('guest-' || gen_random_uuid()::text || '@guest.lucylabs.invalid', true)
+    RETURNING *
+  `;
+  return rows[0] as User;
+}
+
+// Runs when a guest signs in to a real account: their unspent video
+// credits, paygo jobs (so downloads keep working) and Stripe grant ledger
+// rows move over, then the guest row is deleted (its session cascades).
+// One statement so a failure can't leave credits half-moved - same
+// single-statement-is-atomic reasoning as claimAndGrantVideoCredits.
+export async function mergeGuestIntoUser(guestId: string, userId: string): Promise<void> {
+  if (guestId === userId) return;
+  await sql`
+    WITH guest AS (
+      SELECT id FROM users WHERE id = ${guestId} AND is_guest = true
+    ), moved_credits AS (
+      INSERT INTO video_credits (user_id, balance)
+      SELECT ${userId}, vc.balance FROM video_credits vc JOIN guest g ON g.id = vc.user_id WHERE vc.balance > 0
+      ON CONFLICT (user_id) DO UPDATE SET balance = video_credits.balance + EXCLUDED.balance, updated_at = now()
+      RETURNING user_id
+    ), moved_jobs AS (
+      UPDATE video_paygo_jobs SET user_id = ${userId} WHERE user_id IN (SELECT id FROM guest) RETURNING id
+    ), moved_grants AS (
+      UPDATE stripe_credit_grants SET user_id = ${userId} WHERE user_id IN (SELECT id FROM guest) RETURNING event_id
+    ), zeroed AS (
+      UPDATE video_credits SET balance = 0 WHERE user_id IN (SELECT id FROM guest) RETURNING user_id
+    )
+    SELECT (SELECT count(*) FROM moved_credits) + (SELECT count(*) FROM moved_jobs)
+         + (SELECT count(*) FROM moved_grants) + (SELECT count(*) FROM zeroed) AS n
+  `;
+  // Separate statement: a data-modifying CTE can't see rows its siblings
+  // just updated, so deleting the guest in the same statement would race
+  // the ON DELETE CASCADE against the moves above.
+  await sql`DELETE FROM users WHERE id = ${guestId} AND is_guest = true`;
 }
 
 export async function getSessionUserRow(sessionId: string): Promise<User | null> {

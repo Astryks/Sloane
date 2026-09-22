@@ -64,6 +64,23 @@ export async function POST(req: NextRequest) {
     // comment above for why. No free_tier_id path at all anymore; an
     // anonymous/free visitor is turned away here before touching any quota
     // or GPU resource.
+    // Requirements (2026-09-23), all shown on the homepage before signup:
+    // a real account (so every clone is tied to a contactable person), a
+    // paid plan (access_token below), and per clone, whose voice it is plus
+    // the typed consent statement. Checked before the paid-plan/quota
+    // steps so nothing is reserved for someone who can't clone yet.
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Create an account or sign in to clone a voice." }, { status: 401 });
+    }
+    const voiceOwner = String(form.get("voice_owner") ?? "");
+    const speakerName = String(form.get("speaker_name") ?? "").trim().slice(0, 120);
+    if (voiceOwner !== "self" && voiceOwner !== "other") {
+      return NextResponse.json({ error: "Tell us whose voice this is." }, { status: 400 });
+    }
+    if (voiceOwner === "other" && !speakerName) {
+      return NextResponse.json({ error: "Enter the name of the person whose voice this is." }, { status: 400 });
+    }
     if (!accessToken) {
       return NextResponse.json({ error: "Voice cloning is available on a paid plan - see /billing to subscribe." }, { status: 402 });
     }
@@ -98,15 +115,14 @@ export async function POST(req: NextRequest) {
     }
     const exaggeration = form.get("exaggeration");
     const speed = form.get("speed");
-    const sessionUser = await getSessionUser();
     // Awaited (not fire-and-forget) so a serverless function returning its
     // response doesn't race/kill this write - recordConsent itself never
     // throws, so this can't block or fail the actual generation.
     await recordConsent({
-      userId: sessionUser?.id ?? null,
+      userId: sessionUser.id,
       contentType: "voice_reference",
       feature: "clone-voice",
-      consentText: CONSENT_TEXT,
+      consentText: `${CONSENT_TEXT} [voice: ${voiceOwner === "self" ? "own voice" : `${speakerName} (with permission)`}]`,
       ipAddress: req.headers.get("x-forwarded-for"),
     });
 

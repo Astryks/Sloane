@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getVideoPaygoJob, getCharacterVideoJob, getSubscriptionVideoJob, getProductAdJob } from "@/lib/db";
-import { getSessionUser } from "@/lib/auth";
+import { getSessionUser, getPaygoSessionUser } from "@/lib/auth";
 
 // Streams a finished video back through our own domain with a real
 // "download" disposition, instead of sending the user off to fal's raw CDN
@@ -36,7 +36,8 @@ async function resolveVideoUrl(jobType: JobType, jobId: string, accessToken: str
       return variant === "silent" ? job.silent_video_url : job.final_video_url;
     }
     case "paygo": {
-      const user = await getSessionUser();
+      // Guests own paygo jobs too (no-signup checkout).
+      const user = await getPaygoSessionUser();
       if (!user) return null;
       const job = await getVideoPaygoJob(jobId);
       if (!job || job.user_id !== user.id || job.status !== "completed") return null;

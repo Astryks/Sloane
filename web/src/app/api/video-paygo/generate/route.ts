@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/auth";
+import { getPaygoSessionUser } from "@/lib/auth";
 import {
   initSchema,
   spendVideoCredit,
@@ -14,6 +14,11 @@ import { submitFalJob, uploadBufferToFal, hasEnoughFalBalanceToGenerate } from "
 import { submitModalJob } from "@/lib/modal";
 import { probeAudioDurationSeconds, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 import { PRESET_VOICES } from "@/lib/presetVoices";
+import { directPrompt } from "@/lib/promptDirector";
+
+// The optional GPT-6 Astra prompt-director call (see promptDirector.ts)
+// adds up to ~25s before submission - needs more than the default limit.
+export const maxDuration = 60;
 
 const MAX_PROMPT_LENGTH = 600;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
@@ -56,9 +61,9 @@ type LipSyncMode = "lipsync" | "voiceover";
 export async function POST(req: NextRequest) {
   try {
     await initSchema();
-    const user = await getSessionUser();
+    const user = await getPaygoSessionUser();
     if (!user) {
-      return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+      return NextResponse.json({ error: "Buy a video credit first - no account needed" }, { status: 401 });
     }
 
     const form = await req.formData();
@@ -71,6 +76,7 @@ export async function POST(req: NextRequest) {
     const lipSyncMode = (String(form.get("lip_sync_mode") ?? "lipsync") || "lipsync") as LipSyncMode;
     const durationField = form.get("duration_seconds");
     const aspectRatioField = form.get("aspect_ratio");
+    const director = String(form.get("director") ?? "");
 
     if (!VIDEO_PAYGO_ENGINES[engine]) {
       return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
@@ -208,6 +214,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
+    // Optional GPT-6 Astra rewrite (see promptDirector.ts) - after the
+    // credit is spent so it can't be used as a free LLM, and skipped for
+    // a Lucy voice, where the prompt is the literal TTS script. Falls back
+    // to the user's own words on any failure.
+    let finalPrompt = prompt;
+    let directedPrompt: string | null = null;
+    if (director === "astra" && prompt && !wantsLucyVoice && !useKlingAvatar) {
+      directedPrompt = await directPrompt({
+        prompt,
+        engineLabel: engineDef.versionLabel,
+        durationSeconds: requestedDurationSeconds ?? engineDef.durationSeconds,
+        hasReferenceImage: hasImage,
+      });
+      if (directedPrompt) finalPrompt = directedPrompt;
+    }
+
     // "voiceover" mode never uses Avatar (even on Kling) - every engine
     // renders normally, then gets its audio muxed on afterward, so
     // needsMerge now also fires for Kling whenever lip-sync wasn't chosen.
@@ -228,7 +250,7 @@ export async function POST(req: NextRequest) {
       jobId = await createVideoPaygoJob({
         userId: user.id,
         engine,
-        prompt,
+        prompt: finalPrompt,
         falEndpoint,
         inputImageUrl,
         inputAudioUrl,
@@ -255,10 +277,10 @@ export async function POST(req: NextRequest) {
       }
       const falInput = useKlingAvatar
         ? { image_url: inputImageUrl, audio_url: inputAudioUrl }
-        : buildFalInput(engine, prompt, inputImageUrl, !needsMerge && engine === "veo", ownAudioSeconds, requestedDurationSeconds, requestedAspectRatio);
+        : buildFalInput(engine, finalPrompt, inputImageUrl, !needsMerge && engine === "veo", ownAudioSeconds, requestedDurationSeconds, requestedAspectRatio);
       const requestId = await submitFalJob(falEndpoint, falInput);
       await setVideoPaygoJobRequestId(jobId, requestId);
-      return NextResponse.json({ jobId });
+      return NextResponse.json({ jobId, directedPrompt });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Submission failed";
       await failVideoPaygoJob(jobId, message);

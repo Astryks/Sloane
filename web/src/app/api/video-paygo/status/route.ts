@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/auth";
+import { getPaygoSessionUser } from "@/lib/auth";
 import {
   getVideoPaygoJob,
   claimVideoPaygoJobForFalSubmit,
@@ -28,9 +28,9 @@ import { VIDEO_PAYGO_ENGINES, buildFalInput, type VideoEngine } from "@/lib/vide
 import { probeAudioDurationSeconds, padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 
 export async function GET(req: NextRequest) {
-  const user = await getSessionUser();
+  const user = await getPaygoSessionUser();
   if (!user) {
-    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+    return NextResponse.json({ error: "Buy a video credit first - no account needed" }, { status: 401 });
   }
 
   const jobId = req.nextUrl.searchParams.get("jobId");
