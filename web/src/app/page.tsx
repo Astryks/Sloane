@@ -1713,10 +1713,9 @@ function ProductAdSection() {
 type PaygoAudioMode = "none" | "own" | "lucy";
 
 const PAYGO_PROMPT_PLACEHOLDER =
-  'Give a prompt and really add the details - the more specific, the better the result. For example, one we ' +
-  'used for testing: "A confident professional woman holds this exact tumbler and gestures energetically as she ' +
-  'talks to the camera, camera slowly pans across a bright modern sunlit room, energetic, playful, confident, ' +
-  'cinematic commercial ad, photorealistic, 4k"';
+  "Prompting is everything - the models honestly work best one scene at a time. Create a storyboard of your " +
+  "video and study how the movies and ads you like are made. Add images of your character and location (under " +
+  "More options), and make your prompt extremely detailed, one scene at a time.";
 
 // Draft saved across the Stripe redirect (2026-09-23) - checkout is now the
 // "Pay & generate" step itself, so without this the visitor would come back
@@ -2030,16 +2029,14 @@ function PayAsYouGoVideoSection({
                   setDurationSeconds(null);
                   setAspectRatio(null);
                 }}
-                className={`relative w-full rounded-2xl border p-2 text-center text-xs transition ${
+                className={`w-full rounded-2xl border p-2 text-center text-xs transition ${
                   engine === id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted hover:border-purple/40"
                 }`}
               >
-                {e.popular && (
-                  <span className={`absolute right-1.5 top-1.5 text-[9px] font-bold uppercase ${engine === id ? "text-white/80" : "text-purple"}`}>
-                    Popular
-                  </span>
-                )}
-                <div className="font-bold">{e.label}</div>
+                <div className={`text-[9px] font-bold uppercase leading-none ${e.popular ? (engine === id ? "text-white/80" : "text-purple") : "invisible"}`}>
+                  Popular
+                </div>
+                <div className="mt-1 font-bold">{e.label}</div>
                 <div className={`mt-0.5 text-[11px] leading-snug ${engine === id ? "text-white/90" : "text-muted"}`}>{e.pickerNote}</div>
               </button>
             ))}
@@ -2379,12 +2376,12 @@ export default function Home() {
   return (
     <div className="min-h-screen px-4 py-10 sm:px-6 sm:py-16">
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
-        <header className="flex flex-col items-center gap-2 text-center">
+        <header className="shadow-soft-lg flex flex-col items-center gap-3 rounded-[28px] border border-white/60 bg-surface/90 px-6 py-5 text-center backdrop-blur-xl">
           <Link href="/" className="inline-flex items-center gap-2">
             <LogoMark size={40} />
             <span className="text-xl font-extrabold tracking-tight text-foreground">Lucy Labs</span>
           </Link>
-          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-muted">
+          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-foreground/70">
             <a href="#prompt-guide" className="hover:text-foreground">Prompt guide</a>
             <a href="#harper" className="hover:text-foreground">Examples</a>
             <a href="#voice" className="hover:text-foreground">Voice</a>
