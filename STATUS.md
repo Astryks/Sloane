@@ -1,5 +1,12 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - Homepage AI models review; cinematic section removed
+
+- **Where**: lucylabs.app homepage (`web/src/app/page.tsx`) + PromptGuide cross-link.
+- **ProductAdSection**: title **Our review of the AI models**, `id="ai-models-review"`; Sid lead copy as Card subtitle; Harper + tumbler thumbs kept; Kling / Grok / MiniMax / Veo / Seedance switcher + videos kept. Seedance `blockedReason`/note: best for hyper realistic when used **directly**; we offer it on Lucy but **cannot** get hyper realistic through us. Kling + Veo called strongest of the in-Lucy comparison; tumbler disclaimer kept; lip-sync caveat trimmed under the lead.
+- **Removed**: `CinematicExamplesSection`, `CINEMATIC_STORYBOARD`, `MODEL_SHOWCASE_PROMPT`, `TryYourOwnPromptCTA`. Page order: … → AI models review → **Free video editor** → …
+- **Links**: SiteNav + PromptGuide `#harper` → `#ai-models-review`.
+
 ## Latest update, 2026-09-23 - /ads Lucy stills stay on page (inline generate canvas)
 
 - **Problem**: Make stills **GPT Image on Lucy** / **Nano Banana Pro on Lucy** chips linked to `/#prompt-guide` and left `/ads`.

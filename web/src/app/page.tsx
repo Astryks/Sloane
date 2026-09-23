@@ -828,9 +828,8 @@ function useReferenceMedia() {
   // specific URL(s) being dropped, and an unmount effect below revokes
   // whatever's still left if the user navigates away with items still in
   // the list.
-  // Used to seed a photo picked somewhere else on the page (see
-  // TryYourOwnPromptCTA below) directly into this hook's item list,
-  // without needing a real FileList the way handleFiles does.
+  // Seed a photo handed in from elsewhere on the page without needing a
+  // real FileList the way handleFiles does.
   function addItem(blob: Blob) {
     setItems((prev) => {
       setSelectedIndex(prev.length);
@@ -1029,89 +1028,7 @@ function MultiAudioField({ audio }: { audio: ReturnType<typeof useMultiAudio> })
   );
 }
 
-// Shared "try it yourself" block for showcase/comparison sections
-// (2026-09-13, upload added 2026-09-14 per direct feedback - "users need
-// an option to upload their own image" - a text-only box implied you
-// couldn't bring a photo into this, when pay-as-you-go genuinely takes
-// one). These sections show FIXED, already-rendered demo videos, not a
-// live generator, so clicking "Generate my video" here can't submit a
-// real job on its own - instead it hands the prompt AND photo down to the
-// real pay-as-you-go generator below (via onTryItYourself, seeding that
-// section's own state) and scrolls to it, rather than losing what was
-// just typed/uploaded.
-function TryYourOwnPromptCTA({
-  defaultPrompt,
-  onTryItYourself,
-}: {
-  defaultPrompt: string;
-  onTryItYourself: (prompt: string, imageBlob: Blob | null) => void;
-}) {
-  const [prompt, setPrompt] = useState(defaultPrompt);
-  const media = useReferenceMedia();
-
-  function handleClick() {
-    onTryItYourself(prompt, media.imageBlob);
-    document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <textarea
-        className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-        rows={3}
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-      />
-      <ReferenceMediaField media={media} label="Upload your own photo (optional)" />
-      <button onClick={handleClick} className="w-full rounded-full bg-purple py-3 text-sm font-bold text-white shadow-soft">
-        Use this below with pay as you go
-      </button>
-    </div>
-  );
-}
-
-// --- Model comparison showcase: same photo + same prompt, five engines ---
-
-const MODEL_SHOWCASE_PROMPT =
-  'Cinematic wide shot on the lunar surface: this exact same woman walks slowly beside a NASA-style lunar rover, dust kicking up under her boots, Earth hanging in the black sky, dramatic lighting, photorealistic, 4K quality.';
-
-// --- Cinematic short storyboard example: the moon-shot prompt above, broken
-// into a real shot-by-shot sequence instead of one single-shot generation.
-// Demonstrates the same storyboarding technique used for the JoJo case
-// study (one clear subject, one camera move per shot, emotion shown through
-// physical action rather than stated outright, a style/quality line to keep
-// results consistent) - real filmmaking/prompt-engineering practice, not
-// specific to any one video model. Since every engine we use only accepts
-// one photo/prompt per generation, each shot below would be its own
-// generation in the storyboard builder, then combined in /stitch.
-const CINEMATIC_STORYBOARD: { shot: string; camera: string; action: string }[] = [
-  {
-    shot: "1. Establishing",
-    camera: "Wide, fixed camera, low angle looking up at the airlock hatch.",
-    action:
-      "The hatch cycles open. She steps out onto the surface for the first time, one hand braced on the frame. Earth hangs small and blue in the black sky behind her.",
-  },
-  {
-    shot: "2. Walking",
-    camera: "Medium tracking shot, camera dollies alongside her at a matching, unhurried pace.",
-    action:
-      "She walks slowly beside the rover, dust kicking up under her boots with every step. Her breathing is visible and steady - deliberate, not rushed.",
-  },
-  {
-    shot: "3. The pause",
-    camera: "Close-up, camera holds completely still.",
-    action:
-      "She stops, tilts her head back, and looks up at Earth. Her shoulders drop, she exhales, and a small, private smile settles in - no dialogue, the moment reads entirely through the face.",
-  },
-  {
-    shot: "4. Walking on",
-    camera: "Wide shot, slow pull-back.",
-    action:
-      "She turns and keeps walking, the rover trailing behind her, both gradually shrinking into the dark horizon as the frame widens.",
-  },
-];
-
-// --- "Just for fun" product-ad showcase: Harper + our own product, real 2-scene ad ---
+// --- AI models review showcase: Harper + tumbler product ad across engines ---
 
 const PRODUCT_AD_SCRIPT =
   "“I'm on a yoga mat. Now I'm in a corner office, forty floors up. Anything is possible when your tumbler " +
@@ -1129,7 +1046,7 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
   {
     id: "kling",
     name: "Kling",
-    note: "Real lip-sync end to end (Kling's Avatar feature drives both scenes directly from the audio) - the strongest result of the three, crisp logo and a genuine outfit + location change.",
+    note: "One of the two strongest results in this Lucy comparison (alongside Veo). Real lip-sync end to end (Kling's Avatar feature drives both scenes directly from the audio) - crisp logo and a genuine outfit + location change.",
     videoUrl: "/product-showcase/harper_final_kling.mp4",
   },
   {
@@ -1147,112 +1064,30 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
   {
     id: "veo",
     name: "Veo",
-    note: "Can't generate Harper specifically (see below), but here's an earlier real test showing it will incorporate our actual product when the person isn't a named identity - a generic, unnamed woman picking up the tumbler. Real caveat: watch the label closely - it double-exposes/ghosts for a moment instead of staying crisp, so logo fidelity isn't perfect here either.",
+    note: "One of the two strongest results in this Lucy comparison (alongside Kling). Can't generate Harper specifically (see below), but here's an earlier real test showing it will incorporate our actual product when the person isn't a named identity - a generic, unnamed woman picking up the tumbler. Real caveat: watch the label closely - it double-exposes/ghosts for a moment instead of staying crisp, so logo fidelity isn't perfect here either.",
     videoUrl: "/product-showcase/veo_generic_cup.mp4",
   },
   {
     id: "seedance",
     name: "Seedance",
-    note: "Not re-tested this round - see below for why.",
+    note: "Actually by far the best model for hyper realistic video right now — when you connect to Seedance directly. We offer Seedance on Lucy Labs, but we cannot get hyper realistic results through us.",
     videoUrl: null,
     blockedReason:
-      "Seedance's own safety policy blocks any photorealistic AI-generated face outright, before it even looks at the rest of the scene - it can't tell a convincing AI face from a real photo of a real person, so it refuses both. Nothing about wording gets around this one; we've reproduced it three separate times in this project.",
+      "Seedance is by far the best model for hyper realistic videos when you connect to them directly. We offer Seedance on Lucy Labs, but we cannot get them to generate hyper realistic videos with us.",
   },
 ];
-
-// Cinematic examples (2026-09-23 layout) - real clips we generated, each
-// with the exact prompt used, plus the 4-shot breakdown. The how-to rules
-// themselves moved up into PromptGuideSection.
-function CinematicExamplesSection({ onTryItYourself }: { onTryItYourself: (prompt: string, imageBlob: Blob | null) => void }) {
-  const storyboardDetailsRef = useRef<HTMLDetailsElement | null>(null);
-
-  // Lets a link from elsewhere on the site land here already expanded.
-  useEffect(() => {
-    if (window.location.hash === "#cinematic-storyboard" && storyboardDetailsRef.current) {
-      storyboardDetailsRef.current.open = true;
-    }
-  }, []);
-
-  return (
-    <Card
-      id="cinematic-examples"
-      wash="bg-purple-wash/90"
-      iconColor="text-purple"
-      icon="🎬"
-      title="Cinematic video examples"
-      subtitle="Real clips made with the generator above - your own photo dropped into a brand-new scene, no green screen, no set."
-    >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
-          <video className="mx-auto w-full rounded-xl" src="/trailers/kirsty-moon-veo-audio.mp4" controls loop muted playsInline />
-          <p className="mt-1.5 text-xs font-semibold text-foreground">Veo · photo into a new scene</p>
-          <div className="mt-1.5 rounded-xl bg-cream p-2">
-            <p className="text-[11px] font-semibold text-muted">We uploaded a photo and used this prompt:</p>
-            <p className="mt-0.5 text-[11px] italic text-muted">{MODEL_SHOWCASE_PROMPT}</p>
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/60 bg-white/60 p-3">
-          <video className="mx-auto w-full rounded-xl" src="/trailers/kirsty-kling-dub.mp4" controls loop muted playsInline />
-          <p className="mt-1.5 text-xs font-semibold text-foreground">Kling · real photo, dubbed with a Lucy voice</p>
-          <p className="mt-1 text-[11px] text-muted">
-            Our pick for keeping your exact face, not a lookalike. Honest caveat: even Kling&apos;s lip-sync isn&apos;t
-            perfect every time, which is why you can also skip lip-sync and play your audio as a plain voiceover.
-          </p>
-        </div>
-      </div>
-
-      <div className="rounded-2xl bg-white/70 p-3">
-        <p className="mb-2 text-xs font-semibold text-muted">Want to try your own version of that moon shot?</p>
-        <TryYourOwnPromptCTA defaultPrompt={MODEL_SHOWCASE_PROMPT} onTryItYourself={onTryItYourself} />
-      </div>
-
-      <div id="cinematic-storyboard" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
-        <p className="text-xs font-bold uppercase tracking-wide text-purple">From one shot to a short film</p>
-        <details ref={storyboardDetailsRef} className="mt-2 rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-purple">See it applied: the moon shot above, turned into a 4-shot short</summary>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[480px] border-collapse text-xs">
-              <thead>
-                <tr className="text-left text-muted">
-                  <th className="w-28 border-b border-border pb-1 pr-2 font-semibold">Shot</th>
-                  <th className="w-1/3 border-b border-border pb-1 pr-3 font-semibold">Camera</th>
-                  <th className="border-b border-border pb-1 font-semibold">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {CINEMATIC_STORYBOARD.map((s, i) => (
-                  <tr key={i} className="align-top">
-                    <td className="border-b border-border py-2 pr-2 font-semibold text-foreground">{s.shot}</td>
-                    <td className="whitespace-pre-line border-b border-border py-2 pr-3 text-muted">{s.camera}</td>
-                    <td className="whitespace-pre-line border-b border-border py-2 text-muted">{s.action}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-[11px] italic text-muted">
-            The single prompt above compresses all of this into one shot. Written as 4 separate shots instead, each
-            generated on its own and stitched together, it reads as a real short film with a beginning, a quiet
-            middle beat, and an ending - not just one clip.
-          </p>
-        </details>
-
-      </div>
-    </Card>
-  );
-}
 
 function ProductAdSection() {
   const [modelId, setModelId] = useState(PRODUCT_AD_MODELS[0].id);
   const model = PRODUCT_AD_MODELS.find((m) => m.id === modelId)!;
   return (
     <Card
-      id="harper"
+      id="ai-models-review"
       wash="bg-purple-wash/90"
       iconColor="text-purple"
       icon="🥤"
-      title="Meet Harper: an AI-made product ad"
-      subtitle="A real, spoken, multi-scene ad - built with our AI character Harper, run through five engines to see which one could pull it off."
+      title="Our review of the AI models"
+      subtitle="We created an AI character, Harper. We made up a product, a Lucy Labs tumbler. We generated some videos without the detailed prompt structure. We can see the results from different models below. Kling and Veo are the best. Seedance is actually by far the best model right now but you need to connect to them directly to generate hyper realistic videos. We offer Seedance anyway but we cannot get them to generate hyper realistic videos with us."
     >
       <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -1263,9 +1098,8 @@ function ProductAdSection() {
             <img src="/product-showcase/lucylabs_cup_v2.png" alt="The tumbler Harper is trying to sell" className="h-20 w-20 rounded-xl object-contain" />
           </div>
           <p className="text-sm leading-relaxed text-muted">
-            We built an AI character we call Harper. We wanted to see if she could actually sell something - so we
-            handed her a real script and this tumbler, and ran the same two-scene ad (yoga mat to corner office)
-            through five different video engines to see which one could pull it off.
+            Same two-scene ad (yoga mat to corner office) run through five engines - switch models below to
+            compare. Harper + tumbler thumbnails are the references we used.
           </p>
         </div>
       </div>
@@ -1317,19 +1151,18 @@ function ProductAdSection() {
       </div>
 
       <p className="text-xs text-muted">
-        Real-person policies explain the other two: <strong>Seedance</strong> blocks any photorealistic AI face
-        outright, no matter the prompt - left out of this round entirely rather than re-spending credits to
-        reconfirm an already-proven block. <strong>Veo</strong> flags prompts that read like a specific real
-        person endorsing a named brand, so it can&apos;t generate Harper by name - but as the clip above shows, it
-        will render a generic, unnamed person holding the real product once the named-identity part is dropped.
+        Of the results you can play above on Lucy, <strong>Kling</strong> and <strong>Veo</strong> came out
+        strongest. <strong>Seedance</strong> is actually by far the best model for hyper-realistic video when you
+        connect to them directly - we offer Seedance on Lucy, but we cannot get hyper-realistic results through us.
+        Separate Veo caveat: it flags prompts that read like a specific real person endorsing a named brand, so it
+        can&apos;t generate Harper by name - but as the clip above shows, it will render a generic, unnamed person
+        holding the real product once the named-identity part is dropped.
       </p>
 
       <p className="text-xs text-muted">
-        Caveat on the dubbing itself: watching all three side by side, <strong>Kling&apos;s lip-sync is clearly the
-        best of the three</strong> - it generates the mouth movement and audio together in one pass. Grok and
-        MiniMax&apos;s two-step process (silent video, then a separate lip-sync pass laid over it afterward) is
-        real and does work, but the mouth-to-word match is noticeably less convincing than Kling&apos;s. If a
-        spoken, dubbed ad is what you actually need, Kling is the one to pick today.
+        Lip-sync note: <strong>Kling&apos;s lip-sync is the best of the three dubbed clips</strong> - mouth and audio
+        together in one pass. Grok and MiniMax use a two-step process (silent video, then a separate lip-sync pass)
+        that works, but the mouth-to-word match is less convincing.
       </p>
 
       <p className="text-xs text-muted">
@@ -1372,7 +1205,7 @@ function SiteNav() {
       </Link>
       <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-foreground/70">
         <a href="#prompt-guide" className="hover:text-foreground">Prompt guide</a>
-        <a href="#harper" className="hover:text-foreground">Examples</a>
+        <a href="#ai-models-review" className="hover:text-foreground">AI models</a>
         <a href="#voice" className="hover:text-foreground">Voice</a>
         <a href="/stitch" className="hover:text-foreground">Free editor</a>
         <a href="/billing" className="hover:text-foreground">Plans</a>
@@ -1466,9 +1299,8 @@ function PayAsYouGoVideoSection({
   const optionsRef = useRef<HTMLDetailsElement | null>(null);
 
   const engineDef = VIDEO_PAYGO_ENGINES[engine];
-  // Picks up a prompt/photo handed down from the examples' "try it
-  // yourself" box (see TryYourOwnPromptCTA) - keyed on seedVersion so it
-  // only fires on an actual new handoff, not every render.
+  // Picks up a prompt/engine (and optional photo) handed down from Prompt
+  // Guide - keyed on seedVersion so it only fires on an actual new handoff.
   useEffect(() => {
     if (seedVersion === 0) return;
     if (seedPrompt) setPrompt(seedPrompt);
@@ -2078,10 +1910,9 @@ export default function Home() {
     fetch("/api/warm-inference", { method: "POST" }).catch(() => {});
   }, []);
 
-  // Lets CinematicExamplesSection's "try it yourself" box hand its prompt/photo
-  // down into the real generator above instead of losing them - seedVersion
-  // increments on every handoff so PayAsYouGoVideoSection's effect can tell
-  // a brand-new handoff apart from the same prompt/blob being passed again.
+  // Lets PromptGuideSection hand a prompt/engine into the real pay-as-you-go
+  // generator - seedVersion increments on every handoff so PayAsYouGoVideoSection
+  // can tell a brand-new handoff apart from the same values being passed again.
   const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
   const [seedImageBlob, setSeedImageBlob] = useState<Blob | null>(null);
   const [seedVersion, setSeedVersion] = useState(0);
@@ -2098,10 +1929,8 @@ export default function Home() {
     handleTryItYourself(prompt, null, engine);
   }
 
-  // Page order (2026-09-23, per direct request): 1) the generator - prompt,
-  // model, price, pay with no signup; 2) Prompt guide to make hyper realistic videos (incl. JoJo);
-  // 3) Harper; 4) cinematic examples; then the free editor; and voice
-  // (text to speech, then cloning with its up-front requirements) last.
+  // Page order (2026-09-23): 1) generator; 2) Prompt guide; 3) Our review of
+  // the AI models; 4) Free video editor; then voice last.
   return (
     <div className="min-h-screen px-4 py-10 sm:px-6 sm:py-16">
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
@@ -2109,7 +1938,6 @@ export default function Home() {
         <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} />
         <PromptGuideSection onTryVideo={handleTryVideoFromGuide} />
         <ProductAdSection />
-        <CinematicExamplesSection onTryItYourself={handleTryItYourself} />
 
         <VideoOptionCard
           icon="🧵"
