@@ -63,8 +63,8 @@ const REFERENCE_KINDS: { id: ReferenceKind; label: string; hint: string }[] = [
 ];
 
 const IMAGE_ENGINES: { id: "nanobanana" | "gpt"; label: string }[] = [
-  { id: "nanobanana", label: "Nano Banana Pro" },
-  { id: "gpt", label: "GPT Image" },
+  { id: "nanobanana", label: "Nano Banana Pro on Lucy" },
+  { id: "gpt", label: "GPT Image on Lucy" },
 ];
 
 const DIRECTOR_SHOT_TEMPLATE = `[REFERENCE LOCK]
@@ -135,13 +135,13 @@ function ReferenceLibrary({
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ReferenceKind>("character");
   const [prompt, setPrompt] = useState("");
-  const [engine, setEngine] = useState<"nanobanana" | "gpt">("nanobanana");
+  const [engine, setEngine] = useState<"nanobanana" | "gpt">("gpt");
   const [variants, setVariants] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [refiningId, setRefiningId] = useState<string | null>(null);
   const [refinePrompt, setRefinePrompt] = useState("");
-  const [refineEngine, setRefineEngine] = useState<"nanobanana" | "gpt">("nanobanana");
+  const [refineEngine, setRefineEngine] = useState<"nanobanana" | "gpt">("gpt");
   const [refineVariants, setRefineVariants] = useState<string[]>([]);
   const [refineBusy, setRefineBusy] = useState(false);
   const [refineError, setRefineError] = useState("");
@@ -464,7 +464,7 @@ function SlotCard({
   const [prompt, setPrompt] = useState(slot.prompt ?? "");
   const [model, setModel] = useState(slot.video_model ?? "veo");
   const [genPrompt, setGenPrompt] = useState("");
-  const [genEngine, setGenEngine] = useState<"nanobanana" | "gpt">("nanobanana");
+  const [genEngine, setGenEngine] = useState<"nanobanana" | "gpt">("gpt");
   const [selectedRefs, setSelectedRefs] = useState<string[]>(slot.reference_ids ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
