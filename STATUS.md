@@ -1,6 +1,16 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - visual Camera move chooser on Prompt Guide
+## Latest update, 2026-09-23 - Prompt Guide accordion + red fillables + Lucy Popular + animated choosers
+
+- **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx`, `CameraMoveChooser.tsx`, new `ExpressionChooser.tsx`, CSS mini-loops in `web/src/app/globals.css`). `#jojo-case-study` + StillGenerateBox credit tracker / packs / generate path preserved.
+- **Accordion**: main guide is seven collapsed-by-default `<details>` steps — Character still · Location still · Embed character in place · Hyper-real Seedance video · Style paths (cinematic / UGC / history-influencer) · Camera + expression craft · Longer cuts / stitch. Scannable list; click to expand.
+- **Red fill-ins**: cream `PasteBox` templates auto-render `[bracketed]` blanks in `text-red-500` (character/location/hyper-real Seedance paste boxes).
+- **Popular = Lucy-only paid**: GPT Image + Nano Banana Pro (prices on chips + Generate). ChatGPT removed from Popular.
+- **Others**: ChatGPT, Gemini, Midjourney, Flux, Ideogram — outside links + honest one-liner each. **Best for hyper-real stills → Seedance: GPT Image** (on Lucy or ChatGPT). Midjourney = stylized beauty via midjourney.com (no public API). No fal/Higgsfield in UI.
+- **Animated choosers**: CSS-animated SVG mini loops (not third-party GIFs) on every camera-move card + new Expression chooser (smile, laugh, soft blink, furrowed brow, look-to-camera, look-off, whisper, long exhale, eyebrow lift, sharp inhale, lips-press→smile, weight shift). Copy phrases are Seedance-obedient concrete frame/body language (aligned with `docs/seedance-2.5-official-prompt-guide-learnings.md` + Seedance camera notes) — tip: “Phrases below are written the way Seedance follows — paste into one timed beat.”
+- **Vendor invisible**: stills sanitize + no fal/Higgsfield copy in guide UI.
+
+## Previous update, 2026-09-23 - visual Camera move chooser on Prompt Guide
 
 - **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx` + new `web/src/components/CameraMoveChooser.tsx`). StillGenerateBox / Stripe still packs / JoJo `#jojo-case-study` / Steps 1–2 Popular/Others unchanged.
 - **UX**: Step 5 (after the three style paths) ships a **Camera move chooser** — responsive card grid (2 cols mobile → 3/4 desktop). Each card: SVG diagram, title, one-line *does*, one-line *when*, **Copy prompt** (Seedance-ready phrase). Moves: dolly in/out, push-in, track L/R, orbit/arc, tilt up/down, pan L/R, handheld, static lock-off, crane/rise, whip pan, rack focus (text-only).

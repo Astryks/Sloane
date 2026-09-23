@@ -14,6 +14,7 @@ import {
 } from "@/lib/stillsPaygo";
 
 import { CameraMoveChooser } from "@/components/CameraMoveChooser";
+import { ExpressionChooser } from "@/components/ExpressionChooser";
 
 function GuideCard({
   wash,
@@ -58,15 +59,31 @@ function GuideCard({
   );
 }
 
+/** Bracketed fill-ins like [age] / [your character name] render in red. */
+function renderRedFills(text: string): ReactNode {
+  const parts = text.split(/(\[[^\]]+\])/g);
+  return parts.map((part, i) => {
+    if (/^\[[^\]]+\]$/.test(part)) {
+      return (
+        <span key={i} className="font-semibold text-red-500">
+          {part}
+        </span>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
 function PasteBox({ children }: { children: string }) {
   return (
     <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-cream p-3 text-[11px] leading-relaxed text-foreground">
-      {children}
+      {renderRedFills(children)}
     </pre>
   );
 }
 
-function Step({
+/** Collapsed-by-default accordion step — scannable list, click to expand. */
+function AccordionStep({
   n,
   title,
   children,
@@ -76,12 +93,20 @@ function Step({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
-      <p className="text-sm font-extrabold text-foreground">
-        <span className="text-purple">{n}.</span> {title}
-      </p>
-      <div className="mt-2 space-y-2 text-sm leading-relaxed text-muted">{children}</div>
-    </div>
+    <details className="group rounded-2xl border border-purple/20 bg-white/80 p-4 open:shadow-soft">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <p className="text-sm font-extrabold text-foreground">
+          <span className="text-purple">{n}.</span> {title}
+        </p>
+        <span
+          aria-hidden
+          className="shrink-0 rounded-full border border-purple/25 bg-purple-wash/50 px-2 py-0.5 text-[10px] font-bold text-purple transition group-open:rotate-180"
+        >
+          ▾
+        </span>
+      </summary>
+      <div className="mt-3 space-y-2 text-sm leading-relaxed text-muted">{children}</div>
+    </details>
   );
 }
 
@@ -119,36 +144,54 @@ const POPULAR_LUCY: LucyGen[] = [
   {
     id: "gpt",
     label: "GPT Image on Lucy",
-    blurb: "Best all-rounder right now",
+    blurb: "Best all-rounder for hyper-real character/location stills → Seedance",
     priceUsd: STILL_ENGINE_MAP.gpt.costCents / 100,
   },
   {
     id: "nanobanana",
     label: "Nano Banana Pro on Lucy",
-    blurb: "Gemini’s image model — strong too",
+    blurb: "Google’s highest-quality look when you want that finish",
     priceUsd: STILL_ENGINE_MAP.nanobanana.costCents / 100,
   },
 ];
 
-const POPULAR_EXTERNAL: ExternalGen[] = [
+/** Outside links only — honest one-liners. Never mention inference vendors. */
+const OTHER_EXTERNAL: ExternalGen[] = [
   {
     id: "chatgpt",
     label: "ChatGPT",
     href: "https://chatgpt.com",
-    blurb: "Paste outside — best all-rounder",
+    blurb:
+      "Best all-rounder for hyper-real stills when you paste outside — same GPT Image family as Lucy. You don’t need to generate on Lucy — there’s an option if you want to.",
   },
   {
     id: "gemini",
     label: "Gemini",
     href: "https://gemini.google.com",
-    blurb: "Paste outside — Nano Banana’s home",
+    blurb:
+      "Strong photoreal stills and Nano Banana’s home outside Lucy — solid if you already live in Google’s apps.",
   },
-];
-
-const OTHER_EXTERNAL: ExternalGen[] = [
-  { id: "midjourney", label: "Midjourney", href: "https://www.midjourney.com", blurb: "Paste outside" },
-  { id: "ideogram", label: "Ideogram", href: "https://ideogram.ai", blurb: "Paste outside" },
-  { id: "flux", label: "Flux", href: "https://blackforestlabs.ai", blurb: "Paste outside" },
+  {
+    id: "midjourney",
+    label: "Midjourney",
+    href: "https://www.midjourney.com",
+    blurb:
+      "Wins stylized beauty, but not the top pick for hyper-real pores/identity lock for this Seedance path — use midjourney.com directly (no public API).",
+  },
+  {
+    id: "flux",
+    label: "Flux",
+    href: "https://blackforestlabs.ai",
+    blurb:
+      "Strong photorealism via other tools — great outside option when you already have a Flux workflow.",
+  },
+  {
+    id: "ideogram",
+    label: "Ideogram",
+    href: "https://ideogram.ai",
+    blurb:
+      "Best when you need readable text in-frame (labels, signs). Less ideal as the default for face/location identity stills.",
+  },
 ];
 
 /**
@@ -325,20 +368,15 @@ function StillGenerateBox({
         )}
       </div>
 
-      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">Popular</p>
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">
+        Popular — Lucy paid stills
+      </p>
+      <p className="mb-1.5 text-[10px] leading-snug text-muted">
+        Best for hyper-real character/location stills for this guide:{" "}
+        <strong className="text-foreground">GPT Image</strong> (on Lucy or ChatGPT). Nano Banana Pro
+        when you want Google&apos;s highest-quality look.
+      </p>
       <div className="flex flex-wrap gap-1.5">
-        {POPULAR_EXTERNAL.map((e) => (
-          <a
-            key={e.id}
-            href={e.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={e.blurb}
-            className={chipClass(false)}
-          >
-            {e.label} ↗
-          </a>
-        ))}
         {POPULAR_LUCY.map((e) => (
           <button
             key={e.id}
@@ -348,26 +386,32 @@ function StillGenerateBox({
             onClick={() => setEngineId(e.id)}
             className={chipClass(engineId === e.id)}
           >
-            {e.label}
+            {e.label} · ${e.priceUsd.toFixed(2)}
           </button>
         ))}
       </div>
 
-      <p className="mb-1 mt-2 text-[10px] font-bold uppercase tracking-wide text-muted">Others</p>
-      <div className="flex flex-wrap gap-1.5">
+      <p className="mb-1 mt-2 text-[10px] font-bold uppercase tracking-wide text-muted">
+        Others — outside links
+      </p>
+      <p className="mb-1.5 text-[10px] leading-snug text-muted">
+        You don&apos;t need to generate on Lucy — there&apos;s an option if you want to. Honest takes:
+      </p>
+      <ul className="mb-2 space-y-1.5">
         {OTHER_EXTERNAL.map((e) => (
-          <a
-            key={e.id}
-            href={e.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={e.blurb}
-            className={chipClass(false)}
-          >
-            {e.label} ↗
-          </a>
+          <li key={e.id} className="flex flex-wrap items-start gap-2 text-[11px] leading-snug">
+            <a
+              href={e.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={chipClass(false)}
+            >
+              {e.label} ↗
+            </a>
+            <span className="min-w-0 flex-1 text-muted">{e.blurb}</span>
+          </li>
         ))}
-      </div>
+      </ul>
 
       <textarea
         className="mt-3 w-full rounded-xl border border-border bg-cream/60 p-3 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
@@ -439,8 +483,9 @@ function StillGenerateBox({
       )}
 
       <p className="mt-2 text-[11px] text-muted">
-        Prefer outside? Open ChatGPT / Midjourney / etc. above, paste the cream template, and bring
-        the still back here — or generate on Lucy with a still pack.
+        Prefer outside? Open ChatGPT / Midjourney / etc. under Others, paste the cream template
+        (red blanks = fill-ins), and bring the still back here — or generate on Lucy with a still
+        pack. Best all-rounder for this guide: GPT Image.
       </p>
     </div>
   );
@@ -568,13 +613,14 @@ Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz or light
       "weight to back foot",
       "sharp inhale",
     ],
-    body: `Write the body, not the mood word:
+    body: `Prefer the visual Expression chooser above (animated cards + Copy prompt) — physical cues Seedance follows, never mood words alone.
+Quick reminder:
 • Shoulders drop; a long exhale; jaw unclenches.
 • One eyebrow lifts; corner of the mouth tugs, then settles.
-• Eyes glass slightly; blink is slow; gaze holds past the lens.
+• She soft-blinks once then holds gaze at the lens.
 • Lips press together, then break into a small real smile.
-• Weight shifts to the back foot; fingers fidget once on the product.
-• Chin tips up; nostrils flare; a sharp inhale before speaking.`,
+• Tiny weight shift foot-to-foot; fingers fidget once on the product.
+• Chin tips up; nostrils flare on a sharp inhale before she speaks.`,
   },
   {
     id: "location",
@@ -611,7 +657,7 @@ Match aspect to the character sheet (9:16 or 16:9).`,
       "low / high angle",
       "extreme CU → wide",
     ],
-    body: `Prefer the visual Camera move chooser (diagram cards + Copy prompt) in Step 5 — one move per beat, describe the move not gear names.
+    body: `Prefer the visual Camera move chooser above (animated cards + Copy prompt) — one move per beat; phrases describe what the frame does so Seedance follows.
 Quick reminder:
 • Static lock-off — land a payoff / read a label.
 • Dolly in / push-in — intimacy when emotion tightens.
@@ -716,8 +762,8 @@ Friendly lengths: ~8s clips for Seedance 2.0 / 2.5.`,
 const HYPER_REAL_SEEDANCE_TEMPLATE = `REFERENCE MAP
 @Image1 is the character (face, body, wardrobe — identity only, not lighting/background).
 @Image2 is the location (environment + lighting).
-@Image3 is the product (optional — label/shape lock).
-@Image4 is the start keyframe (optional — opening composition).
+@Image3 is [your product — optional label/shape lock].
+@Image4 is [start keyframe — optional opening composition].
 
 How many images: typically 2–4 for hyper-real Lucy clips. Seedance 2.0 accepts up to ~9 refs; Seedance 2.5 up to ~30 images (soft best with 1–8 image subjects). Never re-describe the face once the sheet exists — attach @Image1.
 
@@ -725,9 +771,9 @@ INVENTORY / CONTINUITY LOCKS
 Same person as @Image1. Same place as @Image2. Relight subject to @Image2 (drop white-studio light). Feet grounded, contact shadow matching room light, correct scale. Soft breathing, natural blinks, tiny weight shifts. Hair / wardrobe / weather locked. Photoreal pores — no beauty filter.
 
 TIMED BEATS (~8s — Seedance 2.0/2.5 friendly)
-0s-3s: [framing + ONE camera move]. @Image1 [action] in @Image2. Light/weather continuity. Physical expression (not a mood word). Soft ambience.
-3s-6s: [framing + ONE different move]. Subject action advances the plot. Same light side. Optional {"short dialogue"} or <sfx>.
-6s-8s: [framing + static hold or tiny push-in]. Payoff action. Hold final frame clean.
+0s-3s: [framing + ONE camera move]. @Image1 [subject action] in @Image2. Light/weather continuity. [physical expression — not a mood word]. Soft ambience.
+3s-6s: [framing + ONE different move]. [subject action that advances the plot]. Same light side. Optional {[short dialogue]} or <[sfx]>.
+6s-8s: [framing + static hold or tiny push-in]. [payoff action]. Hold final frame clean.
 
 CONSTRAINTS
 Do not add subtitles. No logos/watermarks. Photoreal pores. Relight to scene. One move per beat. Matching shadows/scale. Prefer Seedance for this hyper-real path (Veo/Kling ok as alternatives).`;
@@ -890,7 +936,7 @@ const CHARACTER_STILL_PROMPT = `Split-screen character reference sheet, 2K, [16:
 LEFT half: full-body standing, head-to-toe, facing camera, relaxed neutral stance.
 RIGHT half: tight chest-up portrait of the SAME person, same wardrobe, same lighting.
 
-Subject: [age], [build], [2–3 distinguishing features], [hair], wearing [wardrobe], [demeanor].
+Subject: [your character age], [build], [2–3 distinguishing features], [hair], wearing [wardrobe], [demeanor].
 
 Background: pure white seamless void, empty, no props, no floor line distraction.
 Lighting: flat soft even studio light, frontal, no rim, no colour cast, no dramatic shadows.
@@ -911,7 +957,7 @@ Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz. No beau
 
 Photorealistic. Identity must match exactly across both panels.`;
 
-const LOCATION_STILL_PROMPT = `Empty [place] interior, 2K, [9:16 or 16:9].
+const LOCATION_STILL_PROMPT = `Empty [your location / place] interior, 2K, [9:16 or 16:9].
 
 [2–3 concrete details of the space].
 [Time of day / weather / light direction].
@@ -1023,7 +1069,7 @@ export function PromptGuideSection({
         . Veo/Kling remain fine as alternatives at the end.
       </p>
 
-      <Step n={1} title="Character still">
+      <AccordionStep n={1} title="Character still">
         <p>
           Go to an image generator like ChatGPT, or choose one below, and paste this.
         </p>
@@ -1046,9 +1092,9 @@ export function PromptGuideSection({
           defaultPrompt={CHARACTER_STILL_PROMPT}
           draftSlot="character"
         />
-      </Step>
+      </AccordionStep>
 
-      <Step n={2} title="Location still">
+      <AccordionStep n={2} title="Location still">
         <p>
           Go to an image generator like ChatGPT, or choose one below, and paste this.
         </p>
@@ -1068,9 +1114,9 @@ export function PromptGuideSection({
           defaultPrompt={LOCATION_STILL_EXAMPLE}
           draftSlot="location"
         />
-      </Step>
+      </AccordionStep>
 
-      <Step n={3} title="Embed the character in the place">
+      <AccordionStep n={3} title="Embed character in place">
         <ul className="list-disc space-y-1.5 pl-4">
           <li>
             Make a <strong className="text-foreground">composite still</strong> first, or in video
@@ -1097,9 +1143,9 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
         <p className="text-xs font-semibold text-foreground">Living hold (short video):</p>
         <PasteBox>{`@Image1 is the character (identity only). @Image2 is the location (environment + lighting).
 @Image1 standing in @Image2. Relight subject to match the room. Soft natural breathing, a natural blink, tiny weight shift. Static medium shot, one hold. Do not add subtitles. No logos.`}</PasteBox>
-      </Step>
+      </AccordionStep>
 
-      <Step n={4} title="Hyper-real Seedance video">
+      <AccordionStep n={4} title="Hyper-real Seedance video">
         <p>
           Add <strong className="text-foreground">2–4 images</strong> (practical Lucy recipe). In
           the prompt write a REFERENCE MAP, then timed beats with Seedance syntax{" "}
@@ -1127,9 +1173,9 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
         </ul>
         <p className="text-xs font-semibold text-foreground">Full paste template:</p>
         <PasteBox>{HYPER_REAL_SEEDANCE_TEMPLATE}</PasteBox>
-      </Step>
+      </AccordionStep>
 
-      <Step n={5} title="Three style paths (full per-second prompts)">
+      <AccordionStep n={5} title="Style paths (cinematic / UGC / history-influencer)">
         <p>
           Pick a path, add the noted images, paste the prompt into Seedance (or try Veo/Kling). Each
           block includes image map, timed beats, and why the camera moves were chosen.
@@ -1160,15 +1206,10 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
           ))}
         </div>
 
-        <div className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3">
-          <p className="text-[11px] font-semibold text-purple">
-            Path A tip — pick one camera move per beat from the chooser below, then paste the phrase
-            into your timed Seedance line.
-          </p>
-          <div className="mt-3">
-            <CameraMoveChooser />
-          </div>
-        </div>
+        <p className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3 text-[11px] font-semibold text-purple">
+          Path tip — open <span className="text-foreground">Camera + expression craft</span> below for
+          animated move/expression previews and Seedance-ready Copy prompt phrases (one move per beat).
+        </p>
 
         <p className="text-xs text-muted">
           More product-ad results:{" "}
@@ -1179,14 +1220,22 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
           <span className="text-foreground">/product-showcase/veo_generic_cup.mp4</span> and Harper
           clips under <span className="text-foreground">/product-showcase/</span>.
         </p>
-      </Step>
+      </AccordionStep>
 
-      <Step n={6} title="Mix-and-match craft chips">
+      <AccordionStep n={6} title="Camera + expression craft">
         <p>
-          Easy tweakable pieces — open a chip, copy a line into your Seedance prompt. Mix skin +
-          camera + beats without reading a wall of text. For camera, prefer the{" "}
-          <span className="font-semibold text-foreground">Camera move chooser</span> in Step 5
-          (diagram + Copy prompt); the Camera angles chip below is the text summary.
+          Animated previews + Seedance-ready Copy prompt phrases for camera moves and physical
+          expressions, then mix-and-match craft chips (skin, lighting, @Image counts, beats).
+        </p>
+        <div className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3">
+          <CameraMoveChooser />
+        </div>
+        <div className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3">
+          <ExpressionChooser />
+        </div>
+        <p className="text-xs text-muted">
+          More craft chips below — open one, copy a line into your Seedance prompt. The Camera
+          angles chip is the text summary; prefer the visual choosers above.
         </p>
         <div className="grid gap-2">
           {CRAFT_TWEAKS.map((tweak) => (
@@ -1274,9 +1323,9 @@ Do not add subtitles. No logos/watermarks unless wanted + a style anchor`}</pre>
             </div>
           </div>
         </details>
-      </Step>
+      </AccordionStep>
 
-      <Step n={7} title="Longer cuts + /stitch">
+      <AccordionStep n={7} title="Longer cuts / stitch">
         <p>
           Break the story into beats. Generate each beat as its own short clip, then combine in{" "}
           <a href="/stitch" className="font-semibold text-purple underline">
@@ -1322,7 +1371,7 @@ Do not add subtitles. No logos/watermarks unless wanted + a style anchor`}</pre>
           Draft cheap first, then upscale the keeper. Sound: write per-shot dialogue/SFX, or say
           &quot;no music&quot; and add score later in /stitch.
         </p>
-      </Step>
+      </AccordionStep>
 
       {onTryVideo && <TryOnLucy onTryVideo={onTryVideo} />}
 
