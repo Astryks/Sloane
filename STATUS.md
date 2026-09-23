@@ -1,6 +1,12 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - Prompt Guide live on production + Vercel build unblocked
+## Latest update, 2026-09-23 - /ads How-this-works → interactive storyboard grid
+
+- **Where**: `lucylabs.app/ads` onboarding card (`web/src/app/ads/page.tsx` + new `web/src/components/AdsHowToStoryboard.tsx`). Real `ReferenceLibrary`, `SlotCard`, start/add/stitch APIs untouched.
+- **UX**: Replaced long numbered list + tiny flowchart boxes + dense “The details” bullets with a plain title (**Your storyboard is a grid of scenes**), **3 short steps**, and a **client-only demo**: Cast strip (Character / Location / Product drop tiles with `URL.createObjectURL` previews) + comic-strip **storyboard grid** (Scene 1/2 + “+ Add scene”; each card = still drop zone then “Then animate → video” placeholder). Hide kept. “More tips” collapsed `<details>` (4 lines). JoJo + cinematic links shortened. One-line pointer: real grid is below after Start a storyboard.
+- **Mobile**: cast strip scrolls; scene grid 1-col → 2/3-col desktop. No fal/Higgsfield in UI.
+
+## Previous update, 2026-09-23 - Prompt Guide live on production + Vercel build unblocked
 
 - **Production**: lucylabs.app is on merge `b34c2e7` (PR #16). Homepage `#prompt-guide` title **Prompt guide to make hyper realistic videos** is live (accordion steps, Faces/angles, director pack, camera + expression choosers, red `[bracket]` fill-ins, Popular = Lucy GPT Image / Nano Banana Pro only).
 - **Why Vercel kept failing**: every recent Preview/Production deploy died in `web/src/app/stitch/largeFileExport.ts` importing `FFFSType` from `@ffmpeg/ffmpeg`. Turbopack SSR resolves that package to `empty.mjs` (no `FFFSType` export), so main could not ship while an older successful build stayed on the domain. **Fix (PR #16)**: use a `"WORKERFS"` string constant instead; local `next build` green; Production deploy status **success**.
