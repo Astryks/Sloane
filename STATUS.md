@@ -1,5 +1,13 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - Native-audio honesty on paygo engines
+
+- **Problem**: Homepage Sound helper said "Only Veo can speak on its own…" and Veo's picker note claimed it was the only native-voice engine — understating Seedance 2.5 / Kling v3 (both pass `generate_audio` in `buildFalInput`) and not naming which engines stay silent.
+- **Source of truth**: `supportsNativeAudio: boolean` on `VideoEngineInfo` in `web/src/lib/videoEngines.ts`.
+  - **Native audio path**: Veo (production-proven), Seedance 2.5, Kling v3.
+  - **No native audio** (silent unless own audio / Lucy voice): Seedance 2.0, Kling 2.1, MiniMax, Grok — picker notes append "no native audio — add your own or a Lucy voice" via `videoEnginePickerNote`.
+- **UI**: Sound blurb under More options driven by `videoEnginesSoundBlurb()`; engine chips use `videoEnginePickerNote`. Generate-route comment aligned. AI models review / Prompt Guide had no conflicting audio claims. No Fal/Higgsfield in UI.
+
 ## Latest update, 2026-09-23 - Free LLM-visibility steps shipped
 
 - **Intent**: Free discovery in ChatGPT / Perplexity / similar assistants — not only classic Google SEO.
@@ -22,7 +30,6 @@
   - Homepage `SiteNav` H1: **AI video, stills & voice** (visible near top of generator card; layout unchanged otherwise).
 - **Optional next (needs Sid)**: Submit `https://lucylabs.app/sitemap.xml` in Google Search Console if/when GSC is set up — not done here (requires Sid's Google login). No paid ads / Search Console automation in this pass.
 - **Out of scope**: mass `next/image` migration; product-claim renames that contradict known truths (Seedance hyper-real people = direct only; no Fal in UI).
-
 ## Latest update, 2026-09-23 - Stripe→Fal vendor treasury (ledger shipped; auto-buy blocked)
 
 - **Intent**: When users buy **still** or **video** credit packs via Stripe, Lucy should automatically buy matching **Fal prepaid credits** for COGS and keep the margin — no manual Fal balance babysitting.

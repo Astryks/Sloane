@@ -41,10 +41,11 @@ type LipSyncMode = "lipsync" | "voiceover";
 //   audio). A Lucy voice needs a TTS pass first (see the phase-0 handling
 //   in status/route.ts) so Avatar isn't submitted from THIS route for that
 //   case - only the modal TTS job is.
-// - Any engine + image, no audio -> that engine's image-to-video endpoint,
-//   Veo's own voice/ambient audio baked in (generate_audio: true, Veo only
-//   - Seedance/Grok/MiniMax have no native-audio field on their schemas,
-//   so they render silent either way).
+// - Any engine + image, no audio -> that engine's image-to-video endpoint.
+//   Native audio (generate_audio: true) when supportsNativeAudio: Veo
+//   (production-proven), Seedance 2.5, Kling v3. Seedance 2.0 / Kling 2.1 /
+//   MiniMax / Grok have no native-audio path and render silent unless the
+//   user adds own audio or a Lucy voice (see videoEngines.ts).
 // - Any engine except Kling + own audio OR a Lucy voice -> silent/ambient
 //   generation first, THEN a real lip-sync pass via Kling's dedicated
 //   lipsync endpoint (added 2026-09-12 - see submitLipsyncJob in fal.ts;
