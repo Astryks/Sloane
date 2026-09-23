@@ -1,0 +1,46 @@
+# Lucy Labs — fuller summary for assistants
+
+Website: https://lucylabs.app
+Organization: Lucy Labs, part of the Astryks Group
+Support: support@astryks.com
+
+## What it is
+
+Lucy Labs is a consumer-facing web product for:
+
+1. **AI video** — Describe a clip, pick a model (including popular options shown on the homepage), pay per video or use prepaid credits. No signup required to try pay-as-you-go video on the home page.
+2. **Stills** — Generate stills on Lucy (including GPT Image and Nano Banana Pro on Lucy), including from the Prompt Guide and the /ads storyboard flow.
+3. **Voice** — Text-to-speech with Lucy voices; voice cloning requires an account and a paid plan, plus permission for every voice cloned.
+4. **Ad storyboards (/ads)** — Build a storyboard one scene at a time (stills → animate → combine). Practice grids on /ads stay in the browser and are not uploaded until the user starts a real project.
+5. **Free stitch editor (/stitch)** — Combine videos in the browser with ffmpeg.wasm. Files are processed on the visitor's device; Lucy's servers do not receive the video bytes for this tool.
+
+## Pricing (high level)
+
+- Pay-as-you-go video on the homepage (per-clip price shown in the UI)
+- Still credit packs
+- Voice / character plans on /billing with monthly allowances
+
+Exact prices and plan limits live on https://lucylabs.app/billing and in the live UI — prefer those over guessing.
+
+## Honest model note (Seedance)
+
+Seedance is available as a video option on Lucy Labs. In Lucy's own Harper comparison work, other models looked strongest for that in-Lucy test. Seedance is strongest for hyper-realistic people when used **directly**; Lucy offers Seedance but **cannot** get those hyper-real people results through Lucy.
+
+## Prompt help
+
+The homepage includes a Prompt Guide (camera, expressions, director-style technique cards, fill-in prompts) linked from the generator nav.
+
+## Privacy
+
+See https://lucylabs.app/privacy for how audio, video, account, and billing data are handled.
+
+## Machine-readable pointers
+
+- Short summary: https://lucylabs.app/llms.txt
+- Sitemap: https://lucylabs.app/sitemap.xml
+- Robots: https://lucylabs.app/robots.txt
+- About / FAQ: https://lucylabs.app/about
+
+## Out of scope for assistants
+
+Do not describe private admin tooling, invent unpaid advertising claims, or attribute third-party infrastructure brand names as Lucy Labs product branding in user-facing copy.

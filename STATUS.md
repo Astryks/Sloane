@@ -1,5 +1,28 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - Free LLM-visibility steps shipped
+
+- **Intent**: Free discovery in ChatGPT / Perplexity / similar assistants — not only classic Google SEO.
+- **Shipped** (same PR as organic SEO):
+  - `web/public/llms.txt` + `web/public/llms-full.txt` — plain factual Lucy Labs summary (video/stills/voice, free /stitch, /ads storyboard; no Fal/Higgsfield; honest Seedance hyper-real caveat).
+  - `robots.ts` — explicit allow for GPTBot, ChatGPT-User, ClaudeBot, anthropic-ai, PerplexityBot, Google-Extended, Applebot-Extended (same public allow / private disallow as `*`).
+  - Public `/about` — crawlable HTML facts + visible FAQ; FAQ JSON-LD only for those visible Qs; in sitemap; Footer link.
+- **Optional later (Sid)**: Product Hunt / AlternativeTo listings; submit sitemap in Google Search Console when GSC is available.
+- **Not done here**: paid ads; GSC setup requiring Sid's Google login.
+
+## Latest update, 2026-09-23 - Free organic SEO pass shipped
+
+- **Intent**: Make lucylabs.app crawlable and shareable without paid ads — proper titles/descriptions, sitemap, robots, OG/Twitter, JSON-LD, one visible homepage H1.
+- **Shipped**:
+  - Root `web/src/app/layout.tsx`: `metadataBase` https://lucylabs.app, title default + `%s | Lucy Labs` template, richer default description (AI video / stills / voice), Open Graph + Twitter `summary_large_image`, robots index/follow, Organization + WebApplication JSON-LD (Lucy Labs only — no Fal/Higgsfield).
+  - `web/public/og.png`: simple brand card (1200×630) generated for OG/Twitter images.
+  - Route layouts with unique titles/descriptions: `/ads`, `/stitch`, `/billing`, `/privacy` (indexable); `/account`, `/admin`, `/ad-studio` → `noindex,nofollow`.
+  - `web/src/app/sitemap.ts` — public only: `/`, `/about`, `/ads`, `/stitch`, `/billing`, `/privacy`.
+  - `web/src/app/robots.ts` — allow public; disallow `/api/`, `/admin`, `/account`, `/ad-studio`.
+  - Homepage `SiteNav` H1: **AI video, stills & voice** (visible near top of generator card; layout unchanged otherwise).
+- **Optional next (needs Sid)**: Submit `https://lucylabs.app/sitemap.xml` in Google Search Console if/when GSC is set up — not done here (requires Sid's Google login). No paid ads / Search Console automation in this pass.
+- **Out of scope**: mass `next/image` migration; product-claim renames that contradict known truths (Seedance hyper-real people = direct only; no Fal in UI).
+
 ## Latest update, 2026-09-23 - Stripe→Fal vendor treasury (ledger shipped; auto-buy blocked)
 
 - **Intent**: When users buy **still** or **video** credit packs via Stripe, Lucy should automatically buy matching **Fal prepaid credits** for COGS and keep the margin — no manual Fal balance babysitting.
