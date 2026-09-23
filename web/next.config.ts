@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
   // Safe to allow broadly: these routes have no cookie/session auth on
   // `main` (access_token is a request body field, not a credential-bearing
   // cookie) and already do their own quota/token checks server-side.
+  async redirects() {
+    return [
+      { source: "/ai-video", destination: "/ai-video-generation", permanent: true },
+    ];
+  },
   async headers() {
     return [
       {

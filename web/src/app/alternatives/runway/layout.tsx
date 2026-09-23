@@ -4,17 +4,17 @@ import type { ReactNode } from "react";
 export const metadata: Metadata = {
   title: "Runway Alternative for AI Video",
   description:
-    "Looking for a Runway alternative? Lucy Labs is a creative AI toolkit: pay-as-you-go multi-model video, prepaid stills, voice, /ads storyboards, and a free browser stitch editor — not a clone of Runway.",
+    "Looking for a Runway alternative? Lucy Labs is a multi-model AI video toolkit with stills, voice, storyboard ads, and free browser stitch — not a Runway clone. Also useful vs CapCut AI / InVideo-style editors.",
   alternates: { canonical: "/alternatives/runway" },
   openGraph: {
     title: "Runway Alternative for AI Video | Lucy Labs",
     description:
-      "Multi-model AI video, stills, voice, storyboard ads, and free browser stitch — an honest Runway alternative framing for makers.",
+      "Looking for a Runway alternative? Lucy Labs is a multi-model AI video toolkit with stills, voice, storyboard ads, and free browser stitch — not a Runway clone. Also useful vs CapCut AI / InVideo-style editors.",
     url: "/alternatives/runway",
   },
   robots: { index: true, follow: true },
 };
 
-export default function RunwayAltLayout({ children }: { children: ReactNode }) {
+export default function Layout({ children }: { children: ReactNode }) {
   return children;
 }
