@@ -16,6 +16,9 @@ const defaultDescription =
   "Make AI video, stills, and voice on Lucy Labs — generate clips with leading models, stills on Lucy, text-to-speech and voice clone, plus a free browser video editor. No signup required to try video.";
 
 export const metadata: Metadata = {
+  verification: {
+    google: "hefST0d33JZ4HOG4G193nRQR-S_DuYXur5Ar4cJl6QE",
+  },
   metadataBase: new URL(siteUrl),
   title: {
     default: defaultTitle,
