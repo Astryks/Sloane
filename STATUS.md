@@ -1,6 +1,12 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - /ads How-this-works → interactive storyboard grid
+## Latest update, 2026-09-23 - /ads teaching: video → storyboard → practice drop grid
+
+- **Where**: `lucylabs.app/ads` How-this-works card (`web/src/components/AdsHowToStoryboard.tsx`). Real `ReferenceLibrary`, `SlotCard`, Start storyboard / APIs untouched.
+- **Layout (Sid)**: Title **Storyboard → finished ad (real example)** + Hide. **(1)** Big JoJo finished-ad Facebook embed at top. **(2)** 8 JoJo storyboard stills in a row/grid under the video (`/public/product-showcase/jojo/`, Scene 1–8 captions). **(3)** Client-only practice drop grid below (“Your scene 1…” + Drop or choose photo + optional **+ Add cell**; `URL.createObjectURL` / revoke). One-liner: directors plan stills first, then animate — Start a storyboard below for real. Cast-strip competing demo removed.
+- **Homepage**: `#jojo-case-study` one-line cross-link → `/ads` practice layout. No Hitchcock/Star Wars scrapes. No fal/Higgsfield in UI.
+
+## Previous update, 2026-09-23 - /ads How-this-works → interactive storyboard grid
 
 - **Where**: `lucylabs.app/ads` onboarding card (`web/src/app/ads/page.tsx` + new `web/src/components/AdsHowToStoryboard.tsx`). Real `ReferenceLibrary`, `SlotCard`, start/add/stitch APIs untouched.
 - **UX**: Replaced long numbered list + tiny flowchart boxes + dense “The details” bullets with a plain title (**Your storyboard is a grid of scenes**), **3 short steps**, and a **client-only demo**: Cast strip (Character / Location / Product drop tiles with `URL.createObjectURL` previews) + comic-strip **storyboard grid** (Scene 1/2 + “+ Add scene”; each card = still drop zone then “Then animate → video” placeholder). Hide kept. “More tips” collapsed `<details>` (4 lines). JoJo + cinematic links shortened. One-line pointer: real grid is below after Start a storyboard.
