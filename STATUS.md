@@ -1,6 +1,15 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - Director technique pack on Prompt Guide
+## Latest update, 2026-09-23 - Expand Director technique pack (directors + feature + MV)
+
+- **Where**: homepage `#prompt-guide` step **7. Lessons from great directors** — `web/src/components/DirectorTechniquePack.tsx` + `dir-anim-*` mini-loops in `web/src/app/globals.css`. Accordion, red fill-ins, Popular Lucy-only, CameraMoveChooser, ExpressionChooser, StillGenerateBox, hashes preserved. No fal/Higgsfield in UI.
+- **Expand**: **43** original technique cards with group filter chips (All / Cinematic / Feature / Ads / Music video) so the accordion stays neat.
+- **Counts**: **Cinematic / directors (17)** — kept prior 10; added Wonder crane rise (Spielberg-style), Tracking through space + Freeze-energy hold (Scorsese-style), Low trunk-angle stare + Long tense hold (Tarantino-style), Conversational walk-and-talk + Nervous off-center frame (Woody Allen–style); refreshed nods on realization push-in / steadicam float. **Feature / classic grammar (7)** — Epic wide establishing, Intimate over-shoulder confession, Dutch unease tilt, Silhouette doorway reveal, Rain night neon track, Desert heat-haze lock, War trench push. **Ads / hero reveal (9)** — prior 7 + Mirror/reflection reveal, Slow pour beauty. **Music video (10)** — Beat-cut energy (continuous), Silhouette dance orbit, Whip-pan chorus hit, Slow-mo hair/fabric float, Tunnel walk toward camera, Neon night drive, Intimate lip-sync hold, Crowd crash-in, Rooftop wide dance lock, Handheld pit energy.
+- **Copyright-safe**: technique names + optional “in the spirit of…” director nods; **no** ripped trailers, movie frames, Super Bowl ads, MV footage, or YouTube embeds. Illustrations = original CSS/SVG loops only.
+- **Seedance**: Copy prompts = concrete camera/frame + physical action, one move per beat; tip line preserved; aligns with `docs/seedance-2.5-official-prompt-guide-learnings.md`.
+- **Mobile**: 2-col → 3/4 grid unchanged; filter chips wrap.
+
+## Previous update, 2026-09-23 - Director technique pack on Prompt Guide
 
 - **Where**: homepage `#prompt-guide` — new `web/src/components/DirectorTechniquePack.tsx`, CSS mini-loops in `web/src/app/globals.css`, wired as accordion step **7. Lessons from great directors** in `PromptGuide.tsx` (Longer cuts / stitch → step 8). `#jojo-case-study`, StillGenerateBox, CameraMoveChooser, ExpressionChooser, red fill-ins, Popular Lucy-only preserved. No fal/Higgsfield in UI.
 - **Product**: copyright-safe chooser cards studying camera *language* of great films / Super Bowl–style ads conceptually — **no ripped trailers, no ad clips, no copyrighted footage**. Original CSS-animated SVG mini-loops only.

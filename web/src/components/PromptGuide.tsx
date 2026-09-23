@@ -1329,9 +1329,10 @@ Do not add subtitles. No logos/watermarks unless wanted + a style anchor`}</pre>
 
       <AccordionStep n={7} title="Lessons from great directors">
         <p>
-          Director technique pack — cinematic camera language and ads / hero-reveal grammar as
-          chooser cards. Each card has an original CSS-animated SVG mini-loop, a one-line lesson,
-          when to use it on Lucy, and a Seedance-ready Copy prompt. No trailers or ad footage.
+          Director technique pack — cinematic / director lessons, classic feature grammar, ads /
+          hero-reveal, and music-video camera language as filterable chooser cards. Each card has
+          an original CSS-animated SVG mini-loop, a one-line lesson, when to use it on Lucy, and a
+          Seedance-ready Copy prompt. No trailers, ad rips, or music-video footage.
         </p>
         <div className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3">
           <DirectorTechniquePack />
