@@ -26,6 +26,28 @@ const JOJO_PANELS: { src: string; caption: string }[] = [
 const JOJO_FB_EMBED =
   "https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2F2521431254554554%2F&show_text=false&width=560&t=0";
 
+/** Outbound study links only — we do not host Hitchcock/Spielberg boards. */
+const MUSEUM_STUDY_LINKS: { href: string; label: string }[] = [
+  {
+    href: "https://www.academymuseum.org/exhibitions/story",
+    label: "Hitchcock storyboards — Academy Museum (Story gallery)",
+  },
+  {
+    href: "https://www.academymuseum.org/exhibitions/jaws",
+    label: "Spielberg — Academy Museum (Jaws: The Exhibition)",
+  },
+];
+
+const PRACTICE_INITIAL = 15;
+
+function initialPracticeCells(): PracticeCell[] {
+  return Array.from({ length: PRACTICE_INITIAL }, (_, i) => ({
+    id: `p${i + 1}`,
+    label: `Your scene ${i + 1}`,
+    stillUrl: null,
+  }));
+}
+
 function revokeIfBlob(url: string | null) {
   if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
 }
@@ -91,12 +113,7 @@ function PracticeDropCell({
 }
 
 export function AdsHowToStoryboard({ onHide }: { onHide: () => void }) {
-  const [cells, setCells] = useState<PracticeCell[]>([
-    { id: "p1", label: "Your scene 1", stillUrl: null },
-    { id: "p2", label: "Your scene 2", stillUrl: null },
-    { id: "p3", label: "Your scene 3", stillUrl: null },
-    { id: "p4", label: "Your scene 4", stillUrl: null },
-  ]);
+  const [cells, setCells] = useState<PracticeCell[]>(initialPracticeCells);
 
   useEffect(() => {
     return () => {
@@ -166,9 +183,31 @@ export function AdsHowToStoryboard({ onHide }: { onHide: () => void }) {
         ))}
       </div>
 
-      {/* 3. Practice drop grid */}
+      {/* 3. Outbound museum study links (no hosted Hitchcock/Spielberg artwork) */}
+      <div className="mb-5 rounded-2xl border border-border bg-cream/30 px-3 py-3">
+        <p className="mb-2 text-xs font-semibold text-foreground">Study classic storyboards</p>
+        <ul className="mb-2 space-y-1.5">
+          {MUSEUM_STUDY_LINKS.map((link) => (
+            <li key={link.href}>
+              <a
+                href={link.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-semibold text-purple underline-offset-2 hover:underline"
+              >
+                {link.label} ↗
+              </a>
+            </li>
+          ))}
+        </ul>
+        <p className="text-[11px] text-muted">
+          These open Academy Museum pages for study; we don&apos;t host their boards.
+        </p>
+      </div>
+
+      {/* 4. Practice drop grid — 5×3 = 15 empty cells on desktop */}
       <p className="mb-2 text-xs font-semibold text-foreground">Try it — drop your own stills</p>
-      <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="mb-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {cells.map((cell) => (
           <PracticeDropCell
             key={cell.id}
@@ -188,6 +227,9 @@ export function AdsHowToStoryboard({ onHide }: { onHide: () => void }) {
           Add cell
         </button>
       </div>
+      <p className="mb-3 text-[11px] text-muted">
+        Photos stay in this browser only and are not uploaded.
+      </p>
 
       <p className="mb-4 text-xs text-muted">
         This is how directors plan — stills first, then animate each square. Start a storyboard below to do it for
