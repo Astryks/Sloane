@@ -5,6 +5,12 @@ import {
   VIDEO_PAYGO_ENGINES,
   type VideoEngine,
 } from "@/lib/videoEngines";
+import {
+  STILL_CREDIT_PACKS,
+  STILL_ENGINES as STILL_ENGINE_MAP,
+  stillCostCents,
+  type StillEngine,
+} from "@/lib/stillsPaygo";
 
 function GuideCard({
   wash,
@@ -76,88 +82,336 @@ function Step({
   );
 }
 
-// Client-safe still prices (2026-09-23). Inference vendor stays server-only —
-// never surface vendor names or URLs in this UI.
-const STILL_ENGINES = [
-  { id: "gpt" as const, label: "GPT Image", priceUsd: 0.19 },
-  { id: "nanobanana" as const, label: "Nano Banana Pro", priceUsd: 0.29 },
+const STILLS_DRAFT_KEY = "lucy_stills_draft";
+
+type StillsDraft = {
+  slot: string;
+  prompt: string;
+  engine: StillEngine;
+  autoGenerate?: boolean;
+};
+
+function formatStillBalance(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+type ExternalGen = { id: string; label: string; href: string; blurb: string };
+type LucyGen = { id: StillEngine; label: string; blurb: string; priceUsd: number };
+
+const POPULAR_LUCY: LucyGen[] = [
+  {
+    id: "gpt",
+    label: "GPT Image on Lucy",
+    blurb: "Best all-rounder right now",
+    priceUsd: STILL_ENGINE_MAP.gpt.costCents / 100,
+  },
+  {
+    id: "nanobanana",
+    label: "Nano Banana Pro on Lucy",
+    blurb: "Gemini’s image model — strong too",
+    priceUsd: STILL_ENGINE_MAP.nanobanana.costCents / 100,
+  },
+];
+
+const POPULAR_EXTERNAL: ExternalGen[] = [
+  {
+    id: "chatgpt",
+    label: "ChatGPT",
+    href: "https://chatgpt.com",
+    blurb: "Paste outside — best all-rounder",
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    href: "https://gemini.google.com",
+    blurb: "Paste outside — Nano Banana’s home",
+  },
+];
+
+const OTHER_EXTERNAL: ExternalGen[] = [
+  { id: "midjourney", label: "Midjourney", href: "https://www.midjourney.com", blurb: "Paste outside" },
+  { id: "ideogram", label: "Ideogram", href: "https://ideogram.ai", blurb: "Paste outside" },
+  { id: "flux", label: "Flux", href: "https://blackforestlabs.ai", blurb: "Paste outside" },
 ];
 
 /**
- * StillGenerateBox — prompt + engine chips + price + Generate.
- *
- * TODO(stripe-stills): wire real Stripe checkout for stills, then call the
- * authenticated image-generate path (server uses generateImageVariants).
- * Until then, Generate deep-links to /ads Cast & Locations so visitors can
- * make character/location stills there without exposing any vendor to the
- * client. Paste-outside (any strong image model) remains valid.
+ * StillGenerateBox — prompt + Popular/Others generator picker + Lucy Stripe stills.
+ * External chips open known third-party sites (never inference-vendor URLs).
+ * Lucy chips run prepaid still credits via /api/stills-paygo/*.
  */
 function StillGenerateBox({
   placeholder,
   defaultPrompt,
+  draftSlot,
 }: {
   placeholder: string;
   defaultPrompt?: string;
+  draftSlot: string;
 }) {
   const [prompt, setPrompt] = useState(defaultPrompt ?? "");
-  const [engineId, setEngineId] = useState<(typeof STILL_ENGINES)[number]["id"]>("gpt");
-  const selected = STILL_ENGINES.find((e) => e.id === engineId) ?? STILL_ENGINES[0];
+  const [engineId, setEngineId] = useState<StillEngine>("gpt");
+  const [balanceCents, setBalanceCents] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [showPacks, setShowPacks] = useState(false);
+  const pendingAutoRef = useRef(false);
+  const autoTriedRef = useRef(false);
 
-  function handleGenerate() {
-    // Deep-link to Cast & Locations until Stripe stills ships.
-    const q = prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}` : "";
-    window.location.href = `/ads${q}`;
+  const selected = POPULAR_LUCY.find((e) => e.id === engineId) ?? POPULAR_LUCY[0];
+  const costCents = stillCostCents(engineId);
+
+  async function refreshBalance() {
+    try {
+      const res = await fetch("/api/stills-paygo/balance");
+      const data = (await res.json()) as { balanceCents?: number };
+      setBalanceCents(typeof data.balanceCents === "number" ? data.balanceCents : 0);
+    } catch {
+      setBalanceCents(0);
+    }
+  }
+
+  useEffect(() => {
+    void refreshBalance();
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("stills") !== "1") return;
+      const raw = sessionStorage.getItem(STILLS_DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as StillsDraft;
+      if (draft.slot !== draftSlot) return;
+      sessionStorage.removeItem(STILLS_DRAFT_KEY);
+      if (typeof draft.prompt === "string") setPrompt(draft.prompt);
+      if (draft.engine === "gpt" || draft.engine === "nanobanana") setEngineId(draft.engine);
+      if (draft.autoGenerate) pendingAutoRef.current = true;
+    } catch {
+      /* ignore bad draft */
+    }
+  }, [draftSlot]);
+
+  useEffect(() => {
+    if (!pendingAutoRef.current || balanceCents === null || autoTriedRef.current) return;
+    if (balanceCents < stillCostCents(engineId)) {
+      setShowPacks(true);
+      pendingAutoRef.current = false;
+      return;
+    }
+    autoTriedRef.current = true;
+    pendingAutoRef.current = false;
+    void runGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot after Stripe return
+  }, [balanceCents, engineId]);
+
+  function saveDraft(autoGenerate: boolean) {
+    const draft: StillsDraft = { slot: draftSlot, prompt, engine: engineId, autoGenerate };
+    try {
+      sessionStorage.setItem(STILLS_DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      /* quota */
+    }
+  }
+
+  async function buyPack(packId: string) {
+    setError(null);
+    setCheckingOut(true);
+    saveDraft(true);
+    try {
+      const res = await fetch("/api/stills-paygo/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packId }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        setError(data.error ?? "Checkout failed");
+        setCheckingOut(false);
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setError("Checkout failed");
+      setCheckingOut(false);
+    }
+  }
+
+  async function runGenerate() {
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      setError("Enter a prompt first");
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    setImageUrl(null);
+    setShowPacks(false);
+    try {
+      const res = await fetch("/api/stills-paygo/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: trimmed, engine: engineId }),
+      });
+      const data = (await res.json()) as {
+        imageUrl?: string;
+        error?: string;
+        needCents?: number;
+        balanceCents?: number;
+      };
+      if (res.status === 401 || res.status === 402) {
+        if (typeof data.balanceCents === "number") setBalanceCents(data.balanceCents);
+        setShowPacks(true);
+        setError(data.error ?? "Buy still credit to generate");
+        return;
+      }
+      if (!res.ok || !data.imageUrl) {
+        setError(data.error ?? "Generation failed");
+        return;
+      }
+      setImageUrl(data.imageUrl);
+      await refreshBalance();
+    } catch {
+      setError("Generation failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function chipClass(active: boolean) {
+    return `rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+      active
+        ? "border-purple bg-purple text-white"
+        : "border-border bg-white text-muted hover:border-purple/40"
+    }`;
   }
 
   return (
     <div className="mt-3 rounded-2xl border border-border bg-white/90 p-3">
-      <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
-        Generate a still on Lucy
-      </p>
-      <textarea
-        className="w-full rounded-xl border border-border bg-cream/60 p-3 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-        rows={4}
-        placeholder={placeholder}
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-      />
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {STILL_ENGINES.map((e) => (
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
+          Choose a generator
+        </p>
+        {balanceCents !== null && (
+          <p className="text-[11px] text-muted">
+            <strong className="text-foreground">{formatStillBalance(balanceCents)}</strong> still
+            credit left
+          </p>
+        )}
+      </div>
+
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">Popular</p>
+      <div className="flex flex-wrap gap-1.5">
+        {POPULAR_EXTERNAL.map((e) => (
+          <a
+            key={e.id}
+            href={e.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={e.blurb}
+            className={chipClass(false)}
+          >
+            {e.label} ↗
+          </a>
+        ))}
+        {POPULAR_LUCY.map((e) => (
           <button
             key={e.id}
             type="button"
             aria-pressed={engineId === e.id}
+            title={e.blurb}
             onClick={() => setEngineId(e.id)}
-            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
-              engineId === e.id
-                ? "border-purple bg-purple text-white"
-                : "border-border bg-white text-muted hover:border-purple/40"
-            }`}
+            className={chipClass(engineId === e.id)}
           >
             {e.label}
           </button>
         ))}
       </div>
+
+      <p className="mb-1 mt-2 text-[10px] font-bold uppercase tracking-wide text-muted">Others</p>
+      <div className="flex flex-wrap gap-1.5">
+        {OTHER_EXTERNAL.map((e) => (
+          <a
+            key={e.id}
+            href={e.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={e.blurb}
+            className={chipClass(false)}
+          >
+            {e.label} ↗
+          </a>
+        ))}
+      </div>
+
+      <textarea
+        className="mt-3 w-full rounded-xl border border-border bg-cream/60 p-3 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+        rows={4}
+        placeholder={placeholder}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted">
-          <strong className="text-foreground">${selected.priceUsd.toFixed(2)}</strong> per still ·{" "}
-          {selected.label}
+          <strong className="text-foreground">${selected.priceUsd.toFixed(2)}</strong> per still on
+          Lucy · {selected.label}
         </p>
         <button
           type="button"
-          onClick={handleGenerate}
-          className="rounded-full bg-purple px-4 py-1.5 text-xs font-bold text-white shadow-soft"
+          disabled={loading || checkingOut}
+          onClick={() => void runGenerate()}
+          className="rounded-full bg-purple px-4 py-1.5 text-xs font-bold text-white shadow-soft disabled:opacity-60"
         >
-          Generate
+          {loading ? "Generating…" : "Generate on Lucy"}
         </button>
       </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {(showPacks || (balanceCents !== null && balanceCents < costCents)) && (
+        <div className="mt-2 rounded-xl border border-purple/20 bg-purple/5 p-2.5">
+          <p className="text-[11px] font-semibold text-foreground">
+            Buy still credit (prepaid packs — Stripe fee makes single $0.19 charges lose money)
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {STILL_CREDIT_PACKS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                disabled={checkingOut}
+                onClick={() => void buyPack(p.id)}
+                className="rounded-full border border-purple bg-white px-3 py-1.5 text-[11px] font-bold text-purple disabled:opacity-60"
+              >
+                Buy {p.id === "pack10" ? "10" : "25"} for ${(p.priceUsdCents / 100).toFixed(2)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {imageUrl && (
+        <div className="mt-3 space-y-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageUrl}
+            alt="Generated still"
+            className="max-h-72 w-full rounded-xl border border-border object-contain bg-cream"
+          />
+          <a
+            href={imageUrl}
+            download
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-xs font-semibold text-purple underline"
+          >
+            Download still
+          </a>
+        </div>
+      )}
+
       <p className="mt-2 text-[11px] text-muted">
-        Opens{" "}
-        <a href="/ads" className="font-semibold text-purple underline">
-          /ads → Cast &amp; Locations
-        </a>{" "}
-        to generate with your account. Or paste the cream prompt into any strong image model and
-        bring the still back here.
+        Prefer outside? Open ChatGPT / Midjourney / etc. above, paste the cream template, and bring
+        the still back here. Lucy Generate uses prepaid still credit — never exposes the inference
+        vendor.
       </p>
     </div>
   );
@@ -357,7 +611,27 @@ Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz or light
 
 Photorealistic. Identity must match exactly across both panels.`;
 
-const LOCATION_STILL_PROMPT = `Empty boxing gym interior, 2K, 9:16 vertical.
+const CHARACTER_STILL_EXAMPLE = `Split-screen character reference sheet, 2K, 9:16.
+
+LEFT half: full-body standing, head-to-toe, facing camera, relaxed neutral stance.
+RIGHT half: tight chest-up portrait of the SAME person, same wardrobe, same lighting.
+
+Subject: 28, athletic, light freckles across the nose, short dark curls, wearing a navy hoodie and black joggers, quiet confidence.
+
+Background: pure white seamless void, empty, no props.
+Lighting: flat soft even studio light, frontal.
+Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz. No beauty filter.
+
+Photorealistic. Identity must match exactly across both panels.`;
+
+const LOCATION_STILL_PROMPT = `Empty [place] interior, 2K, [9:16 or 16:9].
+
+[2–3 concrete details of the space].
+[Time of day / weather / light direction].
+Materials: [surfaces you can almost touch].
+No people, no text, no logos. Photorealistic, natural colour, slight film grain.`;
+
+const LOCATION_STILL_EXAMPLE = `Empty boxing gym interior, 2K, 9:16 vertical.
 
 Worn wooden floor with scuffs, heavy bags in the mid-ground, ropes of a ring visible on the right, chalk dust in the air.
 Late-afternoon light from high windows on the left — warm shafts cutting through cooler shadow in the corners.
@@ -452,9 +726,9 @@ export function PromptGuideSection({
       subtitle="Character → place → embed → style → craft → longer cuts."
     >
       <p className="text-sm leading-relaxed text-muted">
-        Six steps from a locked character still to a finished clip. Generate stills with GPT Image or
-        Nano Banana Pro (or paste from any strong image model), animate with Seedance 2.5, Seedance
-        2.0, Veo, Kling, Kling v3, MiniMax, or Grok on this page, then stitch longer cuts in{" "}
+        Six steps from a locked character still to a finished clip. Enter the templates below into
+        ChatGPT or generate on Lucy, animate with the video engines on this page, then stitch longer
+        cuts in{" "}
         <a href="/stitch" className="font-semibold text-purple underline">
           /stitch
         </a>
@@ -463,38 +737,45 @@ export function PromptGuideSection({
 
       <Step n={1} title="Character still">
         <p>
-          Formula:{" "}
-          <strong className="text-foreground">
-            age + build + features + hair + wardrobe + demeanor
-          </strong>
-          . Push pores and real skin — uneven tone, peach fuzz, faint freckling. No beauty filter.
+          Go to an image generator like ChatGPT, or choose one below, and paste this.
         </p>
-        <p>
-          Ask for a <strong className="text-foreground">split-screen sheet</strong> on white flat
-          light: left = full-body head-to-toe, right = tight chest-up. Same person both sides.
-        </p>
-        <p>
-          Once the sheet exists,{" "}
-          <strong className="text-foreground">never redescribe the face</strong> — only attach the
-          image.
-        </p>
+        <p className="text-xs font-semibold text-foreground">Here&apos;s the example.</p>
+        <PasteBox>{CHARACTER_STILL_EXAMPLE}</PasteBox>
+        <p className="text-xs font-semibold text-foreground">Here&apos;s the guide.</p>
+        <ul className="list-disc space-y-1 pl-4 text-sm">
+          <li>Split-screen on white: left = full-body, right = chest-up</li>
+          <li>Fill age, build, features, hair, wardrobe, demeanor</li>
+          <li>Push real skin — pores, uneven tone, peach fuzz (no beauty filter)</li>
+          <li>Once you have the sheet, never redescribe the face — only attach the image</li>
+        </ul>
+        <p className="text-xs font-semibold text-foreground">Template to paste:</p>
         <PasteBox>{CHARACTER_STILL_PROMPT}</PasteBox>
         <StillGenerateBox
           placeholder="Paste or tweak your character still prompt…"
           defaultPrompt={CHARACTER_STILL_PROMPT}
+          draftSlot="character"
         />
       </Step>
 
       <Step n={2} title="Location still">
         <p>
-          Generate separately — <strong className="text-foreground">empty, no character</strong>.
-          Match the character sheet&apos;s aspect (9:16 or 16:9). Name light / weather and materials
-          so the place feels tangible.
+          Go to an image generator like ChatGPT, or choose one below, and paste this.
         </p>
+        <p className="text-xs font-semibold text-foreground">Here&apos;s the example.</p>
+        <PasteBox>{LOCATION_STILL_EXAMPLE}</PasteBox>
+        <p className="text-xs font-semibold text-foreground">Here&apos;s the guide.</p>
+        <ul className="list-disc space-y-1 pl-4 text-sm">
+          <li>Empty place only — no character</li>
+          <li>Match the character sheet&apos;s aspect (9:16 or 16:9)</li>
+          <li>Name light / weather and materials you can almost touch</li>
+          <li>No people, no text, no logos</li>
+        </ul>
+        <p className="text-xs font-semibold text-foreground">Template to paste:</p>
         <PasteBox>{LOCATION_STILL_PROMPT}</PasteBox>
         <StillGenerateBox
           placeholder="Paste or tweak your empty location prompt…"
-          defaultPrompt={LOCATION_STILL_PROMPT}
+          defaultPrompt={LOCATION_STILL_EXAMPLE}
+          draftSlot="location"
         />
       </Step>
 

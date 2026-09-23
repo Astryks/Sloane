@@ -197,6 +197,27 @@ export async function initSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Pay-as-you-go still credits (2026-09-23) — prepaid USD-cent balance for
+  // image generation (see stillsPaygo.ts). Separate from video_credits
+  // (integer video count) and from stripe_credit_grants (video ledger): a
+  // stills Checkout uses dynamic price_data + metadata, not a Stripe Price
+  // id, so its event ledger is still_credit_grants keyed on the same
+  // Stripe event id uniqueness guarantee.
+  await sql`
+    CREATE TABLE IF NOT EXISTS still_credits (
+      user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      balance_cents INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS still_credit_grants (
+      event_id TEXT PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      cents INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
   await sql`
     CREATE TABLE IF NOT EXISTS video_paygo_jobs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1011,8 +1032,8 @@ export async function createGuestUser(): Promise<User> {
 }
 
 // Runs when a guest signs in to a real account: their unspent video
-// credits, paygo jobs (so downloads keep working) and Stripe grant ledger
-// rows move over, then the guest row is deleted (its session cascades).
+// credits, still credits, paygo jobs (so downloads keep working) and Stripe
+// grant ledger rows move over, then the guest row is deleted (its session cascades).
 // One statement so a failure can't leave credits half-moved - same
 // single-statement-is-atomic reasoning as claimAndGrantVideoCredits.
 export async function mergeGuestIntoUser(guestId: string, userId: string): Promise<void> {
@@ -1025,15 +1046,26 @@ export async function mergeGuestIntoUser(guestId: string, userId: string): Promi
       SELECT ${userId}, vc.balance FROM video_credits vc JOIN guest g ON g.id = vc.user_id WHERE vc.balance > 0
       ON CONFLICT (user_id) DO UPDATE SET balance = video_credits.balance + EXCLUDED.balance, updated_at = now()
       RETURNING user_id
+    ), moved_still_credits AS (
+      INSERT INTO still_credits (user_id, balance_cents)
+      SELECT ${userId}, sc.balance_cents FROM still_credits sc JOIN guest g ON g.id = sc.user_id WHERE sc.balance_cents > 0
+      ON CONFLICT (user_id) DO UPDATE SET balance_cents = still_credits.balance_cents + EXCLUDED.balance_cents, updated_at = now()
+      RETURNING user_id
     ), moved_jobs AS (
       UPDATE video_paygo_jobs SET user_id = ${userId} WHERE user_id IN (SELECT id FROM guest) RETURNING id
     ), moved_grants AS (
       UPDATE stripe_credit_grants SET user_id = ${userId} WHERE user_id IN (SELECT id FROM guest) RETURNING event_id
+    ), moved_still_grants AS (
+      UPDATE still_credit_grants SET user_id = ${userId} WHERE user_id IN (SELECT id FROM guest) RETURNING event_id
     ), zeroed AS (
       UPDATE video_credits SET balance = 0 WHERE user_id IN (SELECT id FROM guest) RETURNING user_id
+    ), zeroed_stills AS (
+      UPDATE still_credits SET balance_cents = 0 WHERE user_id IN (SELECT id FROM guest) RETURNING user_id
     )
-    SELECT (SELECT count(*) FROM moved_credits) + (SELECT count(*) FROM moved_jobs)
-         + (SELECT count(*) FROM moved_grants) + (SELECT count(*) FROM zeroed) AS n
+    SELECT (SELECT count(*) FROM moved_credits) + (SELECT count(*) FROM moved_still_credits)
+         + (SELECT count(*) FROM moved_jobs) + (SELECT count(*) FROM moved_grants)
+         + (SELECT count(*) FROM moved_still_grants) + (SELECT count(*) FROM zeroed)
+         + (SELECT count(*) FROM zeroed_stills) AS n
   `;
   // Separate statement: a data-modifying CTE can't see rows its siblings
   // just updated, so deleting the guest in the same statement would race
@@ -1205,6 +1237,59 @@ export async function spendVideoCredit(userId: string): Promise<boolean> {
 // error) - the user shouldn't lose a credit for a video they never got.
 export async function refundVideoCredit(userId: string) {
   await addVideoCredits(userId, 1);
+}
+
+// --- Pay-as-you-go still credits (USD cents) ---
+
+export async function getStillCreditBalanceCents(userId: string): Promise<number> {
+  const rows = await sql`SELECT balance_cents FROM still_credits WHERE user_id = ${userId}`;
+  return rows[0] ? Number(rows[0].balance_cents) : 0;
+}
+
+export async function addStillCredits(userId: string, cents: number) {
+  if (cents <= 0) return;
+  await sql`
+    INSERT INTO still_credits (user_id, balance_cents)
+    VALUES (${userId}, ${cents})
+    ON CONFLICT (user_id) DO UPDATE SET balance_cents = still_credits.balance_cents + ${cents}, updated_at = now()
+  `;
+}
+
+// Atomic ledger + balance grant — same single-statement reasoning as
+// claimAndGrantVideoCredits. Returns true only when THIS call performed
+// the grant (event id unseen).
+export async function claimAndGrantStillCredits(eventId: string, userId: string, cents: number): Promise<boolean> {
+  if (cents <= 0) return false;
+  const rows = await sql`
+    WITH grant_claim AS (
+      INSERT INTO still_credit_grants (event_id, user_id, cents)
+      VALUES (${eventId}, ${userId}, ${cents})
+      ON CONFLICT (event_id) DO NOTHING
+      RETURNING event_id
+    ), balance_update AS (
+      INSERT INTO still_credits (user_id, balance_cents)
+      SELECT ${userId}, ${cents} WHERE EXISTS (SELECT 1 FROM grant_claim)
+      ON CONFLICT (user_id) DO UPDATE SET balance_cents = still_credits.balance_cents + ${cents}, updated_at = now()
+      RETURNING user_id
+    )
+    SELECT count(*)::int AS granted FROM grant_claim
+  `;
+  return Number(rows[0]?.granted ?? 0) > 0;
+}
+
+// Atomic decrement by cents. Returns false when balance is insufficient.
+export async function spendStillCredits(userId: string, cents: number): Promise<boolean> {
+  if (cents <= 0) return false;
+  const rows = await sql`
+    UPDATE still_credits SET balance_cents = balance_cents - ${cents}, updated_at = now()
+    WHERE user_id = ${userId} AND balance_cents >= ${cents}
+    RETURNING balance_cents
+  `;
+  return rows.length > 0;
+}
+
+export async function refundStillCredits(userId: string, cents: number) {
+  await addStillCredits(userId, cents);
 }
 
 export type VideoPaygoJob = {

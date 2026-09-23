@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
-import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, claimAndGrantVideoCredits, claimStripeEvent, unclaimStripeEvent } from "@/lib/db";
+import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, claimAndGrantVideoCredits, claimAndGrantStillCredits, claimStripeEvent, unclaimStripeEvent } from "@/lib/db";
 import { planFromStripePriceId, PLANS } from "@/lib/plans";
 import { videoCreditPackFromStripePriceId } from "@/lib/videoPaygo";
 import { sendAccessCodeEmail, sendPaymentFailedEmail, sendVideoCreditReceiptEmail } from "@/lib/email";
@@ -81,10 +81,31 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
       // account to hold the balance, unlike the subscription flow where
       // it's optional).
       if (session.mode === "payment") {
+        const userId = session.client_reference_id;
+
+        // Still-credit packs (price_data + metadata) — checked BEFORE video
+        // pack resolution so a stills Checkout is never logged as a video
+        // pack failure (no Stripe Price id to resolve for stills).
+        if (session.metadata?.product === "still_credits") {
+          const centsRaw = session.metadata.creditsCents;
+          const cents = centsRaw ? parseInt(centsRaw, 10) : NaN;
+          if (userId && Number.isFinite(cents) && cents > 0) {
+            const granted = await claimAndGrantStillCredits(event.id, userId, cents);
+            if (granted) ctx.creditsCommitted = true;
+            // Receipt email skipped for v1 (no still-specific helper yet).
+          } else {
+            console.error("Still credit checkout completed but couldn't resolve cents/user", {
+              centsRaw,
+              userId,
+              packId: session.metadata.packId,
+            });
+          }
+          break;
+        }
+
         const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
         const priceId = lineItems.data[0]?.price?.id;
         const pack = priceId ? videoCreditPackFromStripePriceId(priceId) : null;
-        const userId = session.client_reference_id;
         if (pack && userId) {
           // Real fix (follow-up audit, 2026-09-17, stronger version): the
           // ledger insert and the balance update now happen in one atomic
