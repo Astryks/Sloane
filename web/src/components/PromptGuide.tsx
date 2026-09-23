@@ -15,6 +15,7 @@ import {
 
 import { CameraMoveChooser } from "@/components/CameraMoveChooser";
 import { ExpressionChooser } from "@/components/ExpressionChooser";
+import { DirectorTechniquePack } from "@/components/DirectorTechniquePack";
 
 function GuideCard({
   wash,
@@ -1207,8 +1208,9 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
         </div>
 
         <p className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3 text-[11px] font-semibold text-purple">
-          Path tip — open <span className="text-foreground">Camera + expression craft</span> below for
-          animated move/expression previews and Seedance-ready Copy prompt phrases (one move per beat).
+          Path tip — open <span className="text-foreground">Camera + expression craft</span> and{" "}
+          <span className="text-foreground">Lessons from great directors</span> below for animated
+          move/expression/technique previews and Seedance-ready Copy prompt phrases (one move per beat).
         </p>
 
         <p className="text-xs text-muted">
@@ -1325,7 +1327,18 @@ Do not add subtitles. No logos/watermarks unless wanted + a style anchor`}</pre>
         </details>
       </AccordionStep>
 
-      <AccordionStep n={7} title="Longer cuts / stitch">
+      <AccordionStep n={7} title="Lessons from great directors">
+        <p>
+          Director technique pack — cinematic camera language and ads / hero-reveal grammar as
+          chooser cards. Each card has an original CSS-animated SVG mini-loop, a one-line lesson,
+          when to use it on Lucy, and a Seedance-ready Copy prompt. No trailers or ad footage.
+        </p>
+        <div className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3">
+          <DirectorTechniquePack />
+        </div>
+      </AccordionStep>
+
+      <AccordionStep n={8} title="Longer cuts / stitch">
         <p>
           Break the story into beats. Generate each beat as its own short clip, then combine in{" "}
           <a href="/stitch" className="font-semibold text-purple underline">

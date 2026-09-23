@@ -1,6 +1,15 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - Prompt Guide accordion + red fillables + Lucy Popular + animated choosers
+## Latest update, 2026-09-23 - Director technique pack on Prompt Guide
+
+- **Where**: homepage `#prompt-guide` — new `web/src/components/DirectorTechniquePack.tsx`, CSS mini-loops in `web/src/app/globals.css`, wired as accordion step **7. Lessons from great directors** in `PromptGuide.tsx` (Longer cuts / stitch → step 8). `#jojo-case-study`, StillGenerateBox, CameraMoveChooser, ExpressionChooser, red fill-ins, Popular Lucy-only preserved. No fal/Higgsfield in UI.
+- **Product**: copyright-safe chooser cards studying camera *language* of great films / Super Bowl–style ads conceptually — **no ripped trailers, no ad clips, no copyrighted footage**. Original CSS-animated SVG mini-loops only.
+- **Groups**: **Cinematic** (10) — One-point corridor push, Realization push-in, Clinical lateral track, IMAX-feel wide lock, Handheld chaos → lock, Predatory slow push, Steadicam float follow, Dust-haze silhouette crane, Symmetry center hold, Low-angle power rise. **Ads / hero reveal** (7) — Product hero orbit, Whip to logo endcard, Tabletop macro glamour, Crowd-to-product crash zoom feel, Emotional cutaway hold, Hands-first product intro, Lifestyle soft wipe feel. Optional UGC cross-link in ads blurb → Style paths.
+- **Each card**: technique name (generic; short lineage nods OK) · Lesson · When · **Copy prompt** Seedance-obedient concrete frame/body language (one move per beat; aligns with `docs/seedance-2.5-official-prompt-guide-learnings.md`).
+- **Tip**: “Phrases below are written the way Seedance follows — paste into one timed beat.” Footnote: illustrations are original CSS/SVG, not from films or ads.
+- **Grid**: 2 cols mobile → 3/4 desktop (same as other choosers).
+
+## Previous update, 2026-09-23 - Prompt Guide accordion + red fillables + Lucy Popular + animated choosers
 
 - **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx`, `CameraMoveChooser.tsx`, new `ExpressionChooser.tsx`, CSS mini-loops in `web/src/app/globals.css`). `#jojo-case-study` + StillGenerateBox credit tracker / packs / generate path preserved.
 - **Accordion**: main guide is seven collapsed-by-default `<details>` steps — Character still · Location still · Embed character in place · Hyper-real Seedance video · Style paths (cinematic / UGC / history-influencer) · Camera + expression craft · Longer cuts / stitch. Scannable list; click to expand.

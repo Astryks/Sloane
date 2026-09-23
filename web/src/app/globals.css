@@ -246,6 +246,98 @@ body {
 .expr-anim-exhale { animation: expr-exhale 2.6s ease-in-out infinite; transform-origin: center; }
 .expr-anim-inhale { animation: expr-inhale 2.2s ease-in-out infinite; transform-origin: center; }
 
+
+/* Director technique pack — original CSS/SVG mini-loops (not film footage) */
+@keyframes dir-corridor-push {
+  0%, 100% { transform: translateY(6px) scale(0.85); }
+  50% { transform: translateY(-4px) scale(1.05); }
+}
+@keyframes dir-realize-push {
+  0%, 100% { transform: scale(0.72); opacity: 0.4; }
+  50% { transform: scale(1.05); opacity: 1; }
+}
+@keyframes dir-lateral {
+  0%, 100% { transform: translateX(-12px); }
+  50% { transform: translateX(12px); }
+}
+@keyframes dir-wide-lock {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+@keyframes dir-chaos-lock {
+  0%, 20% { transform: translate(2px, -1px) rotate(-1.5deg); }
+  35% { transform: translate(-2px, 1.5px) rotate(1.2deg); }
+  50%, 100% { transform: translate(0, 0) rotate(0deg); }
+}
+@keyframes dir-predatory {
+  0%, 100% { transform: translateY(4px) scale(0.9); }
+  50% { transform: translateY(-2px) scale(1); }
+}
+@keyframes dir-float {
+  0%, 100% { transform: translateX(-8px) translateY(2px); }
+  50% { transform: translateX(8px) translateY(-2px); }
+}
+@keyframes dir-sil-crane {
+  0%, 100% { transform: translateY(8px) scale(1.05); }
+  50% { transform: translateY(-6px) scale(0.92); }
+}
+@keyframes dir-symmetry {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+@keyframes dir-power-rise {
+  0%, 100% { transform: translateY(8px); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes dir-hero-orbit {
+  0% { transform: rotate(0deg) translateX(20px) rotate(0deg); }
+  100% { transform: rotate(360deg) translateX(20px) rotate(-360deg); }
+}
+@keyframes dir-whip-end {
+  0%, 20% { transform: translateX(0); opacity: 1; }
+  45% { transform: translateX(28px); opacity: 0.3; }
+  55%, 100% { transform: translateX(28px); opacity: 0; }
+}
+@keyframes dir-macro {
+  0%, 100% { transform: scale(0.9); }
+  50% { transform: scale(1.15); }
+}
+@keyframes dir-crash {
+  0%, 100% { transform: scale(0.75); }
+  55% { transform: scale(1.2); }
+  70%, 100% { transform: scale(1.05); }
+}
+@keyframes dir-cutaway {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(1.5px); }
+}
+@keyframes dir-hands {
+  0%, 100% { transform: translateY(10px); opacity: 0.5; }
+  50% { transform: translateY(0); opacity: 1; }
+}
+@keyframes dir-wipe {
+  0%, 100% { transform: translateX(-6px); }
+  50% { transform: translateX(4px); }
+}
+
+.dir-anim-corridor-push { animation: dir-corridor-push 2.8s ease-in-out infinite; transform-origin: center; }
+.dir-anim-realize-push { animation: dir-realize-push 2.6s ease-in-out infinite; transform-origin: center; }
+.dir-anim-lateral { animation: dir-lateral 3s ease-in-out infinite; }
+.dir-anim-wide-lock { animation: dir-wide-lock 3.2s ease-in-out infinite; transform-origin: center; }
+.dir-anim-chaos-lock { animation: dir-chaos-lock 2.8s ease-in-out infinite; transform-origin: center; }
+.dir-anim-predatory { animation: dir-predatory 3.4s ease-in-out infinite; transform-origin: center; }
+.dir-anim-float { animation: dir-float 3s ease-in-out infinite; }
+.dir-anim-sil-crane { animation: dir-sil-crane 3s ease-in-out infinite; transform-origin: center; }
+.dir-anim-symmetry { animation: dir-symmetry 2.8s ease-in-out infinite; transform-origin: center; }
+.dir-anim-power-rise { animation: dir-power-rise 2.6s ease-in-out infinite; }
+.dir-anim-hero-orbit { animation: dir-hero-orbit 3.8s linear infinite; transform-origin: 60px 44px; }
+.dir-anim-whip-end { animation: dir-whip-end 2.2s ease-in-out infinite; }
+.dir-anim-macro { animation: dir-macro 2.4s ease-in-out infinite; transform-origin: center; }
+.dir-anim-crash { animation: dir-crash 2.4s ease-in-out infinite; transform-origin: center; }
+.dir-anim-cutaway { animation: dir-cutaway 2.6s ease-in-out infinite; }
+.dir-anim-hands { animation: dir-hands 2.4s ease-in-out infinite; }
+.dir-anim-wipe { animation: dir-wipe 2.8s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .cam-anim-dolly-in,
   .cam-anim-dolly-out,
@@ -269,7 +361,24 @@ body {
   .expr-anim-look,
   .expr-anim-whisper,
   .expr-anim-exhale,
-  .expr-anim-inhale {
+  .expr-anim-inhale,
+  .dir-anim-corridor-push,
+  .dir-anim-realize-push,
+  .dir-anim-lateral,
+  .dir-anim-wide-lock,
+  .dir-anim-chaos-lock,
+  .dir-anim-predatory,
+  .dir-anim-float,
+  .dir-anim-sil-crane,
+  .dir-anim-symmetry,
+  .dir-anim-power-rise,
+  .dir-anim-hero-orbit,
+  .dir-anim-whip-end,
+  .dir-anim-macro,
+  .dir-anim-crash,
+  .dir-anim-cutaway,
+  .dir-anim-hands,
+  .dir-anim-wipe {
     animation: none !important;
   }
 }
