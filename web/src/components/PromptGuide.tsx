@@ -13,6 +13,8 @@ import {
   type StillEngine,
 } from "@/lib/stillsPaygo";
 
+import { CameraMoveChooser } from "@/components/CameraMoveChooser";
+
 function GuideCard({
   wash,
   iconColor,
@@ -609,17 +611,18 @@ Match aspect to the character sheet (9:16 or 16:9).`,
       "low / high angle",
       "extreme CU → wide",
     ],
-    body: `One move per beat. Describe the move, not gear names.
-• Static hold — land a payoff, read a label, freeze emotion. Choose when motion would distract.
-• Slow push-in / dolly in — intimacy, rising tension, product reveal. Choose when emotion tightens.
-• Pull-back — reveal scale or context. Choose after a tight beat.
-• Pan / tilt — redirect attention inside one space. Choose for a motivated look, not decoration.
-• Tracking — travel with a walker. Choose for walk-and-talk without cutting.
-• Handheld sway — phone / UGC authenticity. Choose for selfie energy (not shake-cam).
-• Orbit / bullet time — world holds, camera circles. Choose for spectacle or product hero.
-• Whip pan — fast blur between two clear end-frames. Use sparingly.
-• Low angle — power; high angle — vulnerability or overview.
-• Extreme CU → wide — start on pores/eyes, then reveal geography (stitch as two clips if needed).
+    body: `Prefer the visual Camera move chooser (diagram cards + Copy prompt) in Step 5 — one move per beat, describe the move not gear names.
+Quick reminder:
+• Static lock-off — land a payoff / read a label.
+• Dolly in / push-in — intimacy when emotion tightens.
+• Dolly out / pull-back — reveal scale after a tight beat.
+• Track left/right — walk-and-talk without cutting.
+• Pan / tilt — motivated look inside one space.
+• Handheld sway — UGC / selfie energy (not shake-cam).
+• Orbit / arc — spectacle or product hero.
+• Crane / rise — open on a world or lift out.
+• Whip pan — fast blur between two clear end-frames (sparingly).
+• Rack focus — redirect attention without moving the camera.
 Snippet: Camera: medium shot, slow push-in, eye-level. One move only. Hold the final frame clean.`,
   },
   {
@@ -1156,6 +1159,17 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
             </div>
           ))}
         </div>
+
+        <div className="rounded-2xl border border-purple/25 bg-purple-wash/30 p-3">
+          <p className="text-[11px] font-semibold text-purple">
+            Path A tip — pick one camera move per beat from the chooser below, then paste the phrase
+            into your timed Seedance line.
+          </p>
+          <div className="mt-3">
+            <CameraMoveChooser />
+          </div>
+        </div>
+
         <p className="text-xs text-muted">
           More product-ad results:{" "}
           <a href="#harper" className="font-semibold text-purple underline">
@@ -1170,7 +1184,9 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
       <Step n={6} title="Mix-and-match craft chips">
         <p>
           Easy tweakable pieces — open a chip, copy a line into your Seedance prompt. Mix skin +
-          camera + beats without reading a wall of text.
+          camera + beats without reading a wall of text. For camera, prefer the{" "}
+          <span className="font-semibold text-foreground">Camera move chooser</span> in Step 5
+          (diagram + Copy prompt); the Camera angles chip below is the text summary.
         </p>
         <div className="grid gap-2">
           {CRAFT_TWEAKS.map((tweak) => (

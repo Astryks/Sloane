@@ -1,6 +1,14 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - hyper-real Seedance Prompt Guide (modular craft + 3 style paths)
+## Latest update, 2026-09-23 - visual Camera move chooser on Prompt Guide
+
+- **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx` + new `web/src/components/CameraMoveChooser.tsx`). StillGenerateBox / Stripe still packs / JoJo `#jojo-case-study` / Steps 1–2 Popular/Others unchanged.
+- **UX**: Step 5 (after the three style paths) ships a **Camera move chooser** — responsive card grid (2 cols mobile → 3/4 desktop). Each card: SVG diagram, title, one-line *does*, one-line *when*, **Copy prompt** (Seedance-ready phrase). Moves: dolly in/out, push-in, track L/R, orbit/arc, tilt up/down, pan L/R, handheld, static lock-off, crane/rise, whip pan, rack focus (text-only).
+- **Nice-to-have**: same pattern as compact copy-chip rows for expressions, blink/breath/weight, and background motion (no extra binary assets).
+- **Step 6**: craft chips kept; camera chip body points at the visual chooser; no fal/Higgsfield/third-party tutorial embeds.
+- **Never tell users to Google** — phrases are copy-ready in-product.
+
+## Previous update, 2026-09-23 - hyper-real Seedance Prompt Guide (modular craft + 3 style paths)
 
 - **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx`). StillGenerateBox / Stripe still packs / JoJo `#jojo-case-study` unchanged in behavior.
 - **Title**: GuideCard is now **Prompt guide to make hyper realistic videos** (subtitle: Character + location stills → named @Image refs → per-second Seedance beats).
