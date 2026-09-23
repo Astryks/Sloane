@@ -1,6 +1,15 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - free /stitch editor: large-file export, independent audio, mask/unmask, Draft vs Final
+## Latest update, 2026-09-23 - hyper-real Seedance Prompt Guide (modular craft + 3 style paths)
+
+- **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx`). StillGenerateBox / Stripe still packs / JoJo `#jojo-case-study` unchanged in behavior.
+- **Title**: GuideCard is now **Prompt guide to make hyper realistic videos** (subtitle: Character + location stills → named @Image refs → per-second Seedance beats).
+- **Step 4 — Hyper-real Seedance video**: paste template with REFERENCE MAP, inventory/continuity locks, timed beats in Seedance `0s-3s` syntax (not `0:00`), CONSTRAINTS (no subtitles, pores, relight, one move per beat). Teaches image counts: 2.0 ~9 refs / 2.5 ~30 images / soft best 1–8 subjects / practical Lucy **2–4** images with explicit `@ImageN is…` binding.
+- **Step 5 — three full style paths** (each with image map + tweak notes + per-second paste prompt): **A Cinematic short**, **B UGC product selling**, **C History-influencer explainer** (modern Gen Z host in period location — never period costume; original Lucy prompts).
+- **Step 6 — mix-and-match craft chips**: skin/pores, physical expressions, location details, camera angles+when-to-choose, anti-mannequin micro-motion, background motion, lighting/continuity, @Image naming, per-second beats — scannable chips, not a wall.
+- **Vendor invisible**: no fal / Higgsfield / Soul ID / Cinema Studio in guide copy. Prefer Seedance by name; Veo/Kling ok as alternatives.
+
+## Previous update, 2026-09-23 - free /stitch editor: large-file export, independent audio, mask/unmask, Draft vs Final
 
 - **Where**: free browser editor at `lucylabs.app/stitch` (`web/src/app/stitch`). No Stripe/CLAIMING changes in this work.
 - **Large multi-GB sources**: Export no longer copies whole originals into ffmpeg MEMFS. Clips/overlays/audio are mounted via **WORKERFS** when available; only the **selected trim window** is extracted into a small temp file, then the existing scale/concat/xfade pipeline runs. Soft warnings talk about *selected-section payload*, not raw upload size. Progress shows “extracting section from large file…”.

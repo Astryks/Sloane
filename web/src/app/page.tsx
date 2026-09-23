@@ -2097,7 +2097,7 @@ export default function Home() {
   }
 
   // Page order (2026-09-23, per direct request): 1) the generator - prompt,
-  // model, price, pay with no signup; 2) our prompt guide incl. JoJo;
+  // model, price, pay with no signup; 2) Prompt guide to make hyper realistic videos (incl. JoJo);
   // 3) Harper; 4) cinematic examples; then the free editor; and voice
   // (text to speech, then cloning with its up-front requirements) last.
   return (
