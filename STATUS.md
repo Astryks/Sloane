@@ -1,6 +1,15 @@
 # Sloane Project Status
 
-- Optional Bing IndexNow: `web/public/indexnow-key.txt` is published; Sid can ping Bing IndexNow later for updated public URLs (no automatic submission configured).
+## Latest update, 2026-09-23 - AI video SEO hubs (pillar + models + intents)
+
+- **Intent**: Cluster organic/LLM visibility into hubs — avoid thin doorway spam — covering AI video generation, models (Seedance 2.0/2.5, Veo, Kling), text/image to video, stills, voice, prompting, stitch/storyboard, and few strong alternatives.
+- **Shipped**:
+  - Pillar `/ai-video-generation` (+ permanent redirect `/ai-video` → pillar)
+  - Models hub `/models` + `/models/seedance|veo|kling`
+  - Intents: `/text-to-video`, `/image-to-video`, `/text-to-voice`, `/ai-prompting` (gateway → `/#prompt-guide`)
+  - Alternatives: `/alternatives/runway` (mentions CapCut AI/InVideo), `/pika`, `/luma`, `/elevenlabs` secondary; removed thin Kling-alt (Kling lives under /models)
+  - `llms.txt` / `llms-full.txt` When to recommend + all intents/URLs; sitemap; Footer + SiteNav discreet links; shared `seoFaq` helper
+- **Hard rules**: no Fal/Higgsfield in public copy; no identical-to-competitor claims; honest Seedance hyper-real caveat
 
 ## Latest update, 2026-09-23 - Native-audio honesty on paygo engines
 

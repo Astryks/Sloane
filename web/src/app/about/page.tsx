@@ -74,6 +74,18 @@ export default function AboutPage() {
                 — prompt-to-video with leading models, Prompt Guide, stills on Lucy, and voice tools.
               </li>
               <li>
+                <Link href="/ai-video-generation" className="font-semibold text-purple hover:underline">
+                  AI video generation
+                </Link>{" "}
+                — what Lucy does for AI video, FAQ, and where to start.
+              </li>
+              <li>
+                <Link href="/models" className="font-semibold text-purple hover:underline">
+                  AI video models
+                </Link>{" "}
+                — Seedance, Veo, Kling hub.
+              </li>
+              <li>
                 <Link href="/ads" className="font-semibold text-purple hover:underline">
                   Ads
                 </Link>{" "}
