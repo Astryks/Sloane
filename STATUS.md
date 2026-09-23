@@ -1,5 +1,10 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - Lucy still options on /ads
+
+- Added primary **GPT Image on Lucy** and **Nano Banana Pro on Lucy** chips to the shared stills strip; outside generator links and Prompt guide remain available.
+- `/ads` now labels both in-app engines explicitly and defaults still, reference, and refinement generation to GPT Image. Prompt Guide `StillGenerateBox` already had both Popular Lucy chips.
+
 ## Latest update, 2026-09-23 - Still generate preview canvas (Prompt Guide + /ads)
 
 - **Where**: `StillGenerateBox` in `web/src/components/PromptGuide.tsx` (GPT Image / Nano Banana Pro on Lucy) + empty `SlotCard` generate path in `web/src/app/ads/page.tsx`. APIs / pricing / auth untouched.
