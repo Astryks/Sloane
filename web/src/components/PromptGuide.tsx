@@ -1603,6 +1603,13 @@ Do not add subtitles. No logos/watermarks unless wanted + [style anchor]`}</Past
           not made by us, shown here purely as a real example of a storyboard becoming a finished
           ad.
         </p>
+        <p className="mt-2 text-xs text-muted">
+          Practice the same layout on{" "}
+          <a href="/ads" className="font-semibold text-purple underline">
+            /ads
+          </a>{" "}
+          — finished video, storyboard stills, then your own drop grid.
+        </p>
       </div>
     </GuideCard>
   );
