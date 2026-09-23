@@ -1,4 +1,14 @@
-# Sloane — voice clone prototype
+# Lucy Labs
+
+**[lucylabs.app](https://lucylabs.app)** — AI video, stills & voice. Make clips on Lucy, stitch free in the browser.
+
+Lucy Labs helps you generate AI videos and stills, add voice, storyboard ads, and stitch longer cuts in a free client-side editor. Pay-as-you-go creative toolkit for makers who want results without a subscription stack.
+
+> Public product: [https://lucylabs.app](https://lucylabs.app) · Repo: `Astryks/Sloane`
+
+---
+
+# Sloane — voice clone prototype (internal)
 
 Prototype for cloning the two masterclass instructors' voices (art + music), as a
 testbed before the public voice-conversion platform. Consent for using this
