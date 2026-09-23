@@ -121,3 +121,155 @@ body {
     0 2px 4px rgba(61, 51, 48, 0.04),
     0 16px 40px -12px rgba(61, 51, 48, 0.14);
 }
+
+/* Prompt Guide — CSS-animated SVG mini loops (camera + expression choosers) */
+@keyframes cam-dolly-in {
+  0%, 100% { transform: scale(0.82); }
+  50% { transform: scale(1.08); }
+}
+@keyframes cam-dolly-out {
+  0%, 100% { transform: scale(1.08); }
+  50% { transform: scale(0.82); }
+}
+@keyframes cam-push-in {
+  0%, 100% { transform: scale(0.7); opacity: 0.45; }
+  50% { transform: scale(1); opacity: 1; }
+}
+@keyframes cam-track-left {
+  0%, 100% { transform: translateX(10px); }
+  50% { transform: translateX(-10px); }
+}
+@keyframes cam-track-right {
+  0%, 100% { transform: translateX(-10px); }
+  50% { transform: translateX(10px); }
+}
+@keyframes cam-orbit {
+  0% { transform: rotate(0deg) translateX(14px) rotate(0deg); }
+  100% { transform: rotate(360deg) translateX(14px) rotate(-360deg); }
+}
+@keyframes cam-tilt-up {
+  0%, 100% { transform: translateY(8px); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes cam-tilt-down {
+  0%, 100% { transform: translateY(-8px); }
+  50% { transform: translateY(8px); }
+}
+@keyframes cam-pan-left {
+  0%, 100% { transform: translateX(12px); }
+  50% { transform: translateX(-12px); }
+}
+@keyframes cam-pan-right {
+  0%, 100% { transform: translateX(-12px); }
+  50% { transform: translateX(12px); }
+}
+@keyframes cam-handheld {
+  0%, 100% { transform: translate(0, 0) rotate(-1.2deg); }
+  25% { transform: translate(1.5px, -1.5px) rotate(0.8deg); }
+  50% { transform: translate(-1px, 1px) rotate(-0.6deg); }
+  75% { transform: translate(1px, 0.5px) rotate(0.4deg); }
+}
+@keyframes cam-crane {
+  0%, 100% { transform: translateY(10px) scale(1.05); }
+  50% { transform: translateY(-8px) scale(0.9); }
+}
+@keyframes cam-whip {
+  0%, 15% { transform: translateX(-18px); opacity: 1; }
+  45% { transform: translateX(18px); opacity: 0.35; }
+  55%, 100% { transform: translateX(18px); opacity: 1; }
+}
+@keyframes cam-rack {
+  0%, 40% { opacity: 1; }
+  50%, 90% { opacity: 0.25; }
+  100% { opacity: 1; }
+}
+@keyframes cam-rack-far {
+  0%, 40% { opacity: 0.25; }
+  50%, 90% { opacity: 1; }
+  100% { opacity: 0.25; }
+}
+@keyframes expr-blink {
+  0%, 42%, 58%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.08); }
+}
+@keyframes expr-smile {
+  0%, 100% { transform: scaleX(0.85) translateY(0); }
+  50% { transform: scaleX(1.15) translateY(-1px); }
+}
+@keyframes expr-laugh {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  30% { transform: translateY(-2px) scaleY(1.15); }
+  60% { transform: translateY(1px) scaleY(0.95); }
+}
+@keyframes expr-brow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes expr-look {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(5px); }
+}
+@keyframes expr-whisper {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(2px) scale(0.96); }
+}
+@keyframes expr-exhale {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(3px) scaleY(0.92); }
+}
+@keyframes expr-inhale {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-2px) scaleY(1.08); }
+}
+
+.cam-anim-dolly-in { animation: cam-dolly-in 2.6s ease-in-out infinite; transform-origin: center; }
+.cam-anim-dolly-out { animation: cam-dolly-out 2.6s ease-in-out infinite; transform-origin: center; }
+.cam-anim-push-in { animation: cam-push-in 2.4s ease-in-out infinite; transform-origin: center; }
+.cam-anim-track-left { animation: cam-track-left 2.8s ease-in-out infinite; }
+.cam-anim-track-right { animation: cam-track-right 2.8s ease-in-out infinite; }
+.cam-anim-orbit { animation: cam-orbit 3.6s linear infinite; transform-origin: 60px 36px; }
+.cam-anim-tilt-up { animation: cam-tilt-up 2.5s ease-in-out infinite; }
+.cam-anim-tilt-down { animation: cam-tilt-down 2.5s ease-in-out infinite; }
+.cam-anim-pan-left { animation: cam-pan-left 2.6s ease-in-out infinite; }
+.cam-anim-pan-right { animation: cam-pan-right 2.6s ease-in-out infinite; }
+.cam-anim-handheld { animation: cam-handheld 2.2s ease-in-out infinite; transform-origin: center; }
+.cam-anim-crane { animation: cam-crane 2.8s ease-in-out infinite; transform-origin: center; }
+.cam-anim-whip { animation: cam-whip 1.8s ease-in-out infinite; }
+.cam-anim-rack-near { animation: cam-rack 2.8s ease-in-out infinite; }
+.cam-anim-rack-far { animation: cam-rack-far 2.8s ease-in-out infinite; }
+.expr-anim-blink { animation: expr-blink 2.4s ease-in-out infinite; transform-origin: center; }
+.expr-anim-smile { animation: expr-smile 2.2s ease-in-out infinite; transform-origin: center; }
+.expr-anim-laugh { animation: expr-laugh 1.6s ease-in-out infinite; transform-origin: center; }
+.expr-anim-brow { animation: expr-brow 2s ease-in-out infinite; }
+.expr-anim-look { animation: expr-look 2.4s ease-in-out infinite; }
+.expr-anim-whisper { animation: expr-whisper 2.2s ease-in-out infinite; transform-origin: center; }
+.expr-anim-exhale { animation: expr-exhale 2.6s ease-in-out infinite; transform-origin: center; }
+.expr-anim-inhale { animation: expr-inhale 2.2s ease-in-out infinite; transform-origin: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cam-anim-dolly-in,
+  .cam-anim-dolly-out,
+  .cam-anim-push-in,
+  .cam-anim-track-left,
+  .cam-anim-track-right,
+  .cam-anim-orbit,
+  .cam-anim-tilt-up,
+  .cam-anim-tilt-down,
+  .cam-anim-pan-left,
+  .cam-anim-pan-right,
+  .cam-anim-handheld,
+  .cam-anim-crane,
+  .cam-anim-whip,
+  .cam-anim-rack-near,
+  .cam-anim-rack-far,
+  .expr-anim-blink,
+  .expr-anim-smile,
+  .expr-anim-laugh,
+  .expr-anim-brow,
+  .expr-anim-look,
+  .expr-anim-whisper,
+  .expr-anim-exhale,
+  .expr-anim-inhale {
+    animation: none !important;
+  }
+}
