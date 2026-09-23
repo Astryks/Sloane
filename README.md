@@ -1,114 +1,32 @@
-# Sloane — voice clone prototype
+# Lucy Labs
 
-Prototype for cloning the two masterclass instructors' voices (art + music), as a
-testbed before the public voice-conversion platform. Consent for using this
-footage this way has been confirmed by the project owner.
+[Lucy Labs](https://lucylabs.app) is a browser-based creative toolkit for making
+AI video, stills, and voice content.
 
-## Status
+## What you can make
 
-- [x] Project scaffolded
-- [x] Step 1: raw audio extracted locally from selected masterclass videos
-- [ ] Step 2: vocal separation (Demucs) — run on cloud GPU
-- [ ] Step 3: transcribe + chunk into training clips — run on cloud GPU
-- [ ] Step 4: zero-shot test (OpenVoice / seed-vc) — no training needed
-- [ ] Step 5: RVC fine-tune per speaker — higher fidelity, needs training
+- **AI video** — generate clips across multiple engines from a single creative
+  workspace.
+- **Prepaid stills** — create still images with prepaid credit packs and use
+  them as building blocks for scenes, ads, and videos.
+- **Voice tools** — explore text-to-speech and consent-based voice workflows.
+- **`/ads` storyboard** — plan an ad as a sequence of scenes, gather references,
+  and turn a storyboard into a real project.
+- **Prompt guide** — learn a practical workflow for hyper-realistic video,
+  including character and location references, camera direction, expressions,
+  and timed beats.
+- **Free browser stitch editor** — trim and combine video, layer audio and
+  overlays, then export a draft or final cut directly in the browser.
 
-## Why local vs. cloud is split this way
+## Visit Lucy Labs
 
-The local path now supports Apple Silicon through PyTorch's MPS backend. Audio
-extraction, Chatterbox zero-shot text-to-speech, and (where supported by the
-installed libraries) Demucs can run locally. Faster-Whisper remains on CPU on
-Apple Silicon because CTranslate2 does not provide an MPS backend. RVC
-fine-tuning and the full multi-voice production model still use the CUDA/cloud
-path by default and may be substantially faster on an NVIDIA GPU.
+Start creating at **[lucylabs.app](https://lucylabs.app)**.
 
-## Local Mac setup
+- [Explore the prompt guide](https://lucylabs.app/#prompt-guide)
+- [Build an ad storyboard](https://lucylabs.app/ads)
+- [Open the free stitch editor](https://lucylabs.app/stitch)
 
-Use Python 3.10–3.12 in a virtual environment:
+## Development
 
-```bash
-python3 -m venv .venv-mac
-source .venv-mac/bin/activate
-pip install -r requirements-mac.txt
-pip install -e vendor/chatterbox-upstream
-```
-
-Run the zero-shot local test with the bundled reference clip:
-
-```bash
-python scripts/04_zeroshot_test.py
-```
-
-Or use your own WAV reference and text:
-
-```bash
-python scripts/04_zeroshot_test.py --reference /path/to/reference.wav \
-  --text "Hello from Lucy running locally on this Mac."
-```
-
-Set `LUCY_DEVICE=cpu` if an MPS operation is unsupported, or
-`LUCY_DEVICE=mps` to require Apple Metal for the shared inference engine.
-
-## What's been done
-
-`scripts/01_extract_audio.py` pulled clean speech-heavy source videos and
-extracted their audio tracks (48kHz mono 16-bit WAV) into `raw_audio/`:
-
-- **art_instructor**: instructor intro, "Anyone Can Paint", "Tracing", "What to
-  paint", "Painting a parrot in watercolour" — ~95 min raw audio
-- **music_instructor** (Matt Landi): "Where to begin writing a song", "Really
-  listen to your favourite songs", "JUST START", "Finding the pitch", "Find
-  your note range" — ~47 min raw audio
-
-Videos with heavy singing/music overlay (e.g. "Creating Fortnite on
-GarageBand", "Vocal exercises", "Singing my original song") were deliberately
-skipped for this speech-training set — good candidates to add later for
-style/emotion range, but not for the initial clean-speech dataset.
-
-This is already well above the ~30-60 min of clean speech RVC needs for a
-good fine-tune, before even accounting for the two ~1hr "Painting a self
-portrait" / "Painting a parrot" files, most of which is likely usable talking.
-
-## Next steps: cloud GPU setup
-
-1. **Rent a pod.** RunPod or Vast.ai, RTX 4090 (~$0.34-0.69/hr on RunPod
-   Community Cloud; Vast.ai unverified hosts often cheaper). You'll need to
-   create the account and add billing yourself.
-2. **Upload data.** Copy this project's `raw_audio/` folder to the pod (a few
-   hundred MB, quick over any normal connection).
-3. **Install deps.** `pip install -r requirements-cloud.txt` on the pod.
-4. **Run cleanup pipeline:**
-   ```bash
-   python3 scripts/02_separate_vocals.py     # strips any background music/noise
-   python3 scripts/03_chunk_by_speech.py     # transcribes + cuts utterance clips
-   ```
-   Output: `training_data/<speaker>/clips/*.wav` + `filelist.csv` per speaker.
-5. **Quick zero-shot test (no training, minutes not hours):** pick one clean
-   30-90 sec reference clip from `clean_audio/` and run it through OpenVoice V2
-   or seed-vc directly. This is the fastest way to sanity-check voice identity
-   capture before investing in a full fine-tune. Ask to have this script
-   written once you're on the pod and ready to test.
-6. **RVC fine-tune (higher fidelity):** use `training_data/<speaker>/clips/`
-   as the per-speaker dataset with the RVC-Project WebUI/CLI
-   (https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI).
-   ~300 epochs on ~30-45 min of clips takes roughly 1-2 hours on a single
-   consumer GPU.
-
-## Cost recap for this prototype (1-2 speakers)
-
-| Item | Estimate |
-|---|---|
-| Local extraction/cleanup prep | $0 (already done) |
-| Zero-shot test (OpenVoice/seed-vc) | $0 model cost, ~$1-2 GPU time |
-| RVC fine-tune, both speakers | ~$2-6 GPU time |
-| Generous experimentation/iteration | ~$15-25 total |
-
-## Reminders carried over from planning
-
-- Consent for these two voices has been confirmed — keep documentation of that
-  on file since this becomes load-bearing if the prototype turns into a real
-  product.
-- If/when this becomes the public platform (any user, any voice), the
-  consent-capture (live voice-captcha), watermarking, and abuse-prevention
-  pieces from the earlier design discussion are required before launch, not
-  optional extras.
+The web app's local development instructions are kept in
+[`web/README.md`](web/README.md).
