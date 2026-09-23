@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { MakeStillsOutboundLinks } from "@/components/MakeStillsOutboundLinks";
 
 type PracticeCell = {
   id: string;
@@ -228,8 +229,11 @@ export function AdsHowToStoryboard({ onHide }: { onHide: () => void }) {
         </button>
       </div>
       <p className="mb-3 text-[11px] text-muted">
-        Photos stay in this browser only and are not uploaded.
+        Photos stay in this browser only and are not uploaded. This practice grid is browser-only — it is not the
+        same as Start a storyboard below.
       </p>
+
+      <MakeStillsOutboundLinks showHelper={false} className="mb-4" />
 
       <p className="mb-4 text-xs text-muted">
         This is how directors plan — stills first, then animate each square. Start a storyboard below to do it for
