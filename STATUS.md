@@ -1,6 +1,15 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - Prompt Guide: Faces, angles & embedding + red fillables audit
+## Latest update, 2026-09-23 - Prompt Guide live on production + Vercel build unblocked
+
+- **Production**: lucylabs.app is on merge `b34c2e7` (PR #16). Homepage `#prompt-guide` title **Prompt guide to make hyper realistic videos** is live (accordion steps, Faces/angles, director pack, camera + expression choosers, red `[bracket]` fill-ins, Popular = Lucy GPT Image / Nano Banana Pro only).
+- **Why Vercel kept failing**: every recent Preview/Production deploy died in `web/src/app/stitch/largeFileExport.ts` importing `FFFSType` from `@ffmpeg/ffmpeg`. Turbopack SSR resolves that package to `empty.mjs` (no `FFFSType` export), so main could not ship while an older successful build stayed on the domain. **Fix (PR #16)**: use a `"WORKERFS"` string constant instead; local `next build` green; Production deploy status **success**.
+- **Also shipped same day (PRs #9–#15, #14)**: hyper-real Seedance templates (`0s-3s`, `@Image` map) · visual CameraMoveChooser + ExpressionChooser (CSS/SVG mini-loops, Seedance-ready Copy prompts) · accordion + Lucy Popular / Others honest picks · copyright-safe DirectorTechniquePack (**43** cards: directors incl. Tarantino/Spielberg/Scorsese/Woody Allen, feature grammar, ads, music video) · Faces/angles/embedding step · paygo textarea helper copy pointing at the guide · still Stripe packs + images-left tracker (earlier).
+- **Product call — real GIFs**: keep original CSS/SVG mini-loops for now (copyright-safe). Optional later: Lucy-made muted loops only — do **not** rip trailers/ads/MVs.
+- **Still to confirm with real traffic**: first still-pack purchase → generate → images-left drop; first guest video paygo E2E (webhook → auto-generate → `/api/media/...`).
+- **Vendor invisible**: fal/Higgsfield stay out of client UI.
+
+## Previous update, 2026-09-23 - Prompt Guide: Faces, angles & embedding + red fillables audit
 
 - **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx`). New accordion step **4. Faces, angles & embedding** (after Embed character in place). Later steps renumbered: Hyper-real Seedance video → 5 · Style paths → 6 · Camera + expression craft → 7 · Lessons from great directors → 8 · Longer cuts / stitch → 9. Accordion, Popular Lucy-only, CameraMoveChooser, ExpressionChooser, DirectorTechniquePack, StillGenerateBox, hashes, fal invisible — preserved.
 - **Step 4 content (Sid-approved)**: JSON usually not required (organizes thinking; models care about refs + physical language; structured blocks OK; `{json}` rarely improves pixels; API JSON for settings is separate) · Hyper-real consistent faces (lock stills first; split full-body + chest-up; if drift add 3/4 + profile; practical Seedance **2–4** key refs soft **1–8**; bind `@Image1` once) · Angle counts (min 1 good sheet; stronger front+3/4+profile ~3–4 + body; 8+ near-duplicates hurt) · Natural embed (empty `@Image2`; place `@Image1`; relight; feet planted + contact shadow + scale; living breath/weight; one camera move/beat; match weather/colour temp) · pasteable cream templates with red `[bracket]` fill-ins.
