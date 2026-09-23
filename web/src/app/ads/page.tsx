@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AdsHowToStoryboard } from "@/components/AdsHowToStoryboard";
 import { MakeStillsOutboundLinks } from "@/components/MakeStillsOutboundLinks";
@@ -600,6 +601,27 @@ function SlotCard({
     <div className="flex flex-col gap-2 rounded-2xl border border-border bg-white p-3">
       {!slot.image_url ? (
         <div className="space-y-2">
+          <div
+            className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-border/80 bg-cream/70"
+            aria-live="polite"
+          >
+            <div className="px-3 text-center">
+              <p className="text-xs font-semibold text-muted">Your still will appear here</p>
+              <p className="mt-1 text-[10px] text-muted">
+                Upload or generate to fill this frame
+              </p>
+            </div>
+            {busy && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-cream/80 backdrop-blur-[1px]">
+                <span
+                  className="h-5 w-5 animate-spin rounded-full border-2 border-purple border-t-transparent"
+                  aria-hidden
+                />
+                <p className="text-[11px] font-semibold text-foreground">Generating…</p>
+              </div>
+            )}
+          </div>
+
           <label
             {...uploadDropzone.handlers}
             className={`block cursor-pointer rounded-xl border-2 border-dashed p-3 text-center text-xs transition ${
@@ -684,6 +706,26 @@ function SlotCard({
               Go
             </button>
           </div>
+
+          <details className="rounded-xl border border-border bg-cream/40 p-2">
+            <summary className="cursor-pointer text-[10px] font-bold text-foreground">
+              Prompt guide (tips)
+            </summary>
+            <div className="mt-1.5 space-y-1.5 text-[10px] leading-snug text-muted">
+              <p>
+                Describe the scene clearly: subject, place, light, and mood. For character
+                consistency, generate a sheet first (full-body + chest-up), then embed in an empty
+                location.
+              </p>
+              <p>
+                GPT Image and Nano Banana Pro both work here — GPT Image is the solid all-rounder
+                for hyper-real stills.
+              </p>
+              <Link href="/#prompt-guide" className="inline-block font-semibold text-purple underline">
+                Open full Prompt guide
+              </Link>
+            </div>
+          </details>
         </div>
       ) : !slot.video_url ? (
         <div className="space-y-2">

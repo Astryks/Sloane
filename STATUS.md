@@ -1,6 +1,11 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - /ads Make stills outbound links (GPT + generators)
+## Latest update, 2026-09-23 - Still generate preview canvas (Prompt Guide + /ads)
+
+- **Where**: `StillGenerateBox` in `web/src/components/PromptGuide.tsx` (GPT Image / Nano Banana Pro on Lucy) + empty `SlotCard` generate path in `web/src/app/ads/page.tsx`. APIs / pricing / auth untouched.
+- **UX**: Always-on large **aspect-video** preview frame (`min-h-72` on Prompt Guide) — empty cream/dashed placeholder (“Your still will appear here”), stable loading overlay (spinner + Generating…), then `object-contain` result in the same box + Download still. Prompt textarea + Generate / engine chips kept as the generate stack. Collapsed **Prompt guide (tips)** `<details>` under controls (compressed character/location + GPT tip) + **Open full Prompt guide** → `/#prompt-guide`. /ads SlotCard empty state gets matching aspect-video empty frame above upload/cinematic/refs/generate + the same tips accordion. No sample image faked in empty frame. No fal/Higgsfield in UI.
+
+## Previous update, 2026-09-23 - /ads Make stills outbound links (GPT + generators)
 
 - **Where**: empty state under **Start a storyboard** on `lucylabs.app/ads` (`web/src/app/ads/page.tsx`) + practice note in `AdsHowToStoryboard.tsx`. Shared strip: `MakeStillsOutboundLinks.tsx`. Create/auth APIs untouched; practice grid stays browser-only (no upload).
 - **UX**: Primary CTA unchanged. Muted line: stills first — make them here after you start, or outside and upload into each scene. Compact new-tab chips (noopener): ChatGPT / GPT Image, Gemini, Midjourney, Ideogram + `/#prompt-guide` (existing hash). Flux skipped (Prompt Guide “via other tools” / no clean generator URL). No fal/Higgsfield; no iframes; does not claim Start animates demo drops.

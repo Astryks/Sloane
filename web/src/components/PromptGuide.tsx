@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import {
   VIDEO_PAYGO_ENGINES,
   type VideoEngine,
@@ -234,6 +235,8 @@ function StillGenerateBox({
   }
 
   useEffect(() => {
+    // Stripe return / mount: hydrate balance + optional draft (external system).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional mount hydrate
     void refreshBalance();
     try {
       const params = new URLSearchParams(window.location.search);
@@ -254,6 +257,7 @@ function StillGenerateBox({
   useEffect(() => {
     if (!pendingAutoRef.current || balanceCents === null || autoTriedRef.current) return;
     if (balanceCents < stillCostCents(engineId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot Stripe return packs UI
       setShowPacks(true);
       pendingAutoRef.current = false;
       return;
@@ -347,6 +351,50 @@ function StillGenerateBox({
 
   return (
     <div className="mt-3 rounded-2xl border border-border bg-white/90 p-3">
+      {/* Always-on preview canvas — empty / loading / result in the same frame */}
+      <div
+        className={`relative mb-3 flex min-h-72 w-full aspect-video items-center justify-center overflow-hidden rounded-xl border bg-cream/70 ${
+          imageUrl ? "border-border" : "border-dashed border-border/80"
+        }`}
+        aria-live="polite"
+      >
+        {imageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={imageUrl}
+            alt="Generated still"
+            className="absolute inset-0 h-full w-full rounded-xl object-contain"
+          />
+        ) : (
+          <div className="px-4 text-center">
+            <p className="text-sm font-semibold text-muted">Your still will appear here</p>
+            <p className="mt-1 text-[11px] text-muted/80">
+              Generate on Lucy to fill this frame
+            </p>
+          </div>
+        )}
+        {loading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-cream/80 backdrop-blur-[1px]">
+            <span
+              className="h-6 w-6 animate-spin rounded-full border-2 border-purple border-t-transparent"
+              aria-hidden
+            />
+            <p className="text-xs font-semibold text-foreground">Generating…</p>
+          </div>
+        )}
+      </div>
+      {imageUrl && (
+        <a
+          href={imageUrl}
+          download={stillDownloadFilename(imageUrl)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-3 inline-block text-xs font-semibold text-purple underline"
+        >
+          Download still
+        </a>
+      )}
+
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
           Choose a generator
@@ -415,7 +463,7 @@ function StillGenerateBox({
       </ul>
 
       <textarea
-        className="mt-3 w-full rounded-xl border border-border bg-cream/60 p-3 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+        className="mt-1 w-full rounded-xl border border-border bg-cream/60 p-3 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
         rows={4}
         placeholder={placeholder}
         value={prompt}
@@ -463,25 +511,35 @@ function StillGenerateBox({
         </div>
       )}
 
-      {imageUrl && (
-        <div className="mt-3 space-y-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageUrl}
-            alt="Generated still"
-            className="max-h-72 w-full rounded-xl border border-border object-contain bg-cream"
-          />
-          <a
-            href={imageUrl}
-            download={stillDownloadFilename(imageUrl)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-xs font-semibold text-purple underline"
+      <details className="mt-3 rounded-xl border border-border bg-cream/40 p-2.5">
+        <summary className="cursor-pointer text-[11px] font-bold text-foreground">
+          Prompt guide (tips)
+        </summary>
+        <div className="mt-2 space-y-2 text-[11px] leading-snug text-muted">
+          <p>
+            <strong className="text-foreground">Character still:</strong> split-screen on flat white
+            (full-body + chest-up). Fill age, build, features, hair, wardrobe. Push real skin —
+            pores, uneven tone. Once you have the sheet, never re-describe the face — attach the
+            image.
+          </p>
+          <p>
+            <strong className="text-foreground">Location still:</strong> empty place only (no
+            character). Match aspect (9:16 or 16:9). Name light, weather, and materials.
+          </p>
+          <p>
+            Cream templates use red{" "}
+            <span className="font-semibold text-red-500">[blanks]</span> as fill-ins. Best
+            all-rounder for hyper-real stills:{" "}
+            <strong className="text-foreground">GPT Image</strong> on Lucy.
+          </p>
+          <Link
+            href="/#prompt-guide"
+            className="inline-block font-semibold text-purple underline"
           >
-            Download still
-          </a>
+            Open full Prompt guide
+          </Link>
         </div>
-      )}
+      </details>
 
       <p className="mt-2 text-[11px] text-muted">
         Prefer outside? Open ChatGPT / Midjourney / etc. under Others, paste the cream template
@@ -493,6 +551,7 @@ function StillGenerateBox({
     </div>
   );
 }
+
 
 // Original Lucy prompts only — technique generalized, not third-party wording.
 const STYLE_PATHS: {
