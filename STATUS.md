@@ -1,6 +1,16 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23, later - vendor (fal) fully hidden from visitors; header joined into the generator card
+## Latest update, 2026-09-23, evening - cleaned Prompt Guide + Stripe still credits (images-left tracker)
+
+- **Done for this ask (merged to `main`)**: PRs [#4](https://github.com/Astryks/Sloane/pull/4) (six-step Prompt Guide), [#5](https://github.com/Astryks/Sloane/pull/5) (Stripe still paygo + simpler Steps 1–2), [#7](https://github.com/Astryks/Sloane/pull/7) (images-left tracker + stills panel in `#pay-as-you-go`). Tip of main at this writeup: `ca50616`.
+- **Prompt Guide** (`web/src/components/PromptGuide.tsx`, `#prompt-guide`): character → location → embed → style paths (UGC / cinematic / bullet time) → craft details (collapsible) → longer cuts + `/stitch`; JoJo + `#jojo-case-study` kept. Steps 1–2: go to ChatGPT or pick below → example → short guide → paste box → **Popular** / **Others** generators. End of guide seeds video prompt + engine into pay-as-you-go.
+- **Still credits (prepaid packs, not single $0.19 Checkout)**: GPT Image **19¢**/still, Nano Banana Pro **29¢**/still; packs **10 for $1.90** (190¢) and **25 for $4.50** (475¢). Stripe Checkout `price_data` (no new `STRIPE_PRICE_*` env); product names **Lucy Labs still credits (N)**; webhook grants via `metadata.product === "still_credits"` before video packs. Routes: `/api/stills-paygo/{checkout,balance,generate}`; DB `still_credits` + `still_credit_grants`; guest merge moves still balance with video.
+- **Images-left tracker**: `stillImagesLeft()` — GPT = `floor(balanceCents/19)`, Nano = `floor(balanceCents/29)`. Shown in Prompt Guide `StillGenerateBox` and homepage `StillCreditsPaygoPanel` inside `#pay-as-you-go`. Downloads use `lucy-still.{ext}`; media proxy already serves `lucy-labs.{ext}`.
+- **Vendor invisible**: stills use `generateImageVariants` + `publicJson` / `/api/media` — no fal names/URLs in UI, links, Stripe labels, or download filenames.
+- **Still to confirm on production traffic** (no inference keys on the build machine for a live dry-run): first real still-pack purchase → webhook credit → Generate on Lucy → proxied image + images-left decrement. Same open item as video: first real paid guest video end-to-end.
+- **Open follow-ups (unchanged / related)**: dedicated `MEDIA_URL_SECRET`; privacy-policy lawyer pass; mobile vendor-free release + mobile sign-in for clone; optional deeper `/ads` prefill from guide (`?prompt=` only today).
+
+## Previous update, 2026-09-23, later - vendor (fal) fully hidden from visitors; header joined into the generator card
 
 - **Deployed to production (`b53c148`) and checked live on lucylabs.app, 2026-09-23**: new layout + joined header render; zero vendor mentions in the live homepage HTML, all 9 of its JS bundles, and `/privacy`; `/api/media` route live (rejects tampered tokens); guest (no-signup) Stripe checkout issues a real session, charged in **USD** (US$3.99 confirmed on the live Checkout page); all 7 model entries map to the correct model.
 - **Margins (checked 2026-09-23)**: worst case Kling v3 10s + GPT-6 Astra; profit/video after Stripe fees $1.23-1.29 (single), $1.10-1.15 (5-pack), $1.03-1.08 (10-pack; thinnest - +$1 to $36 adds ~10c/video). If the Stripe account is Australian, a ~2% currency conversion fee on USD payouts could put the 10-pack worst case ~$0.96 - still profitable, check Stripe's real fee breakdown.
