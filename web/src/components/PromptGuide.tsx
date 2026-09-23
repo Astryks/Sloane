@@ -953,8 +953,8 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
 
         <p className="text-xs text-muted">
           More product-ad results:{" "}
-          <a href="#harper" className="font-semibold text-purple underline">
-            Harper
+          <a href="#ai-models-review" className="font-semibold text-purple underline">
+            Our review of the AI models
           </a>
           {" · "}
           <span className="text-foreground">/product-showcase/veo_generic_cup.mp4</span> and Harper
