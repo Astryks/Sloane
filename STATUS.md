@@ -1,6 +1,13 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - Expand Director technique pack (directors + feature + MV)
+## Latest update, 2026-09-23 - Prompt Guide: Faces, angles & embedding + red fillables audit
+
+- **Where**: homepage `#prompt-guide` (`web/src/components/PromptGuide.tsx`). New accordion step **4. Faces, angles & embedding** (after Embed character in place). Later steps renumbered: Hyper-real Seedance video → 5 · Style paths → 6 · Camera + expression craft → 7 · Lessons from great directors → 8 · Longer cuts / stitch → 9. Accordion, Popular Lucy-only, CameraMoveChooser, ExpressionChooser, DirectorTechniquePack, StillGenerateBox, hashes, fal invisible — preserved.
+- **Step 4 content (Sid-approved)**: JSON usually not required (organizes thinking; models care about refs + physical language; structured blocks OK; `{json}` rarely improves pixels; API JSON for settings is separate) · Hyper-real consistent faces (lock stills first; split full-body + chest-up; if drift add 3/4 + profile; practical Seedance **2–4** key refs soft **1–8**; bind `@Image1` once) · Angle counts (min 1 good sheet; stronger front+3/4+profile ~3–4 + body; 8+ near-duplicates hurt) · Natural embed (empty `@Image2`; place `@Image1`; relight; feet planted + contact shadow + scale; living breath/weight; one camera move/beat; match weather/colour temp) · pasteable cream templates with red `[bracket]` fill-ins.
+- **Red fill-ins**: kept/extended `renderRedFills` / `PasteBox`; top-of-guide label “You fill these (red)”; StillGenerateBox placeholders/helper call out red `[blanks]`; location default uses bracketed `LOCATION_STILL_PROMPT`; embed paste boxes + location craft chip + full block structure templates use `[…]` for user blanks.
+- **Vendor invisible**: no fal/Higgsfield in guide UI.
+
+## Previous update, 2026-09-23 - Expand Director technique pack (directors + feature + MV)
 
 - **Where**: homepage `#prompt-guide` step **7. Lessons from great directors** — `web/src/components/DirectorTechniquePack.tsx` + `dir-anim-*` mini-loops in `web/src/app/globals.css`. Accordion, red fill-ins, Popular Lucy-only, CameraMoveChooser, ExpressionChooser, StillGenerateBox, hashes preserved. No fal/Higgsfield in UI.
 - **Expand**: **43** original technique cards with group filter chips (All / Cinematic / Feature / Ads / Music video) so the accordion stays neat.
