@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
-import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, claimAndGrantVideoCredits, claimAndGrantStillCredits, claimStripeEvent, unclaimStripeEvent } from "@/lib/db";
+import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, claimAndGrantVideoCredits, claimAndGrantStillCredits, claimStripeEvent, unclaimStripeEvent, recordVendorTreasuryEntry, markVendorTreasuryStatus } from "@/lib/db";
 import { planFromStripePriceId, PLANS } from "@/lib/plans";
 import { videoCreditPackFromStripePriceId } from "@/lib/videoPaygo";
 import { sendAccessCodeEmail, sendPaymentFailedEmail, sendVideoCreditReceiptEmail } from "@/lib/email";
+import {
+  attemptPurchaseFalCredits,
+  estimateStillTreasury,
+  estimateVideoTreasury,
+} from "@/lib/vendorTreasury";
 import type Stripe from "stripe";
 
 // Stripe needs the raw request body (unparsed) to verify the signature.
@@ -91,7 +96,16 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
           const cents = centsRaw ? parseInt(centsRaw, 10) : NaN;
           if (userId && Number.isFinite(cents) && cents > 0) {
             const granted = await claimAndGrantStillCredits(event.id, userId, cents);
-            if (granted) ctx.creditsCommitted = true;
+            if (granted) {
+              ctx.creditsCommitted = true;
+              // Vendor treasury: estimate Fal still COGS and attempt buy.
+              // Fal has no public purchase API — row lands blocked_no_api.
+              await recordAndAttemptFalPurchase({
+                stripeEventId: event.id,
+                userId,
+                estimate: estimateStillTreasury(cents, session.amount_total ?? cents),
+              });
+            }
             // Receipt email skipped for v1 (no still-specific helper yet).
           } else {
             console.error("Still credit checkout completed but couldn't resolve cents/user", {
@@ -119,6 +133,16 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
           const granted = await claimAndGrantVideoCredits(event.id, userId, pack.credits);
           if (granted) {
             ctx.creditsCommitted = true;
+            // Vendor treasury: worst-case Fal video COGS × pack size.
+            // Fal has no public purchase API — row lands blocked_no_api.
+            await recordAndAttemptFalPurchase({
+              stripeEventId: event.id,
+              userId,
+              estimate: estimateVideoTreasury(
+                pack.credits,
+                session.amount_total ?? pack.priceUsdCents,
+              ),
+            });
             const email = session.customer_details?.email;
             if (email) await sendVideoCreditReceiptEmail(email, pack, session.amount_total ?? pack.priceUsdCents);
           }
@@ -207,5 +231,55 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
       }
       break;
     }
+  }
+}
+
+
+/**
+ * After a successful credit grant: insert vendor_treasury (idempotent on
+ * stripe_event_id), then call attemptPurchaseFalCredits. Today Fal has no
+ * public buy API, so status becomes blocked_no_api with balance/probe notes.
+ * Failures here must NOT unclaim the Stripe event or double-grant — credits
+ * are already committed; treasury is best-effort bookkeeping.
+ */
+async function recordAndAttemptFalPurchase(args: {
+  stripeEventId: string;
+  userId: string;
+  estimate: ReturnType<typeof estimateStillTreasury> | ReturnType<typeof estimateVideoTreasury>;
+}) {
+  const { stripeEventId, userId, estimate } = args;
+  try {
+    const inserted = await recordVendorTreasuryEntry({
+      stripeEventId,
+      product: estimate.product,
+      userId,
+      revenueCents: estimate.revenueCents,
+      falCogsCents: estimate.falCogsCents,
+      marginCents: estimate.marginCents,
+      status: "pending_fal_purchase",
+      notes: estimate.notes,
+    });
+    if (!inserted) {
+      // Duplicate delivery already has a treasury row — do not re-attempt.
+      return;
+    }
+    const usdAmount = estimate.falCogsCents / 100;
+    const purchase = await attemptPurchaseFalCredits(usdAmount);
+    if (purchase.ok) {
+      // Unreachable until Fal ships a buy API; kept for the future path.
+      await markVendorTreasuryStatus(
+        stripeEventId,
+        "settled",
+        `${estimate.notes} | purchased $${purchase.purchasedUsd.toFixed(2)}; balance=${purchase.balanceUsd ?? "n/a"}`,
+      );
+      return;
+    }
+    await markVendorTreasuryStatus(
+      stripeEventId,
+      "blocked_no_api",
+      purchase.message,
+    );
+  } catch (err) {
+    console.error("[vendorTreasury] record/attempt failed (credits already granted)", stripeEventId, err);
   }
 }

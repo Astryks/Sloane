@@ -1,5 +1,16 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - Stripe→Fal vendor treasury (ledger shipped; auto-buy blocked)
+
+- **Intent**: When users buy **still** or **video** credit packs via Stripe, Lucy should automatically buy matching **Fal prepaid credits** for COGS and keep the margin — no manual Fal balance babysitting.
+- **Shipped (Lucy-side ledger)**:
+  - `vendor_treasury` table + `recordVendorTreasuryEntry` / `markVendorTreasuryStatus` in `web/src/lib/db.ts` (idempotent on `stripe_event_id`).
+  - COGS helpers in `web/src/lib/vendorTreasury.ts`: stills = `floor(creditsCents/19)×15¢` (GPT-equivalent × ~$0.15 Fal still cost, capped); video = `max(VIDEO_PAYGO_ENGINE_COST_USD)×credits` (worst-case buffered engine, currently Kling v3 / Seedance range).
+  - Stripe `checkout.session.completed` webhook (`still_credits` + video pack branches) records a row after a successful grant, then calls `attemptPurchaseFalCredits`.
+- **HARD BLOCKER — true auto-buy not available**: Fal’s public Platform API only documents **GET `/account/billing?expand=credits`**. There is **no** documented purchase-credits / auto-recharge HTTP API. `attemptPurchaseFalCredits` does **not** invent fake payment calls; it returns `{ ok: false, reason: 'no_public_api' }`, optionally probes balance, and sets status **`blocked_no_api`**. Settling needs **Fal sales / invoice / dashboard auto-recharge** (or a future public buy API), then mark rows **`settled`**.
+- **Statuses**: `pending_fal_purchase` → `blocked_no_api` (today) | `settled` (manual later / when API exists).
+- **Vendor invisible**: no Fal/Higgsfield in client UI; treasury is server-only bookkeeping next to existing balance-guard cron.
+
 ## Latest update, 2026-09-23 - User-facing copy accuracy audit
 
 - **Audit**: homepage paygo / AI models review, Prompt Guide, `/ads` practice storyboard copy vs known truths.
