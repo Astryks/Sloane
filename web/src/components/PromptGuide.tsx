@@ -9,6 +9,7 @@ import {
   STILL_CREDIT_PACKS,
   STILL_ENGINES as STILL_ENGINE_MAP,
   stillCostCents,
+  stillImagesLeft,
   type StillEngine,
 } from "@/lib/stillsPaygo";
 
@@ -93,6 +94,20 @@ type StillsDraft = {
 
 function formatStillBalance(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+/** Never surface vendor names in client error UI (publicJson already scrubs). */
+function sanitizeStillClientError(msg: string | undefined | null, fallback = "Generation failed"): string {
+  if (!msg) return fallback;
+  if (/\bfal(\.(ai|media|run))?\b/i.test(msg)) return "Generation failed - please try again.";
+  return msg;
+}
+
+function stillDownloadFilename(url: string): string {
+  const m = url.match(/\.(jpe?g|png|webp|gif)(?:\?|#|$)/i);
+  let ext = m ? m[1].toLowerCase() : "png";
+  if (ext === "jpeg") ext = "jpg";
+  return `lucy-still.${ext}`;
 }
 
 type ExternalGen = { id: string; label: string; href: string; blurb: string };
@@ -224,7 +239,7 @@ function StillGenerateBox({
       });
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !data.url) {
-        setError(data.error ?? "Checkout failed");
+        setError(sanitizeStillClientError(data.error, "Checkout failed"));
         setCheckingOut(false);
         return;
       }
@@ -260,11 +275,11 @@ function StillGenerateBox({
       if (res.status === 401 || res.status === 402) {
         if (typeof data.balanceCents === "number") setBalanceCents(data.balanceCents);
         setShowPacks(true);
-        setError(data.error ?? "Buy still credit to generate");
+        setError(sanitizeStillClientError(data.error, "Buy still credit to generate"));
         return;
       }
       if (!res.ok || !data.imageUrl) {
-        setError(data.error ?? "Generation failed");
+        setError(sanitizeStillClientError(data.error, "Generation failed"));
         return;
       }
       setImageUrl(data.imageUrl);
@@ -291,10 +306,20 @@ function StillGenerateBox({
           Choose a generator
         </p>
         {balanceCents !== null && (
-          <p className="text-[11px] text-muted">
-            <strong className="text-foreground">{formatStillBalance(balanceCents)}</strong> still
-            credit left
-          </p>
+          <div className="text-right text-[11px] leading-snug">
+            <p className="font-bold text-foreground">
+              Still credits:{" "}
+              <span className="text-purple">
+                {stillImagesLeft(balanceCents, "gpt")} GPT Image
+              </span>{" "}
+              stills left ·{" "}
+              <span className="text-purple">
+                {stillImagesLeft(balanceCents, "nanobanana")} Nano Banana Pro
+              </span>{" "}
+              stills left
+            </p>
+            <p className="text-muted">{formatStillBalance(balanceCents)} balance</p>
+          </div>
         )}
       </div>
 
@@ -370,7 +395,10 @@ function StillGenerateBox({
       {(showPacks || (balanceCents !== null && balanceCents < costCents)) && (
         <div className="mt-2 rounded-xl border border-purple/20 bg-purple/5 p-2.5">
           <p className="text-[11px] font-semibold text-foreground">
-            Buy still credit (prepaid packs — Stripe fee makes single $0.19 charges lose money)
+            Buy a still pack to generate on Lucy
+          </p>
+          <p className="mt-0.5 text-[10px] text-muted">
+            Pack sizes are GPT Image–equivalent; Nano Banana Pro uses more credit per image.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {STILL_CREDIT_PACKS.map((p) => (
@@ -381,7 +409,7 @@ function StillGenerateBox({
                 onClick={() => void buyPack(p.id)}
                 className="rounded-full border border-purple bg-white px-3 py-1.5 text-[11px] font-bold text-purple disabled:opacity-60"
               >
-                Buy {p.id === "pack10" ? "10" : "25"} for ${(p.priceUsdCents / 100).toFixed(2)}
+                {p.stillsCount} stills · ${(p.priceUsdCents / 100).toFixed(2)}
               </button>
             ))}
           </div>
@@ -398,7 +426,7 @@ function StillGenerateBox({
           />
           <a
             href={imageUrl}
-            download
+            download={stillDownloadFilename(imageUrl)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-block text-xs font-semibold text-purple underline"
@@ -410,8 +438,7 @@ function StillGenerateBox({
 
       <p className="mt-2 text-[11px] text-muted">
         Prefer outside? Open ChatGPT / Midjourney / etc. above, paste the cream template, and bring
-        the still back here. Lucy Generate uses prepaid still credit — never exposes the inference
-        vendor.
+        the still back here — or generate on Lucy with a still pack.
       </p>
     </div>
   );

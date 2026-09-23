@@ -20,6 +20,10 @@ import {
   type VideoEngine,
   PROMPT_DIRECTOR_LABEL,
 } from "@/lib/videoEngines";
+import {
+  STILL_CREDIT_PACKS,
+  stillImagesLeft,
+} from "@/lib/stillsPaygo";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
 
@@ -1949,11 +1953,105 @@ function PayAsYouGoVideoSection({
           <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="paygo" silentVideoUrl={result.silentVideoUrl} />
         )}
 
+        <StillCreditsPaygoPanel />
+
         <p className="text-center text-[11px] italic text-muted">
           Never use someone&apos;s face or voice without their permission. Failed or blocked generations are refunded automatically.
         </p>
       </div>
     </section>
+  );
+}
+
+/** Still credits in the homepage pay-as-you-go area — images left + pack buy. */
+function StillCreditsPaygoPanel() {
+  const [balanceCents, setBalanceCents] = useState<number | null>(null);
+  const [buyingPack, setBuyingPack] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshBalance() {
+    try {
+      const res = await fetch("/api/stills-paygo/balance");
+      const data = (await res.json()) as { balanceCents?: number };
+      setBalanceCents(typeof data.balanceCents === "number" ? data.balanceCents : 0);
+    } catch {
+      setBalanceCents(0);
+    }
+  }
+
+  useEffect(() => {
+    void refreshBalance();
+  }, []);
+
+  async function buyPack(packId: string) {
+    setError(null);
+    setBuyingPack(packId);
+    try {
+      const res = await fetch("/api/stills-paygo/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packId }),
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        const msg = data.error ?? "Checkout failed";
+        setError(/\bfal(\.(ai|media|run))?\b/i.test(msg) ? "Checkout failed" : msg);
+        setBuyingPack(null);
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setError("Checkout failed");
+      setBuyingPack(null);
+    }
+  }
+
+  const gptLeft = balanceCents === null ? null : stillImagesLeft(balanceCents, "gpt");
+  const nanoLeft = balanceCents === null ? null : stillImagesLeft(balanceCents, "nanobanana");
+
+  return (
+    <div className="rounded-2xl border border-border bg-white/80 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="text-sm font-extrabold text-foreground">Still credits</p>
+          <p className="mt-0.5 text-[11px] text-muted">
+            Prepaid image balance for Generate on Lucy in the{" "}
+            <a href="#prompt-guide" className="font-semibold text-purple underline">
+              prompt guide
+            </a>
+            .
+          </p>
+        </div>
+        {balanceCents !== null && (
+          <p className="text-right text-xs text-muted">
+            <span className="font-semibold text-purple">
+              {gptLeft} GPT Image · {nanoLeft} Nano Banana Pro
+            </span>
+            <br />
+            stills left · ${(balanceCents / 100).toFixed(2)} balance
+          </p>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {STILL_CREDIT_PACKS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            disabled={buyingPack !== null}
+            onClick={() => void buyPack(p.id)}
+            className="rounded-full border border-purple bg-white px-3 py-1.5 text-[11px] font-bold text-purple shadow-soft disabled:opacity-50"
+          >
+            {buyingPack === p.id
+              ? "Opening checkout…"
+              : `${p.stillsCount} stills · $${(p.priceUsdCents / 100).toFixed(2)}`}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-[10px] text-muted">
+        Pack sizes are GPT Image–equivalent; Nano Banana Pro uses more credit per image.
+      </p>
+      {error && <p className="mt-2 text-xs text-coral-dark">{error}</p>}
+    </div>
   );
 }
 

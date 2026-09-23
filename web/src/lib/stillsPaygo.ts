@@ -2,9 +2,7 @@
  * Pay-as-you-go still (image) credits — prepaid USD-cent balance, NOT a
  * subscription and deliberately separate from video-paygo packs.
  *
- * Why packs (not per-still Checkout): Stripe takes ~2.9% + $0.30 per
- * Checkout. A single $0.19 charge loses money, so we sell prepaid still
- * balance in packs and debit per generation:
+ * Packs debit per generation:
  * - GPT Image: 19¢ of balance
  * - Nano Banana Pro: 29¢ of balance
  * - pack10: 190¢ for $1.90 (10 GPT-equivalent)
@@ -14,7 +12,7 @@
  * env vars. Session metadata identifies the product for the shared
  * billing webhook: { product: "still_credits", packId, creditsCents }.
  *
- * Client-safe: no inference-vendor endpoints or secrets. Labels only.
+ * Client-safe: labels only; no inference-vendor endpoints or secrets.
  */
 
 export type StillEngine = "gpt" | "nanobanana";
@@ -31,7 +29,10 @@ export type StillCreditPack = {
   id: string;
   creditsCents: number;
   priceUsdCents: number;
+  /** User-facing short label, e.g. "10 stills" */
   label: string;
+  /** How many GPT-equivalent stills this pack is sized for (display). */
+  stillsCount: number;
 };
 
 export const STILL_CREDIT_PACKS: StillCreditPack[] = [
@@ -39,13 +40,15 @@ export const STILL_CREDIT_PACKS: StillCreditPack[] = [
     id: "pack10",
     creditsCents: 190,
     priceUsdCents: 190,
-    label: "10 GPT-equivalent stills",
+    label: "10 stills",
+    stillsCount: 10,
   },
   {
     id: "pack25",
     creditsCents: 475,
     priceUsdCents: 450,
-    label: "25 GPT-equivalent stills",
+    label: "25 stills",
+    stillsCount: 25,
   },
 ];
 
@@ -59,4 +62,16 @@ export function stillCostCents(engine: StillEngine): number {
 
 export function isStillEngine(value: string): value is StillEngine {
   return value === "gpt" || value === "nanobanana";
+}
+
+/** Images left at each engine's per-still cost (floor of balance / cost). */
+export function stillImagesLeft(balanceCents: number, engine: StillEngine): number {
+  const cost = STILL_ENGINES[engine].costCents;
+  if (cost <= 0 || balanceCents <= 0) return 0;
+  return Math.floor(balanceCents / cost);
+}
+
+/** Lucy-branded Stripe Checkout product name — never vendor names. */
+export function stillPackStripeProductName(pack: StillCreditPack): string {
+  return `Lucy Labs still credits (${pack.stillsCount})`;
 }
