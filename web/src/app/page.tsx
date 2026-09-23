@@ -1156,6 +1156,9 @@ function SiteNav() {
         <LogoMark size={40} />
         <span className="text-xl font-extrabold tracking-tight text-foreground">Lucy Labs</span>
       </Link>
+      <h1 className="text-base font-extrabold tracking-tight text-foreground sm:text-lg">
+        AI video, stills & voice
+      </h1>
       <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-foreground/70">
         <a href="#prompt-guide" className="hover:text-foreground">Prompt guide</a>
         <a href="#ai-models-review" className="hover:text-foreground">AI models</a>

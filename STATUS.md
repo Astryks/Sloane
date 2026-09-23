@@ -1,5 +1,18 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - Free organic SEO pass shipped
+
+- **Intent**: Make lucylabs.app crawlable and shareable without paid ads — proper titles/descriptions, sitemap, robots, OG/Twitter, JSON-LD, one visible homepage H1.
+- **Shipped**:
+  - Root `web/src/app/layout.tsx`: `metadataBase` https://lucylabs.app, title default + `%s | Lucy Labs` template, richer default description (AI video / stills / voice), Open Graph + Twitter `summary_large_image`, robots index/follow, Organization + WebApplication JSON-LD (Lucy Labs only — no Fal/Higgsfield).
+  - `web/public/og.png`: simple brand card (1200×630) generated for OG/Twitter images.
+  - Route layouts with unique titles/descriptions: `/ads`, `/stitch`, `/billing`, `/privacy` (indexable); `/account`, `/admin`, `/ad-studio` → `noindex,nofollow`.
+  - `web/src/app/sitemap.ts` — public only: `/`, `/ads`, `/stitch`, `/billing`, `/privacy`.
+  - `web/src/app/robots.ts` — allow public; disallow `/api/`, `/admin`, `/account`, `/ad-studio`.
+  - Homepage `SiteNav` H1: **AI video, stills & voice** (visible near top of generator card; layout unchanged otherwise).
+- **Optional next (needs Sid)**: Submit `https://lucylabs.app/sitemap.xml` in Google Search Console if/when GSC is set up — not done here (requires Sid's Google login). No paid ads / Search Console automation in this pass.
+- **Out of scope**: mass `next/image` migration; product-claim renames that contradict known truths (Seedance hyper-real people = direct only; no Fal in UI).
+
 ## Latest update, 2026-09-23 - Stripe→Fal vendor treasury (ledger shipped; auto-buy blocked)
 
 - **Intent**: When users buy **still** or **video** credit packs via Stripe, Lucy should automatically buy matching **Fal prepaid credits** for COGS and keep the margin — no manual Fal balance babysitting.

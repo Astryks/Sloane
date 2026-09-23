@@ -1,10 +1,7 @@
 import { SiteHeader } from "@/components/SiteHeader";
 import { getGenerationRetentionDays, initSchema } from "@/lib/db";
 
-export const metadata = {
-  title: "Privacy Policy — Lucy Labs",
-};
-
+// Metadata lives in privacy/layout.tsx (title/description/robots for SEO).
 // Reads a live, admin-tunable setting (generation retention days) - without
 // this the page would statically bake in whatever that value was at build
 // time and drift out of sync after the next /admin change, same mistake
