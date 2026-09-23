@@ -16,6 +16,14 @@ export function Footer() {
           Models
         </a>{" "}
         ·{" "}
+        <a href="/camera-moves" className="underline decoration-border hover:text-foreground">
+          Camera moves
+        </a>{" "}
+        ·{" "}
+        <a href="/study-film" className="underline decoration-border hover:text-foreground">
+          Study
+        </a>{" "}
+        ·{" "}
         <a href="/about" className="underline decoration-border hover:text-foreground">
           About
         </a>{" "}

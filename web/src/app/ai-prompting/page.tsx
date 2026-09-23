@@ -43,6 +43,19 @@ export default function Page() {
               — camera, expressions, director technique pack
             </li>
             <li>
+              <Link href="/camera-moves" className="font-semibold text-purple hover:underline">
+                Camera moves hub
+              </Link>{" "}
+              ·{" "}
+              <Link href="/video-styles" className="font-semibold text-purple hover:underline">
+                Video styles
+              </Link>{" "}
+              ·{" "}
+              <Link href="/study-film" className="font-semibold text-purple hover:underline">
+                Study film
+              </Link>
+            </li>
+            <li>
               Then generate:{" "}
               <Link href="/text-to-video" className="font-semibold text-purple hover:underline">
                 text to video
