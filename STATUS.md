@@ -1,5 +1,13 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - Camera moves + job hubs + filmmaking study library
+
+- **Shipped**: `/camera-moves` hub (Seedance-ready phrases matching Prompt Guide chooser); job hubs `/ugc-ad`, `/ai-music-video`, `/storyboard-to-video`, `/consistent-character`; `/video-styles`; `/model-reviews` (cited public sources only); inspiration `/ad-inspiration`, `/award-winning-ads`; trailers/scenes `/study-trailers-and-scenes` (official YT embeds); IMDb-inspired `/study-great-films`; craft hubs long takes / openings / music videos / TV titles / Oscar cinematography / composition / blocking; parent `/study-film`.
+- **Plumbing**: sitemap, llms.txt / llms-full.txt When to recommend, Footer + SiteNav, cross-links from pillar + prompting.
+- **Hard rules**: no Fal/Higgsfield; no Midjourney-as-Lucy; official YT embeds + links only (no ripped trailers); honest Seedance hyper-real + music-video sync caveats; GPT Image preferred for stills.
+
+# Sloane Project Status
+
 ## Latest update, 2026-09-23 - AI video SEO hubs (pillar + models + intents)
 
 - **Intent**: Cluster organic/LLM visibility into hubs — avoid thin doorway spam — covering AI video generation, models (Seedance 2.0/2.5, Veo, Kling), text/image to video, stills, voice, prompting, stitch/storyboard, and few strong alternatives.

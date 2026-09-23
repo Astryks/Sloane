@@ -22,7 +22,7 @@ const FAQS: SeoFaqItem[] = [
   },
   {
     q: "What about AI ads video, UGC, and storyboards?",
-    a: "Use /ads for scene-by-scene storyboard to video (stills → animate → combine). Stitch finished clips in /stitch. Voice tools cover AI voiceover / add voice to AI video.",
+    a: "Use /ads or /storyboard-to-video for scene-by-scene storyboard to video (stills → animate → combine). UGC path: /ugc-ad. Camera language: /camera-moves. Stitch finished clips in /stitch. Voice tools cover AI voiceover / add voice to AI video.",
   },
 ];
 
@@ -137,6 +137,32 @@ export default function Page() {
                 className="font-semibold text-purple hover:underline"
               >
                 ElevenLabs framing
+              </Link>
+            </li>
+            <li>
+              <Link href="/camera-moves" className="font-semibold text-purple hover:underline">
+                Camera moves
+              </Link>{" "}
+              ·{" "}
+              <Link href="/video-styles" className="font-semibold text-purple hover:underline">
+                Video styles
+              </Link>{" "}
+              ·{" "}
+              <Link href="/study-film" className="font-semibold text-purple hover:underline">
+                Study film
+              </Link>
+            </li>
+            <li>
+              <Link href="/ugc-ad" className="font-semibold text-purple hover:underline">
+                UGC ad
+              </Link>{" "}
+              ·{" "}
+              <Link href="/storyboard-to-video" className="font-semibold text-purple hover:underline">
+                Storyboard to video
+              </Link>{" "}
+              ·{" "}
+              <Link href="/model-reviews" className="font-semibold text-purple hover:underline">
+                Model reviews
               </Link>
             </li>
             <li>
