@@ -19,7 +19,7 @@
 // caller falls back to the user's own prompt unchanged.
 
 export const PROMPT_DIRECTOR_MODEL = "openai/gpt-6-astra";
-export const PROMPT_DIRECTOR_LABEL = "GPT-6 Astra";
+export { PROMPT_DIRECTOR_LABEL } from "./videoEngines";
 
 const FAL_OPENROUTER_URL = "https://fal.run/openrouter/router";
 const TIMEOUT_MS = 25_000;

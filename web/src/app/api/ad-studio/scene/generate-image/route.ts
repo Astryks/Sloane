@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import {
   getAdStudioScene,
@@ -10,6 +10,7 @@ import {
   recordAdStudioSceneImageGeneration,
 } from "@/lib/db";
 import { generateImageFromPrompt } from "@/lib/fal";
+import { publicJson } from "@/lib/mediaProxy";
 
 // generateImageFromPrompt polls fal for up to 90s internally - give this
 // route real headroom above Vercel's 10s default rather than let it race
@@ -20,18 +21,18 @@ export async function POST(req: NextRequest) {
   try {
     await initSchema();
     const user = await getSessionUser();
-    if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+    if (!user) return publicJson({ error: "Sign in required" }, { status: 401 });
 
     const body = await req.json();
     const sceneId = String(body.sceneId ?? "");
-    if (!sceneId) return NextResponse.json({ error: "Missing sceneId" }, { status: 400 });
+    if (!sceneId) return publicJson({ error: "Missing sceneId" }, { status: 400 });
 
     const owner = await getAdStudioSceneProjectOwner(sceneId);
-    if (!owner) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
-    if (owner !== user.id) return NextResponse.json({ error: "Not your project" }, { status: 403 });
+    if (!owner) return publicJson({ error: "Scene not found" }, { status: 404 });
+    if (owner !== user.id) return publicJson({ error: "Not your project" }, { status: 403 });
 
     const scene = await getAdStudioScene(sceneId);
-    if (!scene) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
+    if (!scene) return publicJson({ error: "Scene not found" }, { status: 404 });
     // Real fix (follow-up audit, 2026-09-17): reserve the slot atomically
     // BEFORE spending anything on the paid fal call below - the old
     // check-then-spend shape could let two concurrent requests both pass a
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
     // recorded the result afterward. See claimAdStudioSceneImageSlot's own
     // comment in db.ts for the full before/after reasoning.
     if (!(await claimAdStudioSceneImageSlot(sceneId))) {
-      return NextResponse.json(
+      return publicJson(
         { error: `This scene has already used its ${MAX_SCENE_IMAGE_GENERATIONS} free image generations - edit the current image or start a new project.` },
         { status: 400 },
       );
@@ -55,9 +56,9 @@ export async function POST(req: NextRequest) {
       throw err;
     }
     await recordAdStudioSceneImageGeneration(sceneId, imageUrl);
-    return NextResponse.json({ imageUrl });
+    return publicJson({ imageUrl });
   } catch (err) {
     console.error("ad-studio scene image generation failed", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Could not generate the scene image" }, { status: 502 });
+    return publicJson({ error: err instanceof Error ? err.message : "Could not generate the scene image" }, { status: 502 });
   }
 }

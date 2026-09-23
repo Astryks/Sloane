@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { initSchema, getSetting, setSetting } from "@/lib/db";
 import { getFalBalance, FAL_MIN_BALANCE_TO_GENERATE_USD } from "@/lib/fal";
 import { sendLowFalBalanceEmail } from "@/lib/email";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Give a real warning window before the real-time guard (fal.ts's
 // hasEnoughFalBalanceToGenerate) even kicks in - alerts at 4x the "block
@@ -23,10 +24,10 @@ export async function GET(req: NextRequest) {
   const expected = process.env.CRON_SECRET;
   if (!expected) {
     console.error("[cron/check-fal-balance] CRON_SECRET not configured - refusing to run");
-    return NextResponse.json({ error: "Not configured" }, { status: 500 });
+    return publicJson({ error: "Not configured" }, { status: 500 });
   }
   if (auth !== `Bearer ${expected}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return publicJson({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -34,22 +35,22 @@ export async function GET(req: NextRequest) {
     const { usd } = await getFalBalance();
 
     if (usd >= ALERT_THRESHOLD_USD) {
-      return NextResponse.json({ balance: usd, alerted: false, reason: "above threshold" });
+      return publicJson({ balance: usd, alerted: false, reason: "above threshold" });
     }
 
     const lastAlertAt = await getSetting(LAST_ALERT_SETTING_KEY);
     if (lastAlertAt) {
       const hoursSinceLastAlert = (Date.now() - new Date(lastAlertAt).getTime()) / (1000 * 60 * 60);
       if (hoursSinceLastAlert < ALERT_COOLDOWN_HOURS) {
-        return NextResponse.json({ balance: usd, alerted: false, reason: "cooldown" });
+        return publicJson({ balance: usd, alerted: false, reason: "cooldown" });
       }
     }
 
     await sendLowFalBalanceEmail(usd);
     await setSetting(LAST_ALERT_SETTING_KEY, new Date().toISOString());
-    return NextResponse.json({ balance: usd, alerted: true });
+    return publicJson({ balance: usd, alerted: true });
   } catch (err) {
     console.error("[cron/check-fal-balance] failed", err);
-    return NextResponse.json({ error: "Balance check failed" }, { status: 502 });
+    return publicJson({ error: "Balance check failed" }, { status: 502 });
   }
 }

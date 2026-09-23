@@ -1,13 +1,14 @@
 import { randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { publicJson } from "@/lib/mediaProxy";
 
 const STATE_COOKIE = "lucy_oauth_state";
 
 export async function GET(req: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    return NextResponse.json({ error: "Google sign-in isn't configured yet" }, { status: 500 });
+    return publicJson({ error: "Google sign-in isn't configured yet" }, { status: 500 });
   }
 
   const state = randomBytes(16).toString("hex");

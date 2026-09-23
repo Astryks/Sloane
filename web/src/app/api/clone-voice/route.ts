@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSubscriberByToken, checkQuota, reserveCharacterUsage, createPendingGeneration, initSchema, recordConsent } from "@/lib/db";
 import { getInferenceBackend, generateViaPod, generateViaCascade, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 import { PLANS } from "@/lib/plans";
+import { publicJson } from "@/lib/mediaProxy";
 
 // See generate-preset/route.ts's identical export for why - Cascade mode's
 // Mac attempt needs the full Hobby-plan ceiling before falling back to Modal.
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
     // identical check - empty text otherwise sails through every quota
     // check and still spends real GPU compute on the clone backend.
     if (!text) {
-      return NextResponse.json({ error: "Enter some text to generate." }, { status: 400 });
+      return publicJson({ error: "Enter some text to generate." }, { status: 400 });
     }
 
     // Real restriction (2026-09-21, follow-up request): voice cloning is
@@ -71,39 +72,39 @@ export async function POST(req: NextRequest) {
     // steps so nothing is reserved for someone who can't clone yet.
     const sessionUser = await getSessionUser();
     if (!sessionUser) {
-      return NextResponse.json({ error: "Create an account or sign in to clone a voice." }, { status: 401 });
+      return publicJson({ error: "Create an account or sign in to clone a voice." }, { status: 401 });
     }
     const voiceOwner = String(form.get("voice_owner") ?? "");
     const speakerName = String(form.get("speaker_name") ?? "").trim().slice(0, 120);
     if (voiceOwner !== "self" && voiceOwner !== "other") {
-      return NextResponse.json({ error: "Tell us whose voice this is." }, { status: 400 });
+      return publicJson({ error: "Tell us whose voice this is." }, { status: 400 });
     }
     if (voiceOwner === "other" && !speakerName) {
-      return NextResponse.json({ error: "Enter the name of the person whose voice this is." }, { status: 400 });
+      return publicJson({ error: "Enter the name of the person whose voice this is." }, { status: 400 });
     }
     if (!accessToken) {
-      return NextResponse.json({ error: "Voice cloning is available on a paid plan - see /billing to subscribe." }, { status: 402 });
+      return publicJson({ error: "Voice cloning is available on a paid plan - see /billing to subscribe." }, { status: 402 });
     }
     const sub = await getSubscriberByToken(accessToken);
     if (!sub) {
-      return NextResponse.json({ error: "Access code not recognized" }, { status: 401 });
+      return publicJson({ error: "Access code not recognized" }, { status: 401 });
     }
     // Atomic reservation - see generate-preset/route.ts for the same fix
     // and why checkQuota alone isn't enough enforcement.
     const quotaError = checkQuota(sub, text.length);
     if (quotaError) {
-      return NextResponse.json({ error: quotaError }, { status: 402 });
+      return publicJson({ error: quotaError }, { status: 402 });
     }
     const reserved = await reserveCharacterUsage(accessToken, text.length, PLANS[sub.plan].charactersPerMonth);
     if (!reserved) {
-      return NextResponse.json({ error: quotaError ?? "This would put you over your plan's character limit." }, { status: 402 });
+      return publicJson({ error: quotaError ?? "This would put you over your plan's character limit." }, { status: 402 });
     }
 
     if (!(referenceAudio instanceof Blob)) {
-      return NextResponse.json({ error: "Missing reference_audio" }, { status: 400 });
+      return publicJson({ error: "Missing reference_audio" }, { status: 400 });
     }
     if (referenceAudio.size > MAX_REFERENCE_AUDIO_BYTES) {
-      return NextResponse.json(
+      return publicJson(
         { error: `Reference audio is too large (max ${Math.round(MAX_REFERENCE_AUDIO_BYTES / 1024 / 1024)}MB) - try a shorter clip.` },
         { status: 400 },
       );
@@ -111,7 +112,7 @@ export async function POST(req: NextRequest) {
     // Real restriction (2026-09-21): a typed, exact-match statement instead
     // of a bare checkbox - see CONSENT_TEXT's comment above.
     if (normalizeConsent(String(form.get("consent_statement") ?? "")) !== normalizeConsent(CONSENT_TEXT)) {
-      return NextResponse.json({ error: "Please type the consent statement exactly as shown before continuing." }, { status: 400 });
+      return publicJson({ error: "Please type the consent statement exactly as shown before continuing." }, { status: 400 });
     }
     const exaggeration = form.get("exaggeration");
     const speed = form.get("speed");
@@ -185,9 +186,9 @@ export async function POST(req: NextRequest) {
 
     // Subscriber usage was already recorded atomically above, before
     // generation started - no free-tier path exists anymore to record here.
-    return NextResponse.json(result);
+    return publicJson(result);
   } catch (err) {
-    return NextResponse.json(
+    return publicJson(
       { error: err instanceof Error ? err.message : "Something went wrong - please try again." },
       { status: 502 },
     );

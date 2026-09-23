@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import wav from "node-wav";
 import lamejs from "@breezystack/lamejs";
+import { publicJson } from "@/lib/mediaProxy";
 
 // lamejs's pure-JS encoder scales with audio duration; a slowed-down (speed
 // < 1.0) or just long generation takes proportionally longer to encode, and
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
     const audioBase64 = body.audioBase64 as string | undefined;
     const name = (body.name as string | undefined) ?? "lucy-audio";
     if (!audioBase64) {
-      return NextResponse.json({ error: "Missing audioBase64" }, { status: 400 });
+      return publicJson({ error: "Missing audioBase64" }, { status: 400 });
     }
 
     const wavBuffer = Buffer.from(audioBase64, "base64");
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
-    return NextResponse.json(
+    return publicJson(
       { error: err instanceof Error ? err.message : "Could not convert that audio to MP3." },
       { status: 400 },
     );

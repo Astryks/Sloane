@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import {
   initSchema,
   getSubscriberByToken,
@@ -16,6 +16,7 @@ import { PRESET_VOICES } from "@/lib/presetVoices";
 import { submitModalJob } from "@/lib/modal";
 import { submitFalJob, uploadBufferToFal, hasEnoughFalBalanceToGenerate } from "@/lib/fal";
 import { VIDEO_CREDIT_COSTS, PLANS } from "@/lib/plans";
+import { publicJson } from "@/lib/mediaProxy";
 
 const MAX_PROMPT_LENGTH = 600;
 const MAX_REFERENCE_AUDIO_BYTES = 7 * 1024 * 1024;
@@ -49,35 +50,35 @@ export async function POST(req: NextRequest) {
     const referenceAudio = form.get("reference_audio");
 
     if (!accessToken) {
-      return NextResponse.json({ error: "Sign in with your access code to use this" }, { status: 401 });
+      return publicJson({ error: "Sign in with your access code to use this" }, { status: 401 });
     }
     const sub = await getSubscriberByToken(accessToken);
     if (!sub) {
-      return NextResponse.json({ error: "Access code not recognized" }, { status: 401 });
+      return publicJson({ error: "Access code not recognized" }, { status: 401 });
     }
     if (!prompt) {
-      return NextResponse.json({ error: "Describe the scene" }, { status: 400 });
+      return publicJson({ error: "Describe the scene" }, { status: 400 });
     }
     if (prompt.length > MAX_PROMPT_LENGTH) {
-      return NextResponse.json({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
+      return publicJson({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
     }
     if (!(referenceImage instanceof Blob)) {
-      return NextResponse.json({ error: "A photo (or video, we'll grab a frame) is required" }, { status: 400 });
+      return publicJson({ error: "A photo (or video, we'll grab a frame) is required" }, { status: 400 });
     }
     if (!["engine_native", "own_upload", "lucy_preset", "lucy_cloned"].includes(audioSource)) {
-      return NextResponse.json({ error: "Unknown audio source" }, { status: 400 });
+      return publicJson({ error: "Unknown audio source" }, { status: 400 });
     }
     if (audioSource === "lucy_preset" && !PRESET_VOICES.find((v) => v.id === presetVoiceId)) {
-      return NextResponse.json({ error: "Unknown voice choice" }, { status: 400 });
+      return publicJson({ error: "Unknown voice choice" }, { status: 400 });
     }
     if ((audioSource === "own_upload" || audioSource === "lucy_cloned") && !(referenceAudio instanceof Blob)) {
-      return NextResponse.json(
+      return publicJson(
         { error: audioSource === "own_upload" ? "Upload the audio you want on this video" : "A short audio sample of your voice is required" },
         { status: 400 },
       );
     }
     if (referenceAudio instanceof Blob && referenceAudio.size > MAX_REFERENCE_AUDIO_BYTES) {
-      return NextResponse.json(
+      return publicJson(
         { error: `Audio is too large (max ${Math.round(MAX_REFERENCE_AUDIO_BYTES / 1024 / 1024)}MB)` },
         { status: 400 },
       );
@@ -87,18 +88,18 @@ export async function POST(req: NextRequest) {
     // is the real atomic enforcement (see its comment in db.ts).
     const quotaError = checkVideoCreditQuota(sub, CINEMATIC_CREDIT_COST);
     if (quotaError) {
-      return NextResponse.json({ error: quotaError }, { status: 402 });
+      return publicJson({ error: quotaError }, { status: 402 });
     }
     // Real-time fal balance guard - see fal.ts's comment for why.
     if (!(await hasEnoughFalBalanceToGenerate())) {
-      return NextResponse.json(
+      return publicJson(
         { error: "Video generation is temporarily paused while we top up - please try again shortly." },
         { status: 503 },
       );
     }
     const reserved = await reserveVideoCredits(accessToken, CINEMATIC_CREDIT_COST, PLANS[sub.plan].videoCreditsPerMonth);
     if (!reserved) {
-      return NextResponse.json({ error: quotaError ?? "Not enough video credits left this billing period" }, { status: 402 });
+      return publicJson({ error: quotaError ?? "Not enough video credits left this billing period" }, { status: 402 });
     }
 
     let referenceImageUrl: string;
@@ -108,7 +109,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       await releaseVideoCredits(accessToken, CINEMATIC_CREDIT_COST);
       const message = err instanceof Error ? err.message : "Upload failed";
-      return NextResponse.json({ error: message }, { status: 500 });
+      return publicJson({ error: message }, { status: 500 });
     }
     const needsMerge = audioSource !== "engine_native";
 
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       await releaseVideoCredits(accessToken, CINEMATIC_CREDIT_COST);
       const message = err instanceof Error ? err.message : "Could not start this job";
-      return NextResponse.json({ error: message }, { status: 500 });
+      return publicJson({ error: message }, { status: 500 });
     }
 
     try {
@@ -148,7 +149,7 @@ export async function POST(req: NextRequest) {
               })
             : await submitModalJob({ action: "generate-preset", text: prompt, voice_id: presetVoiceId });
         await setSubscriptionVideoJobModalId(jobId, modalJobId);
-        return NextResponse.json({ jobId });
+        return publicJson({ jobId });
       }
 
       // engine_native or own_upload: Veo can start generating right away -
@@ -167,16 +168,16 @@ export async function POST(req: NextRequest) {
         generate_audio: audioSource === "engine_native",
       });
       await setSubscriptionVideoJobRequestId(jobId, requestId);
-      return NextResponse.json({ jobId });
+      return publicJson({ jobId });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Submission failed";
       await failSubscriptionVideoJob(jobId, message);
       await releaseVideoCredits(accessToken, CINEMATIC_CREDIT_COST);
-      return NextResponse.json({ error: message }, { status: 500 });
+      return publicJson({ error: message }, { status: 500 });
     }
   } catch (err) {
     console.error("generate-cinematic-video failed", err);
     const message = err instanceof Error ? err.message : "Generation failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return publicJson({ error: message }, { status: 500 });
   }
 }

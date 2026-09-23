@@ -1,18 +1,5 @@
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
-
-export type ProductAdModel = VideoEngine;
-
-export const PRODUCT_AD_MODELS: Array<{ id: VideoEngine; label: string }> = [
-  { id: "veo", label: "Veo" },
-  { id: "minimax", label: "MiniMax" },
-  { id: "grok", label: "Grok" },
-  { id: "kling", label: "Kling" },
-  { id: "seedance", label: "Seedance" },
-];
-
-export function isProductAdModel(value: string): value is VideoEngine {
-  return PRODUCT_AD_MODELS.some((model) => model.id === value);
-}
+export { type ProductAdModel, PRODUCT_AD_MODELS, isProductAdModel } from "./productAdModels";
 
 export function productAdFalEndpoint(model: VideoEngine): string {
   return model === "seedance" ? "bytedance/seedance-2.0/fast/reference-to-video" : VIDEO_PAYGO_ENGINES[model].falImageToVideoEndpoint;

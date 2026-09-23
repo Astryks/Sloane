@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import {
   getSubscriptionVideoJob,
   claimSubscriptionVideoJobForFalSubmit,
@@ -13,6 +13,7 @@ import {
 } from "@/lib/db";
 import { getFalJobStatus, getFalJobResult, uploadBufferToFal, submitFalJob, submitMergeAudioVideo, hasRealRequestId, FFMPEG_MERGE_ENDPOINT } from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
+import { publicJson } from "@/lib/mediaProxy";
 
 const VEO_ENDPOINT = "fal-ai/veo3.1/fast/image-to-video";
 const VEO_DURATION = "8s";
@@ -33,20 +34,20 @@ export async function GET(req: NextRequest) {
   // (server logs/browser history/Referer exposure otherwise).
   const accessToken = req.headers.get("x-access-token");
   if (!jobId) {
-    return NextResponse.json({ error: "jobId is required" }, { status: 400 });
+    return publicJson({ error: "jobId is required" }, { status: 400 });
   }
 
   const job = await getSubscriptionVideoJob(jobId);
   // Ownership check - see generate-character-video/status/route.ts for the
   // same fix and why it matters.
   if (!job || job.mode !== "cinematic" || job.access_token !== accessToken) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    return publicJson({ error: "Job not found" }, { status: 404 });
   }
   if (job.status === "completed") {
-    return NextResponse.json({ status: "COMPLETED", videoUrl: job.video_url, silentVideoUrl: job.silent_video_url });
+    return publicJson({ status: "COMPLETED", videoUrl: job.video_url, silentVideoUrl: job.silent_video_url });
   }
   if (job.status === "failed") {
-    return NextResponse.json({ status: "FAILED", error: job.error });
+    return publicJson({ status: "FAILED", error: job.error });
   }
 
   // Phase 0: waiting on Lucy TTS/clone before Veo can even be submitted.
@@ -60,23 +61,23 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Voice generation status check failed";
       if (await failSubscriptionVideoJob(job.id, message)) await releaseVideoCredits(job.access_token, job.credits_cost);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
     if (modalStatus.status === "FAILED") {
       if (await failSubscriptionVideoJob(job.id, modalStatus.error ?? "Voice generation failed")) {
         await releaseVideoCredits(job.access_token, job.credits_cost);
       }
-      return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
+      return publicJson({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     // Real double-submit race fixed here (security audit, 2026-09-16): two
     // overlapping polls could both observe modalStatus COMPLETED and
     // fal_request_id still null, both submitting a paid Veo job for the one
     // credit already spent. Claim atomically before submitting.
     if (!(await claimSubscriptionVideoJobForFalSubmit(job.id))) {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     try {
       const audioBase64 = modalStatus.output?.audio_base64 as string | undefined;
@@ -91,16 +92,16 @@ export async function GET(req: NextRequest) {
         generate_audio: false,
       });
       await setSubscriptionVideoJobRequestId(job.id, requestId);
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Scene generation submission failed";
       if (await failSubscriptionVideoJob(job.id, message)) await releaseVideoCredits(job.access_token, job.credits_cost);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
   }
 
   if (!hasRealRequestId(job.fal_request_id)) {
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
 
   // Phase 2: merge already submitted - poll the merge job for the final result.
@@ -109,7 +110,7 @@ export async function GET(req: NextRequest) {
     try {
       mergeStatus = await getFalJobStatus(FFMPEG_MERGE_ENDPOINT, job.merge_request_id);
     } catch {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     if (mergeStatus === "COMPLETED") {
       try {
@@ -119,20 +120,20 @@ export async function GET(req: NextRequest) {
         await completeSubscriptionVideoJob(job.id, videoUrl);
         // Usage already recorded atomically at submission time (see
         // reserveVideoCredits in generate-cinematic-video/route.ts).
-        return NextResponse.json({ status: "COMPLETED", videoUrl, silentVideoUrl: job.silent_video_url });
+        return publicJson({ status: "COMPLETED", videoUrl, silentVideoUrl: job.silent_video_url });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to fetch merged result";
         if (await failSubscriptionVideoJob(job.id, message)) await releaseVideoCredits(job.access_token, job.credits_cost);
-        return NextResponse.json({ status: "FAILED", error: message });
+        return publicJson({ status: "FAILED", error: message });
       }
     }
     if (mergeStatus === "FAILED") {
       if (await failSubscriptionVideoJob(job.id, "Combining your audio with the video failed")) {
         await releaseVideoCredits(job.access_token, job.credits_cost);
       }
-      return NextResponse.json({ status: "FAILED", error: "Generation failed" });
+      return publicJson({ status: "FAILED", error: "Generation failed" });
     }
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
 
   // Phase 1: waiting on Veo's own clip.
@@ -140,16 +141,16 @@ export async function GET(req: NextRequest) {
   try {
     falStatus = await getFalJobStatus(job.fal_endpoint, job.fal_request_id);
   } catch {
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
   if (falStatus === "FAILED") {
     if (await failSubscriptionVideoJob(job.id, "Generation failed at the vendor (often a content-policy block)")) {
       await releaseVideoCredits(job.access_token, job.credits_cost);
     }
-    return NextResponse.json({ status: "FAILED", error: "Generation failed" });
+    return publicJson({ status: "FAILED", error: "Generation failed" });
   }
   if (falStatus !== "COMPLETED") {
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
 
   try {
@@ -163,7 +164,7 @@ export async function GET(req: NextRequest) {
       // clip from the start, same as Kling Avatar), so there's nothing
       // extra to offer here.
       await completeSubscriptionVideoJob(job.id, veoVideoUrl);
-      return NextResponse.json({ status: "COMPLETED", videoUrl: veoVideoUrl, silentVideoUrl: null });
+      return publicJson({ status: "COMPLETED", videoUrl: veoVideoUrl, silentVideoUrl: null });
     }
 
     if (!job.resolved_audio_url) throw new Error("No resolved audio to merge onto the video");
@@ -175,14 +176,14 @@ export async function GET(req: NextRequest) {
     // Same double-submit race as the phase-0 fix above, for this second fal
     // job (audio merge) - claim before submitting.
     if (!(await claimSubscriptionVideoJobForMergeSubmit(job.id))) {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     const mergeRequestId = await submitMergeAudioVideo(veoVideoUrl, job.resolved_audio_url);
     await setSubscriptionVideoJobMergeRequestId(job.id, mergeRequestId);
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch result";
     if (await failSubscriptionVideoJob(job.id, message)) await releaseVideoCredits(job.access_token, job.credits_cost);
-    return NextResponse.json({ status: "FAILED", error: message });
+    return publicJson({ status: "FAILED", error: message });
   }
 }

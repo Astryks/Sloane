@@ -71,7 +71,7 @@ export function VideoPreviewSection() {
         <Text style={styles.noteText}>
           The first three modes share one Video-plan balance: {VIDEO_CREDITS_PER_MONTH} credits/month.
           Whichever mode you use, your photo, video, and any audio are sent to third-party AI vendors
-          (Kling, Veo, Seedance, and the fal.ai platform we use to reach them) for processing.
+          (Kling, Veo, Seedance, and the AI infrastructure provider we use to reach them) for processing.
         </Text>
       </View>
     </View>

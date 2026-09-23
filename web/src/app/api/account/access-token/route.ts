@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSubscriberByUserId, initSchema } from "@/lib/db";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Lightweight sibling of /api/account (2026-09-12) - returns just the
 // access token linked to the signed-in session, if any, without the
@@ -13,12 +13,12 @@ export async function GET() {
     await initSchema();
     const user = await getSessionUser();
     if (!user) {
-      return NextResponse.json({ accessToken: null });
+      return publicJson({ accessToken: null });
     }
     const subscriber = await getSubscriberByUserId(user.id);
-    return NextResponse.json({ accessToken: subscriber?.access_token ?? null });
+    return publicJson({ accessToken: subscriber?.access_token ?? null });
   } catch (err) {
     console.error("[account/access-token] failed to look up subscriber", err);
-    return NextResponse.json({ accessToken: null });
+    return publicJson({ accessToken: null });
   }
 }

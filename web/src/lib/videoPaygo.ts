@@ -66,10 +66,26 @@
  * enabled, not one being incurred today).
  */
 
-export type VideoEngine = "seedance25" | "seedance" | "veo" | "kling" | "klingv3" | "minimax" | "grok";
+
+import {
+  VIDEO_PAYGO_ENGINES as VIDEO_ENGINE_INFO,
+  VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
+  VIDEO_CREDIT_PACKS,
+  type VideoEngine,
+  type VideoEngineInfo,
+  type VideoCreditPack,
+} from "./videoEngines";
+
+export {
+  VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
+  VIDEO_CREDIT_PACKS,
+  VIDEO_PAYGO_PRICE_USD_CENTS,
+  type VideoEngine,
+  type VideoEngineInfo,
+  type VideoCreditPack,
+} from "./videoEngines";
 
 export const VIDEO_PAYGO_RESOLUTION = "720p";
-export const VIDEO_PAYGO_PRICE_USD_CENTS = 399; // $3.99, flat across every engine
 
 // versionLabel is shown directly in the UI so the engine picker is honest
 // about exactly which model version is running, per direct request ("give
@@ -79,191 +95,61 @@ export const VIDEO_PAYGO_PRICE_USD_CENTS = 399; // $3.99, flat across every engi
 // upgraded to a newer/pricier version (e.g. Seedance 2.5), which would
 // invalidate the worst-case cost math this file's margin comment depends
 // on without re-verifying its real fal price first.
-export const VIDEO_PAYGO_ENGINES: Record<
-  VideoEngine,
-  {
-    label: string;
-    versionLabel: string;
-    falEndpoint: string;
-    falImageToVideoEndpoint: string;
-    falAvatarEndpoint?: string; // only Kling has a proven lip-sync/avatar path in this stack
-    durationSeconds: number;
-    falDurationValue: string;
-    // Only set when an engine's resolution enum doesn't match the shared
-    // VIDEO_PAYGO_RESOLUTION constant below - MiniMax H3 Max has no "720p"
-    // option at all (its enum is "480P"/"768P"/"1080P", capitalized
-    // differently too), so it needs its own value rather than silently
-    // reusing Veo/Seedance/Grok's "720p".
-    falResolutionValue?: string;
-    // fal's own model page for this exact endpoint - real example galleries
-    // showing that engine's actual output quality, linked directly from the
-    // engine picker per direct request ("so they can see the quality of
-    // each") rather than us maintaining our own curated gallery per engine.
-    exampleUrl: string;
-    // Shown together as the "Popular" group in the engine picker vs.
-    // "More models" for the rest - a real, direct request (2026-09-15) to
-    // stop presenting every engine as an equal-weight grid and instead lead
-    // with the ones people actually want (Seedance 2.5/2.0, Veo, Kling).
-    popular: boolean;
-    // One short, honest line shown directly next to the engine name in the
-    // picker - the real fix for "won't a flat price make everyone pick
-    // whichever model sounds newest, even when it's the worse deal for
-    // them" (raised 2026-09-15): state the actual tradeoff (duration,
-    // quality) in the UI itself rather than hoping the user infers it from
-    // a small duration number - see VIDEO_PAYGO_ENGINE_COST_USD's comment
-    // for the real cost math this is priced against.
-    pickerNote: string;
-    // Real per-engine aspect-ratio enum, checked directly against each
-    // endpoint's OpenAPI schema 2026-09-15 (not guessed) - undefined means
-    // no manual control exists (e.g. Kling v3 Pro's image-to-video endpoint
-    // inherits its ratio from the uploaded image instead). Only the 3
-    // broadly-supported values are surfaced in the UI (16:9/9:16/1:1) even
-    // on engines whose real enum has more options, to keep the picker
-    // simple and consistent across engines.
-    aspectRatioOptions?: string[];
-    // Real per-second, per-duration-unit linear pricing confirmed directly
-    // against fal (not guessed) - only engines with this set get a
-    // user-facing duration slider (see the DURATION_SELECTABLE export
-    // below); Kling 2.1's pricing is flat/non-linear per its own module
-    // comment, so it's deliberately excluded rather than guessing a
-    // per-second rate for it.
-    supportsDurationChoice?: boolean;
-    // Confirmed directly against the real OpenAPI schema 2026-09-15 - NOT
-    // wired into buildFalInput or the UI yet (scoped as a fast-follow, see
-    // STATUS.md), just recorded here so that work doesn't need to re-audit
-    // every engine's schema again from scratch.
-    supportsNegativePrompt?: boolean;
-  }
-> = {
+// Server-only: which inference endpoint runs each engine. Never import this
+// from client code - see videoEngines.ts.
+type VendorFields = {
+  falEndpoint: string;
+  falImageToVideoEndpoint: string;
+  falAvatarEndpoint?: string; // only Kling has a proven lip-sync/avatar path in this stack
+  falDurationValue: string;
+  // Only set when an engine's resolution enum doesn't match
+  // VIDEO_PAYGO_RESOLUTION (MiniMax H3 Max uses "768P").
+  falResolutionValue?: string;
+};
+
+const VIDEO_PAYGO_VENDOR: Record<VideoEngine, VendorFields> = {
   seedance25: {
-    label: "Seedance 2.5",
-    versionLabel: "Seedance 2.5",
     falEndpoint: "bytedance/seedance-2.5/text-to-video",
     falImageToVideoEndpoint: "bytedance/seedance-2.5/image-to-video",
-    // 4s, not 8s like 2.0 - real cost is ~$0.473/s at 720p (fal's own
-    // pricing page, checked 2026-09-15) vs 2.0's $0.2419/s, almost double.
-    // 4s is the longest duration that still clears the $1/video profit
-    // floor at the flat $3.99 price - see VIDEO_PAYGO_ENGINE_COST_USD.
-    // Schema's exact duration field wasn't fully confirmed (the fal
-    // playground showed a "Duration: auto" selector, not a documented
-    // enum) - verify the real accepted value against
-    // bytedance/seedance-2.5/text-to-video's OpenAPI schema before this
-    // engine's first real production generation, same as every other
-    // engine's schema in this file was checked directly rather than
-    // assumed.
-    durationSeconds: 4,
     falDurationValue: "4",
-    exampleUrl: "https://fal.ai/models/bytedance/seedance-2.5/text-to-video",
-    // Moved out of "Popular" per direct request (2026-09-15) - its capped
-    // 4s duration made it read as a downgrade next to 2.0's 8s when shown
-    // with equal billing; still a real option, just not front-and-center.
-    popular: false,
-    pickerNote: "Shortest clip here (4s) - sharpest detail, native audio",
-    aspectRatioOptions: ["16:9", "9:16", "1:1"],
-    supportsDurationChoice: true,
   },
   seedance: {
-    label: "Seedance 2.0",
-    versionLabel: "Seedance 2.0 Fast",
     falEndpoint: "bytedance/seedance-2.0/fast/text-to-video",
     falImageToVideoEndpoint: "bytedance/seedance-2.0/fast/image-to-video",
-    durationSeconds: 8,
     falDurationValue: "8",
-    exampleUrl: "https://fal.ai/models/bytedance/seedance-2.0/fast/text-to-video",
-    popular: true,
-    pickerNote: "8s clip · the longer, cheaper-to-produce option",
-    aspectRatioOptions: ["16:9", "9:16", "1:1"],
-    supportsDurationChoice: true,
   },
   veo: {
-    label: "Veo",
-    versionLabel: "Veo 3.1 Fast",
     falEndpoint: "fal-ai/veo3.1/fast",
     falImageToVideoEndpoint: "fal-ai/veo3.1/fast/image-to-video",
-    durationSeconds: 8,
     falDurationValue: "8s",
-    exampleUrl: "https://fal.ai/models/fal-ai/veo3.1/fast",
-    popular: true,
-    pickerNote: "8s clip · only engine with its own native voice",
-    aspectRatioOptions: ["16:9", "9:16"],
-    supportsDurationChoice: true,
-    supportsNegativePrompt: true,
   },
   kling: {
-    label: "Kling",
-    versionLabel: "Kling 2.1 Master",
     falEndpoint: "fal-ai/kling-video/v2.1/master/text-to-video",
     falImageToVideoEndpoint: "fal-ai/kling-video/v2.1/master/image-to-video",
     falAvatarEndpoint: "fal-ai/kling-video/ai-avatar/v2/standard",
-    durationSeconds: 5,
     falDurationValue: "5",
-    exampleUrl: "https://fal.ai/models/fal-ai/kling-video/v2.1/master/text-to-video",
-    popular: true,
-    pickerNote: "5s clip · best proven real lip-sync of the set",
-    aspectRatioOptions: ["16:9", "9:16", "1:1"],
-    supportsNegativePrompt: true,
   },
-  // Added 2026-09-15 - real, confirmed cheaper AND more capable than Kling
-  // 2.1 (checked directly against fal's own pricing page and OpenAPI
-  // schema, not guessed): $0.112/s audio-off, $0.168/s audio-on, $0.196/s
-  // with voice control - vs. 2.1's flat $1.40/5s (~$0.28/s equivalent).
-  // Also genuinely new capability: multi_prompt (several timed prompts in
-  // one call - a native fit for the shot-sequence template above),
-  // `elements` (character/object reference injection via @Element1, same
-  // idea as our own Cast & Locations), and a real `duration` enum "3"-"15"
-  // (vs 2.1's fixed "5"/"10" only). Kept as a SEPARATE option rather than
-  // replacing Kling 2.1 outright: 2.1's `falAvatarEndpoint` (the proven
-  // real lip-sync path this product's whole "best lip-sync" claim rests
-  // on) has no confirmed v3 equivalent yet - don't want to silently weaken
-  // that proven path on an unverified assumption.
-  //
-  // Duration priced against the WORST real per-second tier ($0.196/s,
-  // audio+voice) so it's safe regardless of which audio option a request
-  // uses: 10s * $0.196 = $1.96, +15% buffer = $2.254, profit =
-  // $3.574 - $2.254 = **$1.32/video** - clears the floor even in the most
-  // expensive case, with real margin to spare (at the cheaper $0.168/s
-  // audio-on tier most requests will actually use, profit is $1.64).
   klingv3: {
-    label: "Kling v3",
-    versionLabel: "Kling 3.0 Pro",
     falEndpoint: "fal-ai/kling-video/v3/pro/text-to-video",
     falImageToVideoEndpoint: "fal-ai/kling-video/v3/pro/image-to-video",
-    durationSeconds: 10,
     falDurationValue: "10",
-    exampleUrl: "https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video",
-    popular: false,
-    pickerNote: "10s clip · newer, cheaper, no proven lip-sync path yet",
-    supportsDurationChoice: true,
-    supportsNegativePrompt: true,
   },
   minimax: {
-    label: "MiniMax",
-    versionLabel: "MiniMax H3 Max",
     falEndpoint: "minimax/h3-max/text-to-video",
     falImageToVideoEndpoint: "minimax/h3-max/image-to-video",
-    durationSeconds: 8,
     falDurationValue: "8",
     falResolutionValue: "768P",
-    exampleUrl: "https://fal.ai/models/minimax/h3-max/text-to-video",
-    popular: false,
-    pickerNote: "8s clip · cheapest to produce of the seven",
-    aspectRatioOptions: ["16:9", "9:16", "1:1"],
-    supportsDurationChoice: true,
   },
   grok: {
-    label: "Grok",
-    versionLabel: "Grok Imagine Video 1.5",
     falEndpoint: "xai/grok-imagine-video/v1.5/text-to-video",
     falImageToVideoEndpoint: "xai/grok-imagine-video/v1.5/image-to-video",
-    durationSeconds: 8,
     falDurationValue: "8",
-    exampleUrl: "https://fal.ai/models/xai/grok-imagine-video/v1.5/text-to-video",
-    popular: false,
-    pickerNote: "8s clip",
-    aspectRatioOptions: ["16:9", "9:16", "1:1"],
-    supportsDurationChoice: true,
   },
 };
+
+export const VIDEO_PAYGO_ENGINES = Object.fromEntries(
+  (Object.keys(VIDEO_ENGINE_INFO) as VideoEngine[]).map((id) => [id, { ...VIDEO_ENGINE_INFO[id], ...VIDEO_PAYGO_VENDOR[id] }]),
+) as Record<VideoEngine, VideoEngineInfo & VendorFields>;
 
 // Real cost per engine at each engine's own duration above, +15% buffer -
 // kept here (not just in the comment above) so a future engine price
@@ -322,50 +208,6 @@ export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
   grok: 1.30,
 };
 
-// Real per-engine minimum duration, confirmed directly against each
-// endpoint (not guessed) - see audioDuration.ts's module comment for the
-// production bug (dead air / ungrounded mouth movement past the end of
-// short audio) this exists to fix. Only ever used to SHRINK a generation's
-// duration down to match short real audio; never to extend past the
-// engine's existing default above, since that default is what
-// VIDEO_PAYGO_ENGINE_COST_USD's worst-case margin math is priced against -
-// going higher would need new cost math, a separate decision from this fix.
-// - veo: strict enum ["4s","6s","8s"] - 4s is the floor, checked directly
-//   against the schema (see module comment at the top of this file).
-// - kling: strict enum ["5","10"] - 5s is both the floor and this file's
-//   existing default, so there's nothing to shrink to; kept here anyway so
-//   a future default change doesn't silently lose this behavior.
-// - seedance: flexible "4"-"15", floor checked directly against the schema.
-// - grok: confirmed 2026-09-12 - duration=1 was accepted and rendered a
-//   real ~1.04s clip; duration=99 was rejected ("must be <= 15"). No
-//   documented range existed before this (fal's own docs just said
-//   "integer, default 6" with no bounds), so this was verified against the
-//   live API rather than assumed - see STATUS.md for the exact probe.
-// - minimax: confirmed 2026-09-12 - duration=2 was rejected ("must be >=
-//   5") while testing the Harper round; this file's existing default of 8
-//   was already proven working in the same round.
-// - seedance25: NOT verified against the real schema (see the engine
-//   entry's own comment) - deliberately set equal to its own 4s default
-//   rather than guessing a lower floor, so this engine can't be shrunk to
-//   an unconfirmed duration value before that's checked.
-// Exported (not just used internally) so the UI's duration slider can read
-// the same real bounds this file's pricing already depends on, rather than
-// a second, potentially-drifting copy of the numbers.
-export const VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS: Record<VideoEngine, number> = {
-  seedance25: 4,
-  veo: 4,
-  kling: 5,
-  // Real confirmed enum floor ("3"-"15") - but capped here at the same 10s
-  // used as this engine's priced default (VIDEO_PAYGO_ENGINE_COST_USD),
-  // NOT the schema's true "3" floor, so a manual duration choice can only
-  // ever shrink toward cheaper, never toward a duration this file hasn't
-  // separately priced margin for. Real floor "3" is fine to use once this
-  // engine gets audio-length auto-matching like the others below.
-  klingv3: 3,
-  seedance: 4,
-  grok: 1,
-  minimax: 5,
-};
 
 // Resolves the actual duration value to send to fal for one generation:
 // the engine's fixed default when no real audio duration is known yet (the
@@ -485,22 +327,7 @@ export function buildFalInput(
   }
 }
 
-export type VideoCreditPack = {
-  id: string;
-  credits: number;
-  priceUsdCents: number;
-  stripePriceEnvVar: string;
-};
 
-// Packs give a small volume discount over the flat $3.99 single-video price
-// while still clearing the $1/video profit floor (see the module comment
-// above for the exact worst-case math): pack5 nets ~$1.21/video, pack10
-// ~$1.14/video - real numbers, not round-number guesses.
-export const VIDEO_CREDIT_PACKS: VideoCreditPack[] = [
-  { id: "single", credits: 1, priceUsdCents: 399, stripePriceEnvVar: "STRIPE_PRICE_VIDEO_CREDIT_1" },
-  { id: "pack5", credits: 5, priceUsdCents: 1800, stripePriceEnvVar: "STRIPE_PRICE_VIDEO_CREDIT_5" },
-  { id: "pack10", credits: 10, priceUsdCents: 3500, stripePriceEnvVar: "STRIPE_PRICE_VIDEO_CREDIT_10" },
-];
 
 export function videoCreditPackFromStripePriceId(priceId: string): VideoCreditPack | null {
   for (const pack of VIDEO_CREDIT_PACKS) {

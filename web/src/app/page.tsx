@@ -17,8 +17,8 @@ import {
   VIDEO_CREDIT_PACKS,
   VIDEO_PAYGO_PRICE_USD_CENTS,
   type VideoEngine,
-} from "@/lib/videoPaygo";
-import { PROMPT_DIRECTOR_LABEL } from "@/lib/promptDirector";
+  PROMPT_DIRECTOR_LABEL,
+} from "@/lib/videoEngines";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
 
@@ -1717,6 +1717,27 @@ const PAYGO_PROMPT_PLACEHOLDER =
   "video and study how the movies and ads you like are made. Add images of your character and location (under " +
   "More options), and make your prompt extremely detailed, one scene at a time.";
 
+// Logo + section links, shown as the top of the generator card so the
+// brand and the first thing to do read as one block.
+function SiteNav() {
+  return (
+    <header className="flex flex-col items-center gap-3 border-b border-purple/15 pb-5 text-center">
+      <Link href="/" className="inline-flex items-center gap-2">
+        <LogoMark size={40} />
+        <span className="text-xl font-extrabold tracking-tight text-foreground">Lucy Labs</span>
+      </Link>
+      <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-foreground/70">
+        <a href="#prompt-guide" className="hover:text-foreground">Prompt guide</a>
+        <a href="#harper" className="hover:text-foreground">Examples</a>
+        <a href="#voice" className="hover:text-foreground">Voice</a>
+        <a href="/stitch" className="hover:text-foreground">Free editor</a>
+        <a href="/billing" className="hover:text-foreground">Plans</a>
+        <a href="/account" className="hover:text-foreground">My account</a>
+      </nav>
+    </header>
+  );
+}
+
 // Draft saved across the Stripe redirect (2026-09-23) - checkout is now the
 // "Pay & generate" step itself, so without this the visitor would come back
 // to an empty box. sessionStorage, not localStorage: it's one tab's
@@ -1766,10 +1787,12 @@ function PayAsYouGoVideoSection({
   seedPrompt,
   seedImageBlob,
   seedVersion,
+  header,
 }: {
   seedPrompt: string | null;
   seedImageBlob: Blob | null;
   seedVersion: number;
+  header?: React.ReactNode;
 }) {
   const [signedIn, setSignedIn] = useState(false);
   const [balance, setBalance] = useState(0);
@@ -1998,7 +2021,8 @@ function PayAsYouGoVideoSection({
       id="pay-as-you-go"
       className="shadow-soft-lg scroll-mt-6 rounded-[28px] border border-white/60 bg-purple-wash/90 p-5 backdrop-blur-xl sm:p-7"
     >
-      <div className="text-center">
+      {header}
+      <div className={`text-center ${header ? "mt-5" : ""}`}>
         <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Make a video from one prompt</h2>
         <p className="mt-1 text-sm text-muted">
           Pick any leading model · <strong className="text-foreground">{PAYGO_PRICE_LABEL} per video</strong> · no signup, no subscription
@@ -2029,7 +2053,7 @@ function PayAsYouGoVideoSection({
                   setDurationSeconds(null);
                   setAspectRatio(null);
                 }}
-                className={`w-full rounded-2xl border p-2 text-center text-xs transition ${
+                className={`flex w-full flex-col items-center justify-start rounded-2xl border p-2 text-center text-xs transition ${
                   engine === id ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white text-muted hover:border-purple/40"
                 }`}
               >
@@ -2042,10 +2066,7 @@ function PayAsYouGoVideoSection({
             ))}
           </div>
           <p className="mt-1.5 text-[11px] text-muted">
-            Running <strong className="text-foreground">{engineDef.versionLabel}</strong> ·{" "}
-            <a href={engineDef.exampleUrl} target="_blank" rel="noopener noreferrer" className="text-purple underline">
-              see its example gallery ↗
-            </a>
+            Running <strong className="text-foreground">{engineDef.versionLabel}</strong> on Lucy Labs
           </p>
         </div>
 
@@ -2376,22 +2397,8 @@ export default function Home() {
   return (
     <div className="min-h-screen px-4 py-10 sm:px-6 sm:py-16">
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
-        <header className="shadow-soft-lg flex flex-col items-center gap-3 rounded-[28px] border border-white/60 bg-surface/90 px-6 py-5 text-center backdrop-blur-xl">
-          <Link href="/" className="inline-flex items-center gap-2">
-            <LogoMark size={40} />
-            <span className="text-xl font-extrabold tracking-tight text-foreground">Lucy Labs</span>
-          </Link>
-          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-foreground/70">
-            <a href="#prompt-guide" className="hover:text-foreground">Prompt guide</a>
-            <a href="#harper" className="hover:text-foreground">Examples</a>
-            <a href="#voice" className="hover:text-foreground">Voice</a>
-            <a href="/stitch" className="hover:text-foreground">Free editor</a>
-            <a href="/billing" className="hover:text-foreground">Plans</a>
-            <a href="/account" className="hover:text-foreground">My account</a>
-          </nav>
-        </header>
 
-        <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedVersion={seedVersion} />
+        <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedVersion={seedVersion} header={<SiteNav />} />
         <PromptGuideSection />
         <ProductAdSection />
         <CinematicExamplesSection onTryItYourself={handleTryItYourself} />

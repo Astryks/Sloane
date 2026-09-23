@@ -61,19 +61,18 @@ export default async function PrivacyPage() {
               text/audio we generate on your behalf to drive it — is sent to third-party AI model
               providers to actually produce the video. Depending on which engine you (or the feature)
               select, that means one or more of: <strong>Kling</strong> (Kuaishou), <strong>Veo</strong>{" "}
-              (Google), and <strong>Seedance</strong> (ByteDance) — all reached through{" "}
-              <strong>fal.ai</strong>, the inference platform that hosts and routes to these models on
-              our behalf. fal.ai also runs a small audio/video-merge utility we use when a video needs
-              your uploaded or generated audio track attached to it.
+              (Google), and <strong>Seedance</strong> (ByteDance) — all reached through a third-party AI
+              inference infrastructure provider that hosts and routes to these models on our behalf, and
+              that also runs the audio/video-merge step we use when a video needs your uploaded or
+              generated audio track attached to it.
             </p>
             <p>
               Practically, this means: your uploaded photo/video/audio and the resulting generated
-              video are transmitted to and briefly stored by fal.ai and whichever model provider
-              actually renders it, are subject to those companies&apos; own privacy and retention
-              policies (not just ours), and the finished video is returned to you via a URL hosted on
-              fal.ai&apos;s infrastructure rather than ours. We do not control how long fal.ai or its
-              model providers retain that content on their own systems, and we have asked fal.ai
-              directly about aspects of this we could not confirm from public documentation alone. We
+              video are transmitted to and briefly stored by our inference provider and whichever model
+              provider actually renders it, and are subject to those companies&apos; own privacy and
+              retention policies (not just ours). The finished file stays on our inference
+              provider&apos;s storage and is delivered to you through a Lucy Labs link. We do not
+              control how long those providers retain that content on their own systems. We
               never send your data to these providers for anything other than fulfilling the specific
               video you asked for — not for their model training, and not for ours.
             </p>
@@ -98,7 +97,7 @@ export default async function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5">
               <li>
-                <strong>fal.ai, Kling, Veo, Seedance</strong> — your uploaded photo/video/audio and
+                <strong>Our AI inference infrastructure provider, Kling, Veo, Seedance</strong> — your uploaded photo/video/audio and
                 generated video, only when you use a video feature (see &quot;Video&quot; above).
               </li>
               <li>
@@ -146,11 +145,11 @@ export default async function PrivacyPage() {
               only in your browser for that session. If you sign in, we keep a short history of your
               generations (currently {retentionDays} days) so you can play them back and re-download
               them from your account; anything older is automatically deleted. Videos are not stored on
-              our own servers at any point — you get a direct link to the file as hosted by fal.ai, and
+              our own servers at any point — you get a Lucy Labs link to the file as held by our inference provider, and
               signed-in users&apos; history keeps that link, not a copy of the video itself, for the same
               retention window. If you&apos;d like anything deleted sooner — your account, uploaded
               samples, or generated clips — email us and we&apos;ll take care of it. We can&apos;t force an
-              early deletion on fal.ai&apos;s or a model provider&apos;s own systems, but we can and will ask
+              early deletion on our inference provider&apos;s or a model provider&apos;s own systems, but we can and will ask
               on your behalf.
             </p>
           </Section>

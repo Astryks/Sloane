@@ -1,17 +1,17 @@
-import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getSubscriberByUserId, listGenerationsForUser, initSchema } from "@/lib/db";
+import { publicJson } from "@/lib/mediaProxy";
 
 export async function GET() {
   try {
     await initSchema();
     const user = await getSessionUser();
     if (!user) {
-      return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+      return publicJson({ error: "Not signed in" }, { status: 401 });
     }
     const subscriber = await getSubscriberByUserId(user.id);
     const generations = await listGenerationsForUser(user.id);
-    return NextResponse.json({
+    return publicJson({
       email: user.email,
       accessToken: subscriber?.access_token ?? null,
       subscriber: subscriber
@@ -34,6 +34,6 @@ export async function GET() {
     });
   } catch (err) {
     console.error("[account] failed to load account", err);
-    return NextResponse.json({ error: "Could not load your account right now" }, { status: 500 });
+    return publicJson({ error: "Could not load your account right now" }, { status: 500 });
   }
 }

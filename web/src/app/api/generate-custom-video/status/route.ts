@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import {
   getSubscriptionVideoJob,
   claimSubscriptionVideoJobForFalSubmit,
@@ -11,6 +11,7 @@ import {
 import { submitFalJob, getFalJobStatus, getFalJobResult, uploadBufferToFal, hasRealRequestId } from "@/lib/fal";
 import { getModalJobStatus } from "@/lib/modal";
 import { padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
+import { publicJson } from "@/lib/mediaProxy";
 
 const KLING_AVATAR_ENDPOINT = "fal-ai/kling-video/ai-avatar/v2/standard";
 
@@ -25,20 +26,20 @@ export async function GET(req: NextRequest) {
   // (server logs/browser history/Referer exposure otherwise).
   const accessToken = req.headers.get("x-access-token");
   if (!jobId) {
-    return NextResponse.json({ error: "jobId is required" }, { status: 400 });
+    return publicJson({ error: "jobId is required" }, { status: 400 });
   }
 
   const job = await getSubscriptionVideoJob(jobId);
   // Ownership check - see generate-character-video/status/route.ts for the
   // same fix and why it matters (this route previously had none at all).
   if (!job || job.mode !== "custom" || job.access_token !== accessToken) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    return publicJson({ error: "Job not found" }, { status: 404 });
   }
   if (job.status === "completed") {
-    return NextResponse.json({ status: "COMPLETED", videoUrl: job.video_url });
+    return publicJson({ status: "COMPLETED", videoUrl: job.video_url });
   }
   if (job.status === "failed") {
-    return NextResponse.json({ status: "FAILED", error: job.error });
+    return publicJson({ status: "FAILED", error: job.error });
   }
 
   if (job.modal_job_id && !hasRealRequestId(job.fal_request_id)) {
@@ -48,17 +49,17 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Voice generation status check failed";
       if (await failSubscriptionVideoJob(job.id, message)) await releaseVideoCredits(job.access_token, job.credits_cost);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
 
     if (modalStatus.status === "FAILED") {
       if (await failSubscriptionVideoJob(job.id, modalStatus.error ?? "Voice generation failed")) {
         await releaseVideoCredits(job.access_token, job.credits_cost);
       }
-      return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
+      return publicJson({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     // Real double-submit race fixed here (follow-up audit, 2026-09-17): two
     // overlapping polls could both observe modalStatus COMPLETED and
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
     // the one credit already spent - same fix as generate-cinematic-video/
     // status/route.ts's identical claim, just missing here until now.
     if (!(await claimSubscriptionVideoJobForFalSubmit(job.id))) {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
 
     try {
@@ -85,23 +86,23 @@ export async function GET(req: NextRequest) {
         audio_url: audioUrl,
       });
       await setSubscriptionVideoJobRequestId(job.id, requestId);
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Lip-sync submission failed";
       if (await failSubscriptionVideoJob(job.id, message)) await releaseVideoCredits(job.access_token, job.credits_cost);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
   }
 
   if (!hasRealRequestId(job.fal_request_id)) {
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
 
   let falStatus;
   try {
     falStatus = await getFalJobStatus(job.fal_endpoint, job.fal_request_id);
   } catch {
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
   if (falStatus === "COMPLETED") {
     try {
@@ -111,18 +112,18 @@ export async function GET(req: NextRequest) {
       await completeSubscriptionVideoJob(job.id, videoUrl);
       // Usage already recorded atomically at submission time (see
       // reserveVideoCredits in generate-custom-video/route.ts).
-      return NextResponse.json({ status: "COMPLETED", videoUrl });
+      return publicJson({ status: "COMPLETED", videoUrl });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch result";
       if (await failSubscriptionVideoJob(job.id, message)) await releaseVideoCredits(job.access_token, job.credits_cost);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
   }
   if (falStatus === "FAILED") {
     if (await failSubscriptionVideoJob(job.id, "Generation failed at the vendor (often a content-policy block)")) {
       await releaseVideoCredits(job.access_token, job.credits_cost);
     }
-    return NextResponse.json({ status: "FAILED", error: "Generation failed" });
+    return publicJson({ status: "FAILED", error: "Generation failed" });
   }
-  return NextResponse.json({ status: "IN_PROGRESS" });
+  return publicJson({ status: "IN_PROGRESS" });
 }

@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { getOrCreatePaygoSessionUser } from "@/lib/auth";
 import { initSchema } from "@/lib/db";
 import { VIDEO_CREDIT_PACKS } from "@/lib/videoPaygo";
+import { publicJson } from "@/lib/mediaProxy";
 
 // One-time payment (mode: "payment", not "subscription") for a video-credit
 // pack - a deliberately different Stripe flow from @/app/api/billing/checkout,
@@ -18,11 +19,11 @@ export async function POST(req: NextRequest) {
   const { packId } = (await req.json()) as { packId: string };
   const pack = VIDEO_CREDIT_PACKS.find((p) => p.id === packId);
   if (!pack) {
-    return NextResponse.json({ error: "Unknown credit pack" }, { status: 400 });
+    return publicJson({ error: "Unknown credit pack" }, { status: 400 });
   }
   const priceId = process.env[pack.stripePriceEnvVar];
   if (!priceId) {
-    return NextResponse.json({ error: "Credit pack not configured on the server yet" }, { status: 500 });
+    return publicJson({ error: "Credit pack not configured on the server yet" }, { status: 500 });
   }
 
   await initSchema();
@@ -39,10 +40,10 @@ export async function POST(req: NextRequest) {
       client_reference_id: user.id,
       managed_payments: { enabled: false },
     });
-    return NextResponse.json({ url: session.url });
+    return publicJson({ url: session.url });
   } catch (err) {
     console.error("Video credit checkout session creation failed", err);
     const message = err instanceof Error ? err.message : "Checkout failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return publicJson({ error: message }, { status: 500 });
   }
 }

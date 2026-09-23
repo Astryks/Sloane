@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { initSchema, recordVisit } from "@/lib/db";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Heartbeat endpoint for the live-visitors dashboard (see
 // web/src/app/admin/page.tsx). Pinged by VisitTracker.tsx every ~20s while
@@ -11,15 +12,15 @@ export async function POST(req: NextRequest) {
   const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null;
   const path = typeof body?.path === "string" ? body.path : "/";
   if (!sessionId) {
-    return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+    return publicJson({ error: "Missing sessionId" }, { status: 400 });
   }
 
   try {
     await initSchema();
     await recordVisit(sessionId, path);
-    return NextResponse.json({ ok: true });
+    return publicJson({ ok: true });
   } catch (err) {
     console.error("[track-visit] failed to record visit", err);
-    return NextResponse.json({ error: "Could not record visit." }, { status: 502 });
+    return publicJson({ error: "Could not record visit." }, { status: 502 });
   }
 }

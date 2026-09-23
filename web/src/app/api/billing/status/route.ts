@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSubscriberByToken } from "@/lib/db";
 import { PLANS } from "@/lib/plans";
+import { publicJson } from "@/lib/mediaProxy";
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,14 +12,14 @@ export async function GET(req: NextRequest) {
     // gated route in the app.
     const token = req.headers.get("x-access-token");
     if (!token) {
-      return NextResponse.json({ error: "Missing token" }, { status: 400 });
+      return publicJson({ error: "Missing token" }, { status: 400 });
     }
     const sub = await getSubscriberByToken(token);
     if (!sub) {
-      return NextResponse.json({ error: "Access code not found" }, { status: 404 });
+      return publicJson({ error: "Access code not found" }, { status: 404 });
     }
     const plan = PLANS[sub.plan];
-    return NextResponse.json({
+    return publicJson({
       plan: plan.name,
       status: sub.status,
       charactersUsed: sub.characters_used,
@@ -31,6 +32,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error("[billing/status] failed to look up subscriber", err);
-    return NextResponse.json({ error: "Couldn't reach the account server." }, { status: 502 });
+    return publicJson({ error: "Couldn't reach the account server." }, { status: 502 });
   }
 }

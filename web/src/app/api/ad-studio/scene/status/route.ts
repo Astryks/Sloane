@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { failAdStudioScene, getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, refundVideoCredit, setAdStudioSceneVideo } from "@/lib/db";
 import { adStudioFalEndpoint, isAdStudioModel } from "@/lib/adStudio";
 import { getFalJobResult, getFalJobStatus, getFalVideoUrl } from "@/lib/fal";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Video generation is submitted async (generate-video/route.ts) rather than
 // blocking the request - it can take well over a minute, and this route is
@@ -12,23 +13,23 @@ export async function GET(req: NextRequest) {
   try {
     await initSchema();
     const user = await getSessionUser();
-    if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+    if (!user) return publicJson({ error: "Sign in required" }, { status: 401 });
 
     const sceneId = req.nextUrl.searchParams.get("sceneId") ?? "";
-    if (!sceneId) return NextResponse.json({ error: "Missing sceneId" }, { status: 400 });
+    if (!sceneId) return publicJson({ error: "Missing sceneId" }, { status: 400 });
 
     const owner = await getAdStudioSceneProjectOwner(sceneId);
-    if (!owner) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
-    if (owner !== user.id) return NextResponse.json({ error: "Not your project" }, { status: 403 });
+    if (!owner) return publicJson({ error: "Scene not found" }, { status: 404 });
+    if (owner !== user.id) return publicJson({ error: "Not your project" }, { status: 403 });
 
     const scene = await getAdStudioScene(sceneId);
-    if (!scene) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
+    if (!scene) return publicJson({ error: "Scene not found" }, { status: 404 });
 
-    if (scene.video_url) return NextResponse.json({ status: "COMPLETED", videoUrl: scene.video_url });
-    if (!scene.video_fal_request_id) return NextResponse.json({ status: scene.status });
+    if (scene.video_url) return publicJson({ status: "COMPLETED", videoUrl: scene.video_url });
+    if (!scene.video_fal_request_id) return publicJson({ status: scene.status });
 
     if (!isAdStudioModel(scene.video_model)) {
-      return NextResponse.json({ error: "This scene's video model is no longer supported" }, { status: 500 });
+      return publicJson({ error: "This scene's video model is no longer supported" }, { status: 500 });
     }
     const endpoint = adStudioFalEndpoint(scene.video_model);
 
@@ -42,9 +43,9 @@ export async function GET(req: NextRequest) {
       if (await failAdStudioScene(sceneId, "Video generation failed")) {
         await refundVideoCredit(user.id);
       }
-      return NextResponse.json({ status: "FAILED" });
+      return publicJson({ status: "FAILED" });
     }
-    if (status !== "COMPLETED") return NextResponse.json({ status });
+    if (status !== "COMPLETED") return publicJson({ status });
 
     const result = await getFalJobResult(endpoint, scene.video_fal_request_id);
     const videoUrl = getFalVideoUrl(result);
@@ -52,12 +53,12 @@ export async function GET(req: NextRequest) {
       if (await failAdStudioScene(sceneId, "Video provider returned no usable video URL")) {
         await refundVideoCredit(user.id);
       }
-      return NextResponse.json({ status: "FAILED" });
+      return publicJson({ status: "FAILED" });
     }
     await setAdStudioSceneVideo(sceneId, videoUrl);
-    return NextResponse.json({ status: "COMPLETED", videoUrl });
+    return publicJson({ status: "COMPLETED", videoUrl });
   } catch (err) {
     console.error("ad-studio scene status check failed", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Could not check scene status" }, { status: 502 });
+    return publicJson({ error: err instanceof Error ? err.message : "Could not check scene status" }, { status: 502 });
   }
 }

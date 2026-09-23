@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { getSubscriberByCustomerId } from "@/lib/db";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Looks up the access token for a just-completed Checkout session, so the
 // success page can show it once. Safe-ish because Stripe session IDs are
@@ -23,15 +24,15 @@ export async function GET(req: NextRequest) {
   try {
     const sessionId = req.nextUrl.searchParams.get("session_id");
     if (!sessionId) {
-      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+      return publicJson({ error: "Missing session_id" }, { status: 400 });
     }
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (!session.customer) {
-      return NextResponse.json({ error: "Session has no customer" }, { status: 400 });
+      return publicJson({ error: "Session has no customer" }, { status: 400 });
     }
     const ageSeconds = Date.now() / 1000 - session.created;
     if (ageSeconds > SESSION_LOOKUP_WINDOW_SECONDS) {
-      return NextResponse.json(
+      return publicJson(
         { error: "This checkout link has expired - sign in with your email instead to see your access." },
         { status: 410 },
       );
@@ -39,12 +40,12 @@ export async function GET(req: NextRequest) {
     const sub = await getSubscriberByCustomerId(session.customer as string);
     if (!sub) {
       // Webhook may not have landed yet (it's async) - tell the client to retry shortly.
-      return NextResponse.json({ pending: true });
+      return publicJson({ pending: true });
     }
-    return NextResponse.json({ accessToken: sub.access_token, plan: sub.plan });
+    return publicJson({ accessToken: sub.access_token, plan: sub.plan });
   } catch (err) {
     console.error("[billing/session] failed to look up checkout session", err);
-    return NextResponse.json(
+    return publicJson(
       { error: "Couldn't confirm your subscription right now - refresh this page in a moment." },
       { status: 502 },
     );

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import {
   createProductAdJob,
@@ -15,6 +15,8 @@ import { compositeProductAndCharacter, hasEnoughFalBalanceToGenerate, lockFaceOn
 import { submitModalJob } from "@/lib/modal";
 import { buildProductAdFalInput, isProductAdModel, productAdFalEndpoint } from "@/lib/productAd";
 import { buildProductAdStoryboard } from "@/lib/productAdStoryboard";
+import { publicJson } from "@/lib/mediaProxy";
+import { characterInputImageUrl } from "@/lib/characterImages";
 
 // Real legal-risk mitigation (2026-09-14) - only applies to an actually
 // UPLOADED character photo, never the app's own pre-made characters
@@ -38,10 +40,10 @@ export async function POST(req: NextRequest) {
   try {
     await initSchema();
     const user = await getSessionUser();
-    if (!user) return NextResponse.json({ error: "Sign in required to generate a product ad" }, { status: 401 });
+    if (!user) return publicJson({ error: "Sign in required to generate a product ad" }, { status: 401 });
 
     const missingProvider = setupError();
-    if (missingProvider) return NextResponse.json({ error: missingProvider }, { status: 503 });
+    if (missingProvider) return publicJson({ error: missingProvider }, { status: 503 });
 
     const form = await req.formData();
     const model = String(form.get("model") ?? "");
@@ -52,14 +54,14 @@ export async function POST(req: NextRequest) {
     const uploadedCharacter = form.get("character_image");
     const metadataText = String(form.get("storyboard_metadata") ?? "{}");
 
-    if (!isProductAdModel(model)) return NextResponse.json({ error: "Choose one of the available product ad models" }, { status: 400 });
-    if (!brief) return NextResponse.json({ error: "Add an ad brief before generating" }, { status: 400 });
-    if (brief.length > MAX_BRIEF_LENGTH) return NextResponse.json({ error: `Ad brief is too long (max ${MAX_BRIEF_LENGTH} characters)` }, { status: 400 });
-    if (youtubeReferences && youtubeReferences.length > MAX_REFERENCES_LENGTH) return NextResponse.json({ error: `YouTube references are too long (max ${MAX_REFERENCES_LENGTH} characters)` }, { status: 400 });
+    if (!isProductAdModel(model)) return publicJson({ error: "Choose one of the available product ad models" }, { status: 400 });
+    if (!brief) return publicJson({ error: "Add an ad brief before generating" }, { status: 400 });
+    if (brief.length > MAX_BRIEF_LENGTH) return publicJson({ error: `Ad brief is too long (max ${MAX_BRIEF_LENGTH} characters)` }, { status: 400 });
+    if (youtubeReferences && youtubeReferences.length > MAX_REFERENCES_LENGTH) return publicJson({ error: `YouTube references are too long (max ${MAX_REFERENCES_LENGTH} characters)` }, { status: 400 });
     if (!(productImage instanceof Blob) || productImage.size === 0 || !productImage.type.startsWith("image/")) {
-      return NextResponse.json({ error: "Upload a product image" }, { status: 400 });
+      return publicJson({ error: "Upload a product image" }, { status: 400 });
     }
-    if (productImage.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: "Product image is too large (max 15MB)" }, { status: 400 });
+    if (productImage.size > MAX_UPLOAD_BYTES) return publicJson({ error: "Product image is too large (max 15MB)" }, { status: 400 });
 
     let storyboardMetadata: Record<string, unknown>;
     try {
@@ -68,17 +70,17 @@ export async function POST(req: NextRequest) {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid shape");
       storyboardMetadata = parsed as Record<string, unknown>;
     } catch {
-      return NextResponse.json({ error: "Storyboard metadata is invalid" }, { status: 400 });
+      return publicJson({ error: "Storyboard metadata is invalid" }, { status: 400 });
     }
 
     let characterImageUrl: string;
     let characterName: string;
     let characterVoiceId: string | null;
     if (uploadedCharacter instanceof Blob && uploadedCharacter.size > 0) {
-      if (!uploadedCharacter.type.startsWith("image/")) return NextResponse.json({ error: "Character upload must be an image" }, { status: 400 });
-      if (uploadedCharacter.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: "Character image is too large (max 15MB)" }, { status: 400 });
+      if (!uploadedCharacter.type.startsWith("image/")) return publicJson({ error: "Character upload must be an image" }, { status: 400 });
+      if (uploadedCharacter.size > MAX_UPLOAD_BYTES) return publicJson({ error: "Character image is too large (max 15MB)" }, { status: 400 });
       if (String(form.get("character_consent") ?? "") !== "true") {
-        return NextResponse.json({ error: "Please confirm you have the right to use this image before continuing." }, { status: 400 });
+        return publicJson({ error: "Please confirm you have the right to use this image before continuing." }, { status: 400 });
       }
       await recordConsent({
         userId: user.id,
@@ -97,16 +99,16 @@ export async function POST(req: NextRequest) {
       characterVoiceId = null;
     } else {
       const character = getCharacter(characterId === "jess" ? "vicky" : characterId);
-      if (!character) return NextResponse.json({ error: "Choose a character or upload a character image" }, { status: 400 });
-      characterImageUrl = character.imageUrl;
+      if (!character) return publicJson({ error: "Choose a character or upload a character image" }, { status: 400 });
+      characterImageUrl = characterInputImageUrl(character.id) ?? character.imageUrl;
       characterName = character.name;
       characterVoiceId = character.defaultVoiceId;
     }
 
     if (!(await hasEnoughFalBalanceToGenerate())) {
-      return NextResponse.json({ error: "Video generation is temporarily paused while the provider balance is topped up." }, { status: 503 });
+      return publicJson({ error: "Video generation is temporarily paused while the provider balance is topped up." }, { status: 503 });
     }
-    if (!(await spendVideoCredit(user.id))) return NextResponse.json({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
+    if (!(await spendVideoCredit(user.id))) return publicJson({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
 
     let jobId: string | null = null;
     try {
@@ -157,15 +159,15 @@ export async function POST(req: NextRequest) {
       const voiceId = characterVoiceId ?? (typeof storyboardMetadata.voiceId === "string" ? storyboardMetadata.voiceId : "harper");
       const modal = await submitModalJob({ action: "generate-preset", text: storyboard.dialogueLine, voice_id: voiceId });
       await setProductAdModalId(jobId, modal.jobId);
-      return NextResponse.json({ jobId });
+      return publicJson({ jobId });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Product ad submission failed";
       if (jobId) await failProductAdJob(jobId, message);
       await refundVideoCredit(user.id);
-      return NextResponse.json({ error: message }, { status: 502 });
+      return publicJson({ error: message }, { status: 502 });
     }
   } catch (err) {
     console.error("product-ad generate failed", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Product ad submission failed" }, { status: 500 });
+    return publicJson({ error: err instanceof Error ? err.message : "Product ad submission failed" }, { status: 500 });
   }
 }

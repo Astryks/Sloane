@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getVideoPaygoJob, getCharacterVideoJob, getSubscriptionVideoJob, getProductAdJob } from "@/lib/db";
 import { getSessionUser, getPaygoSessionUser } from "@/lib/auth";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Streams a finished video back through our own domain with a real
 // "download" disposition, instead of sending the user off to fal's raw CDN
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest) {
   const accessToken = req.headers.get("x-access-token");
   const variant = (req.nextUrl.searchParams.get("variant") === "silent" ? "silent" : "final") as Variant;
   if (!jobType || !jobId || !["paygo", "product-ad", "character", "custom", "cinematic"].includes(jobType)) {
-    return NextResponse.json({ error: "jobType and jobId are required" }, { status: 400 });
+    return publicJson({ error: "jobType and jobId are required" }, { status: 400 });
   }
 
   let videoUrl: string | null;
@@ -81,15 +82,15 @@ export async function GET(req: NextRequest) {
     videoUrl = await resolveVideoUrl(jobType, jobId, accessToken, variant);
   } catch (err) {
     console.error("download-video lookup failed", err);
-    return NextResponse.json({ error: "Could not find that video" }, { status: 500 });
+    return publicJson({ error: "Could not find that video" }, { status: 500 });
   }
   if (!videoUrl) {
-    return NextResponse.json({ error: "Video not found, not finished yet, or not yours" }, { status: 404 });
+    return publicJson({ error: "Video not found, not finished yet, or not yours" }, { status: 404 });
   }
 
   const upstream = await fetch(videoUrl);
   if (!upstream.ok || !upstream.body) {
-    return NextResponse.json({ error: "Could not fetch the video from the vendor" }, { status: 502 });
+    return publicJson({ error: "Could not fetch the video - please try again" }, { status: 502 });
   }
 
   return new NextResponse(upstream.body, {

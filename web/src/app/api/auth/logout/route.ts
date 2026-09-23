@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
 import { destroySession } from "@/lib/auth";
+import { publicJson } from "@/lib/mediaProxy";
 
 export async function POST() {
   await destroySession();
-  return NextResponse.json({ ok: true });
+  return publicJson({ ok: true });
 }

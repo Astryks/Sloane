@@ -1,17 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { PLANS, type PlanId } from "@/lib/plans";
 import { getSessionUser } from "@/lib/auth";
+import { publicJson } from "@/lib/mediaProxy";
 
 export async function POST(req: NextRequest) {
   const { plan } = (await req.json()) as { plan: PlanId };
   const planDef = PLANS[plan];
   if (!planDef || !planDef.stripePriceEnvVar) {
-    return NextResponse.json({ error: "Unknown plan" }, { status: 400 });
+    return publicJson({ error: "Unknown plan" }, { status: 400 });
   }
   const priceId = process.env[planDef.stripePriceEnvVar];
   if (!priceId) {
-    return NextResponse.json({ error: "Plan not configured on the server yet" }, { status: 500 });
+    return publicJson({ error: "Plan not configured on the server yet" }, { status: 500 });
   }
 
   const origin = req.nextUrl.origin;
@@ -30,10 +31,10 @@ export async function POST(req: NextRequest) {
       // deliberately decided.
       managed_payments: { enabled: false },
     });
-    return NextResponse.json({ url: session.url });
+    return publicJson({ url: session.url });
   } catch (err) {
     console.error("Stripe checkout session creation failed", err);
     const message = err instanceof Error ? err.message : "Checkout failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return publicJson({ error: message }, { status: 500 });
   }
 }

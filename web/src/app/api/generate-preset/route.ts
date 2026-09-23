@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSubscriberByToken, checkQuota, reserveCharacterUsage, checkFreeQuota, recordFreeUsage, createPendingGeneration, initSchema } from "@/lib/db";
 import { getInferenceBackend, generateViaPod, generateViaCascade, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 import { PLANS } from "@/lib/plans";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Cascade mode's Mac attempt (health check + a real generation) can run up
 // close to a minute before falling back to Modal - Vercel Hobby's default
@@ -42,13 +43,13 @@ export async function POST(req: NextRequest) {
     // exceeds any limit) - without this, the request would still reach the
     // TTS backend and spend real GPU compute generating audio for nothing.
     if (!text) {
-      return NextResponse.json({ error: "Enter some text to generate." }, { status: 400 });
+      return publicJson({ error: "Enter some text to generate." }, { status: 400 });
     }
 
     if (accessToken) {
       const sub = await getSubscriberByToken(accessToken);
       if (!sub) {
-        return NextResponse.json({ error: "Access code not recognized" }, { status: 401 });
+        return publicJson({ error: "Access code not recognized" }, { status: 401 });
       }
       // checkQuota is a fast, friendly pre-check; reserveCharacterUsage
       // right after is the real atomic enforcement (see its comment in
@@ -59,16 +60,16 @@ export async function POST(req: NextRequest) {
       // both read the same pre-generation characters_used and both pass.
       const quotaError = checkQuota(sub, text.length);
       if (quotaError) {
-        return NextResponse.json({ error: quotaError }, { status: 402 });
+        return publicJson({ error: quotaError }, { status: 402 });
       }
       const reserved = await reserveCharacterUsage(accessToken, text.length, PLANS[sub.plan].charactersPerMonth);
       if (!reserved) {
-        return NextResponse.json({ error: quotaError ?? "This would put you over your plan's character limit." }, { status: 402 });
+        return publicJson({ error: quotaError ?? "This would put you over your plan's character limit." }, { status: 402 });
       }
     } else {
       const freeError = await checkFreeQuota(freeTierId, text.length);
       if (freeError) {
-        return NextResponse.json({ error: freeError }, { status: 402 });
+        return publicJson({ error: freeError }, { status: 402 });
       }
     }
 
@@ -131,9 +132,9 @@ export async function POST(req: NextRequest) {
     if (!accessToken) {
       await recordFreeUsage(freeTierId, text.length);
     }
-    return NextResponse.json(result);
+    return publicJson(result);
   } catch (err) {
-    return NextResponse.json(
+    return publicJson(
       { error: err instanceof Error ? err.message : "Something went wrong - please try again." },
       { status: 502 },
     );

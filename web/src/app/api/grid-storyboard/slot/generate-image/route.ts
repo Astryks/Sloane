@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import {
   getGridStoryboardSlotProjectOwner,
@@ -9,6 +9,7 @@ import {
   type StoryboardReference,
 } from "@/lib/db";
 import { generateImageVariants, hasEnoughFalBalanceToGenerate, isImageEngine } from "@/lib/fal";
+import { publicJson } from "@/lib/mediaProxy";
 
 const MAX_PROMPT_LENGTH = 500;
 const MAX_REFERENCES = 6;
@@ -47,24 +48,24 @@ export async function POST(req: NextRequest) {
   try {
     await initSchema();
     const user = await getSessionUser();
-    if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+    if (!user) return publicJson({ error: "Sign in required" }, { status: 401 });
 
     const body = await req.json();
     const slotId = String(body.slotId ?? "");
     const prompt = String(body.prompt ?? "").trim();
     const engine = String(body.engine ?? "nanobanana");
     const referenceIds: string[] = Array.isArray(body.referenceIds) ? body.referenceIds.map(String).slice(0, MAX_REFERENCES) : [];
-    if (!slotId) return NextResponse.json({ error: "Missing slotId" }, { status: 400 });
-    if (!prompt) return NextResponse.json({ error: "Describe the image you want" }, { status: 400 });
-    if (prompt.length > MAX_PROMPT_LENGTH) return NextResponse.json({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
-    if (!isImageEngine(engine)) return NextResponse.json({ error: "Unknown image engine" }, { status: 400 });
+    if (!slotId) return publicJson({ error: "Missing slotId" }, { status: 400 });
+    if (!prompt) return publicJson({ error: "Describe the image you want" }, { status: 400 });
+    if (prompt.length > MAX_PROMPT_LENGTH) return publicJson({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
+    if (!isImageEngine(engine)) return publicJson({ error: "Unknown image engine" }, { status: 400 });
 
     const owner = await getGridStoryboardSlotProjectOwner(slotId);
-    if (!owner) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
-    if (owner !== user.id) return NextResponse.json({ error: "Not your project" }, { status: 403 });
+    if (!owner) return publicJson({ error: "Scene not found" }, { status: 404 });
+    if (owner !== user.id) return publicJson({ error: "Not your project" }, { status: 403 });
 
     if (!(await hasEnoughFalBalanceToGenerate())) {
-      return NextResponse.json(
+      return publicJson(
         { error: "Image generation is temporarily paused while we top up - please try again shortly." },
         { status: 503 },
       );
@@ -75,9 +76,9 @@ export async function POST(req: NextRequest) {
     const [imageUrl] = await generateImageVariants(finalPrompt, engine, references.map((r) => r.image_url), 1);
     await setGridStoryboardSlotImage(slotId, imageUrl);
     await setGridStoryboardSlotReferences(slotId, references.map((r) => r.id));
-    return NextResponse.json({ imageUrl });
+    return publicJson({ imageUrl });
   } catch (err) {
     console.error("grid-storyboard generate image failed", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Could not generate this image" }, { status: 502 });
+    return publicJson({ error: err instanceof Error ? err.message : "Could not generate this image" }, { status: 502 });
   }
 }

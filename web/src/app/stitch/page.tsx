@@ -403,16 +403,13 @@ function waitForMediaMeta(el: HTMLMediaElement, timeoutMs: number): Promise<void
 // fetch ANY url a visitor was given with no host check at all - a crafted
 // link could make a visitor's own browser fetch an arbitrary attacker
 // domain from this page. Every real value this ever carries is one of our
-// own generated scenes' fal.ai result URLs (fal's CDN serves from
-// `<version>.fal.media` subdomains, e.g. `v3b.fal.media` - see
-// characters.ts's own image URLs for the same pattern), so anything else is
-// rejected outright rather than trusted. Parsed with a real URL object, not
-// a substring check, so a hostname like "fal.media.evil.com" or
-// "evil.com/fal.media" can't slip past a naive `.includes("fal.media")`.
+// own generated scenes, served same-origin under /api/media/ (see
+// mediaProxy.ts), so anything else is rejected outright rather than
+// trusted. Parsed with a real URL object, not a substring check.
 function isAllowedPreloadUrl(url: string): boolean {
   try {
-    const { hostname, protocol } = new URL(url);
-    return protocol === "https:" && (hostname === "fal.media" || hostname.endsWith(".fal.media"));
+    const parsed = new URL(url, window.location.origin);
+    return parsed.origin === window.location.origin && parsed.pathname.startsWith("/api/media/");
   } catch {
     return false;
   }

@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CHARACTERS } from "@/lib/characters";
-import { PRODUCT_AD_MODELS, type ProductAdModel } from "@/lib/productAd";
+import { PRODUCT_AD_MODELS, type ProductAdModel } from "@/lib/productAdModels";
 
 const continuityLock = "Keep the selected character's face, hair, wardrobe, proportions, and performance identity consistent across every shot and location.";
 const productIntegrityLock = "Use the uploaded product as the source of truth: preserve its exact silhouette, materials, colors, label, logo, cap, and readable text. Never invent, melt, mirror, or redesign the product.";

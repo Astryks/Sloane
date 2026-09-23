@@ -5,7 +5,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
-import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudio";
+import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudioModels";
 import { expandCinematicPrompt, GENRE_STYLE_LIBRARY, ATMOSPHERE_LIBRARY, CAMERA_MOVEMENT_LIBRARY, type GenreKey } from "@/lib/directorMode";
 
 // Small shared drag-and-drop wrapper (2026-09-14, per direct request -

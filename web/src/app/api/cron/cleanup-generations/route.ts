@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getExpiredGenerations, deleteGenerationsByIds, initSchema } from "@/lib/db";
 import { deleteGenerationBlob } from "@/lib/generationHistory";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Runs daily via vercel.json's cron config. This is what actually bounds
 // storage cost regardless of traffic - generations past their retention
@@ -17,10 +18,10 @@ export async function GET(req: NextRequest) {
   const expected = process.env.CRON_SECRET;
   if (!expected) {
     console.error("[cron/cleanup-generations] CRON_SECRET not configured - refusing to run");
-    return NextResponse.json({ error: "Not configured" }, { status: 500 });
+    return publicJson({ error: "Not configured" }, { status: 500 });
   }
   if (auth !== `Bearer ${expected}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return publicJson({ error: "Unauthorized" }, { status: 401 });
   }
 
   await initSchema();
@@ -29,5 +30,5 @@ export async function GET(req: NextRequest) {
     await deleteGenerationBlob(generation);
   }
   await deleteGenerationsByIds(expired.map((g) => g.id));
-  return NextResponse.json({ deleted: expired.length });
+  return publicJson({ deleted: expired.length });
 }

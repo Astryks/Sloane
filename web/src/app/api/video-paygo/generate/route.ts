@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getPaygoSessionUser } from "@/lib/auth";
 import {
   initSchema,
@@ -15,6 +15,7 @@ import { submitModalJob } from "@/lib/modal";
 import { probeAudioDurationSeconds, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 import { PRESET_VOICES } from "@/lib/presetVoices";
 import { directPrompt } from "@/lib/promptDirector";
+import { publicJson } from "@/lib/mediaProxy";
 
 // The optional GPT-6 Astra prompt-director call (see promptDirector.ts)
 // adds up to ~25s before submission - needs more than the default limit.
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
     await initSchema();
     const user = await getPaygoSessionUser();
     if (!user) {
-      return NextResponse.json({ error: "Buy a video credit first - no account needed" }, { status: 401 });
+      return publicJson({ error: "Buy a video credit first - no account needed" }, { status: 401 });
     }
 
     const form = await req.formData();
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
     const director = String(form.get("director") ?? "");
 
     if (!VIDEO_PAYGO_ENGINES[engine]) {
-      return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
+      return publicJson({ error: "Unknown engine" }, { status: 400 });
     }
     // Both optional - null means "use the engine's own default", same
     // behavior as before either field existed. Server-side clamped to the
@@ -94,10 +95,10 @@ export async function POST(req: NextRequest) {
     if (durationField != null && String(durationField).length > 0) {
       const n = Number(durationField);
       if (!Number.isFinite(n)) {
-        return NextResponse.json({ error: "Invalid duration" }, { status: 400 });
+        return publicJson({ error: "Invalid duration" }, { status: 400 });
       }
       if (!engineDef.supportsDurationChoice) {
-        return NextResponse.json({ error: `${engineDef.label} doesn't support a custom duration` }, { status: 400 });
+        return publicJson({ error: `${engineDef.label} doesn't support a custom duration` }, { status: 400 });
       }
       const min = VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine];
       requestedDurationSeconds = Math.min(engineDef.durationSeconds, Math.max(min, Math.round(n)));
@@ -106,23 +107,23 @@ export async function POST(req: NextRequest) {
     if (aspectRatioField != null && String(aspectRatioField).length > 0) {
       const val = String(aspectRatioField);
       if (!engineDef.aspectRatioOptions?.includes(val)) {
-        return NextResponse.json({ error: `${engineDef.label} doesn't support that aspect ratio` }, { status: 400 });
+        return publicJson({ error: `${engineDef.label} doesn't support that aspect ratio` }, { status: 400 });
       }
       requestedAspectRatio = val;
     }
     if (!["none", "own", "lucy"].includes(audioMode)) {
-      return NextResponse.json({ error: "Unknown audio option" }, { status: 400 });
+      return publicJson({ error: "Unknown audio option" }, { status: 400 });
     }
     if (!["lipsync", "voiceover"].includes(lipSyncMode)) {
-      return NextResponse.json({ error: "Unknown lip-sync option" }, { status: 400 });
+      return publicJson({ error: "Unknown lip-sync option" }, { status: 400 });
     }
     const wantsLucyVoice = audioMode === "lucy";
     if (wantsLucyVoice && !PRESET_VOICES.find((v) => v.id === presetVoiceId)) {
-      return NextResponse.json({ error: "Unknown voice choice" }, { status: 400 });
+      return publicJson({ error: "Unknown voice choice" }, { status: 400 });
     }
     const hasAudio = audioMode === "own" && referenceAudio instanceof Blob && referenceAudio.size > 0;
     if (audioMode === "own" && !hasAudio) {
-      return NextResponse.json({ error: "Add the audio you want on this video" }, { status: 400 });
+      return publicJson({ error: "Add the audio you want on this video" }, { status: 400 });
     }
     const hasImage = referenceImage instanceof Blob && referenceImage.size > 0;
     // Kling Avatar is only used when the user actually wants a lip-sync
@@ -135,23 +136,23 @@ export async function POST(req: NextRequest) {
     // status/route.ts), same as every non-Kling path.
     const promptOptional = useKlingAvatar && hasAudio;
     if (!prompt && !promptOptional) {
-      return NextResponse.json(
+      return publicJson(
         { error: wantsLucyVoice ? "Write what you want the voice to say" : "Describe the video you want" },
         { status: 400 },
       );
     }
     if (prompt.length > MAX_PROMPT_LENGTH) {
-      return NextResponse.json({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
+      return publicJson({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
     }
     if ((hasAudio || wantsLucyVoice) && useKlingAvatar && !hasImage) {
-      return NextResponse.json(
+      return publicJson(
         { error: wantsLucyVoice ? "Kling needs a photo (or video) to lip-sync the voice to" : "Kling needs a photo (or video) to lip-sync your audio to" },
         { status: 400 },
       );
     }
     for (const f of [referenceImage, referenceAudio]) {
       if (f instanceof Blob && f.size > MAX_UPLOAD_BYTES) {
-        return NextResponse.json({ error: `File too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB)` }, { status: 400 });
+        return publicJson({ error: `File too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB)` }, { status: 400 });
       }
     }
 
@@ -173,7 +174,7 @@ export async function POST(req: NextRequest) {
       ownAudioBuffer = Buffer.from(await (referenceAudio as Blob).arrayBuffer());
       ownAudioSeconds = await probeAudioDurationSeconds(ownAudioBuffer, (referenceAudio as Blob).type || "");
       if (ownAudioSeconds != null && ownAudioSeconds < LIPSYNC_MIN_AUDIO_SECONDS) {
-        return NextResponse.json(
+        return publicJson(
           { error: `That audio is too short to lip-sync (${ownAudioSeconds.toFixed(1)}s) - add at least ${LIPSYNC_MIN_AUDIO_SECONDS}s` },
           { status: 400 },
         );
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
     // the full reasoning (this is what makes a burst of real demand safe
     // without needing a much larger prepaid buffer).
     if (!(await hasEnoughFalBalanceToGenerate())) {
-      return NextResponse.json(
+      return publicJson(
         { error: "Video generation is temporarily paused while we top up - please try again shortly." },
         { status: 503 },
       );
@@ -195,7 +196,7 @@ export async function POST(req: NextRequest) {
 
     const spent = await spendVideoCredit(user.id);
     if (!spent) {
-      return NextResponse.json({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
+      return publicJson({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
     }
 
     let inputImageUrl: string | null = null;
@@ -211,7 +212,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       await refundVideoCredit(user.id);
       const message = err instanceof Error ? err.message : "Upload failed";
-      return NextResponse.json({ error: message }, { status: 500 });
+      return publicJson({ error: message }, { status: 500 });
     }
 
     // Optional GPT-6 Astra rewrite (see promptDirector.ts) - after the
@@ -263,7 +264,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       await refundVideoCredit(user.id);
       const message = err instanceof Error ? err.message : "Could not start this job";
-      return NextResponse.json({ error: message }, { status: 500 });
+      return publicJson({ error: message }, { status: 500 });
     }
 
     try {
@@ -273,23 +274,23 @@ export async function POST(req: NextRequest) {
         // generate-cinematic-video/route.ts's lucy_preset handling.
         const { jobId: modalJobId } = await submitModalJob({ action: "generate-preset", text: prompt, voice_id: presetVoiceId });
         await setVideoPaygoJobModalId(jobId, modalJobId);
-        return NextResponse.json({ jobId });
+        return publicJson({ jobId });
       }
       const falInput = useKlingAvatar
         ? { image_url: inputImageUrl, audio_url: inputAudioUrl }
         : buildFalInput(engine, finalPrompt, inputImageUrl, !needsMerge && engine === "veo", ownAudioSeconds, requestedDurationSeconds, requestedAspectRatio);
       const requestId = await submitFalJob(falEndpoint, falInput);
       await setVideoPaygoJobRequestId(jobId, requestId);
-      return NextResponse.json({ jobId, directedPrompt });
+      return publicJson({ jobId, directedPrompt });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Submission failed";
       await failVideoPaygoJob(jobId, message);
       await refundVideoCredit(user.id);
-      return NextResponse.json({ error: message }, { status: 500 });
+      return publicJson({ error: message }, { status: 500 });
     }
   } catch (err) {
     console.error("video-paygo generate failed", err);
     const message = err instanceof Error ? err.message : "Generation failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return publicJson({ error: message }, { status: 500 });
   }
 }

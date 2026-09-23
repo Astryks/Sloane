@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getJobStatus, type RunpodStatusResponse } from "@/lib/runpod";
 import { getModalJobStatus, type ModalStatusResponse } from "@/lib/modal";
 import { claimJobAudioDelivery, consumePendingGeneration, initSchema } from "@/lib/db";
 import { saveGenerationAudio } from "@/lib/generationHistory";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Polled by the client after generate-preset/clone-voice hand back a jobId
 // (see web/src/app/page.tsx's handleGenerate). On COMPLETED, the audio comes
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
   await initSchema();
   const jobId = req.nextUrl.searchParams.get("jobId");
   if (!jobId) {
-    return NextResponse.json({ error: "Missing jobId" }, { status: 400 });
+    return publicJson({ error: "Missing jobId" }, { status: 400 });
   }
 
   let result: RunpodStatusResponse | ModalStatusResponse;
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
       result = await getJobStatus(jobId);
     }
   } catch (err) {
-    return NextResponse.json(
+    return publicJson(
       { error: err instanceof Error ? err.message : "Could not check job status" },
       { status: 502 },
     );
@@ -38,19 +39,19 @@ export async function GET(req: NextRequest) {
 
   if (result.status === "FAILED" || result.status === "CANCELLED" || result.status === "TIMED_OUT") {
     const output = result.output as { error?: string } | undefined;
-    return NextResponse.json({
+    return publicJson({
       status: "FAILED",
       error: result.error ?? output?.error ?? `Generation ${result.status.toLowerCase().replace("_", " ")}`,
     });
   }
 
   if (result.status !== "COMPLETED") {
-    return NextResponse.json({ status: result.status });
+    return publicJson({ status: result.status });
   }
 
   const output = result.output as { audio_base64?: string; sample_rate?: number; voice_id?: string; error?: string } | undefined;
   if (!output?.audio_base64) {
-    return NextResponse.json({ status: "FAILED", error: output?.error ?? "No audio in job output" });
+    return publicJson({ status: "FAILED", error: output?.error ?? "No audio in job output" });
   }
 
   // Real cross-tenant leak partially fixed here (security audit,
@@ -60,7 +61,7 @@ export async function GET(req: NextRequest) {
   // indefinitely. Delivery is now single-use-with-a-grace-window instead;
   // only the caller(s) within that window get the real audio.
   if (!(await claimJobAudioDelivery(jobId))) {
-    return NextResponse.json({ status: "FAILED", error: "This generation has already been retrieved." });
+    return publicJson({ status: "FAILED", error: "This generation has already been retrieved." });
   }
 
   // If generate-preset/clone-voice recorded a pending entry for this job
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({
+  return publicJson({
     status: "COMPLETED",
     audioBase64: output.audio_base64,
     sampleRate: output.sample_rate,

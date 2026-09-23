@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { warmInferenceBackend } from "@/lib/inferenceBackend";
 import { getSetting, setSetting, initSchema } from "@/lib/db";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Called by the client the moment someone opens the generation page (see
 // web/src/app/page.tsx and mobile/App.tsx) - fires a background warm-up
@@ -26,9 +26,9 @@ export async function POST() {
   await initSchema();
   const lastWarmAt = await getSetting(LAST_WARM_SETTING_KEY);
   if (lastWarmAt && Date.now() - new Date(lastWarmAt).getTime() < WARM_COOLDOWN_MS) {
-    return NextResponse.json({ ok: true, skipped: "cooldown" });
+    return publicJson({ ok: true, skipped: "cooldown" });
   }
   await setSetting(LAST_WARM_SETTING_KEY, new Date().toISOString());
   await warmInferenceBackend().catch(() => {});
-  return NextResponse.json({ ok: true });
+  return publicJson({ ok: true });
 }

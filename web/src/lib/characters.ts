@@ -21,7 +21,7 @@ export type Character = {
   gender: "female" | "male";
   age: string;
   region: string;
-  imageUrl: string;
+  imageUrl: string; // our own /public copy, for display - the model input URL lives in characterImages.ts (server-only)
   // Default Lucy voice for this character's click-to-preview clip and as
   // the pre-selected option in the generation UI. Original assignments
   // (2026-09-11) were picked purely by requested accent; three were
@@ -44,7 +44,7 @@ export const CHARACTERS: Character[] = [
     gender: "female",
     age: "mid-20s",
     region: "Sydney, Australia",
-    imageUrl: "https://v3b.fal.media/files/b/0aa9eb60/yOpTgTwUZNYQcFCLsa822_harper.jpg",
+    imageUrl: "/characters/harper.jpg",
     // 2026-09-11: switched from Katie to Harper's own voice - a new preset
     // zero-shot cloned from the surfing ads-demo clip's own audio (see
     // VoicePicker.tsx's PRESET_VOICES and lucy_tts_engine.py's
@@ -58,7 +58,7 @@ export const CHARACTERS: Character[] = [
     gender: "female",
     age: "late 20s",
     region: "London, UK",
-    imageUrl: "https://v3b.fal.media/files/b/0aa9eb60/Y2m8E19pk2G12R1ewoEYH_beth.jpg",
+    imageUrl: "/characters/beth.jpg",
     defaultVoiceId: "voice_business", // Alice - UK, requested explicitly ("like Alice")
   },
   {
@@ -74,7 +74,7 @@ export const CHARACTERS: Character[] = [
     gender: "female",
     age: "late 20s",
     region: "Australia",
-    imageUrl: "https://v3b.fal.media/files/b/0aa9eb60/GCrI6ghEIlnUFmhtS8X7v_vicky.jpg",
+    imageUrl: "/characters/vicky.jpg",
     // 2026-09-11: switched to Jess (renamed from Aoife - same zero-shot
     // voice, just renamed to match the character), a second/distinct
     // Irish-accented voice, per direct request ("give vicky another irish
@@ -98,7 +98,7 @@ export const CHARACTERS: Character[] = [
     // full beard per direct request ("change marcus to a white male
     // character reddish haired beard") - v2 was a generic music-instructor
     // studio portrait, kept the same guitar/studio setting for continuity.
-    imageUrl: "https://v3b.fal.media/files/b/0aa9fa6a/n5HtFS9LwobmqSacIVRGL_marcus_v3.jpg",
+    imageUrl: "/characters/marcus.jpg",
     defaultVoiceId: "voice_mark", // Mark - requested explicitly ("voice of mark")
   },
   {
@@ -113,7 +113,7 @@ export const CHARACTERS: Character[] = [
     // the way he was in the older video without spending more to
     // regenerate - reverted to the original portrait/age rather than
     // attempting a third portrait.
-    imageUrl: "https://v3b.fal.media/files/b/0aa9eb61/6_ml_AMMqKfis0tvQBm8G_jack.jpg",
+    imageUrl: "/characters/jack.jpg",
     defaultVoiceId: "voice_tech", // Brad - Australian accent, requested explicitly ("like Brad")
   },
 ];

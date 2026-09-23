@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getPaygoSessionUser } from "@/lib/auth";
 import {
   getVideoPaygoJob,
@@ -26,28 +26,29 @@ import {
 import { getModalJobStatus } from "@/lib/modal";
 import { VIDEO_PAYGO_ENGINES, buildFalInput, type VideoEngine } from "@/lib/videoPaygo";
 import { probeAudioDurationSeconds, padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
+import { publicJson } from "@/lib/mediaProxy";
 
 export async function GET(req: NextRequest) {
   const user = await getPaygoSessionUser();
   if (!user) {
-    return NextResponse.json({ error: "Buy a video credit first - no account needed" }, { status: 401 });
+    return publicJson({ error: "Buy a video credit first - no account needed" }, { status: 401 });
   }
 
   const jobId = req.nextUrl.searchParams.get("jobId");
   if (!jobId) {
-    return NextResponse.json({ error: "jobId is required" }, { status: 400 });
+    return publicJson({ error: "jobId is required" }, { status: 400 });
   }
 
   const job = await getVideoPaygoJob(jobId);
   if (!job || job.user_id !== user.id) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    return publicJson({ error: "Job not found" }, { status: 404 });
   }
 
   if (job.status === "completed") {
-    return NextResponse.json({ status: "COMPLETED", videoUrl: job.video_url, silentVideoUrl: job.silent_video_url });
+    return publicJson({ status: "COMPLETED", videoUrl: job.video_url, silentVideoUrl: job.silent_video_url });
   }
   if (job.status === "failed") {
-    return NextResponse.json({ status: "FAILED", error: job.error });
+    return publicJson({ status: "FAILED", error: job.error });
   }
 
   // Phase 0 ("a Lucy voice" only): wait on the Modal TTS job, then submit
@@ -67,14 +68,14 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Voice generation status check failed";
       if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
     if (modalStatus.status === "FAILED") {
       if (await failVideoPaygoJob(job.id, modalStatus.error ?? "Voice generation failed")) await refundVideoCredit(user.id);
-      return NextResponse.json({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
+      return publicJson({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     // Real double-submit race fixed here (security audit, 2026-09-16): two
     // overlapping polls could both observe modalStatus COMPLETED and
@@ -82,7 +83,7 @@ export async function GET(req: NextRequest) {
     // for the one credit already spent. Claim atomically before submitting;
     // a losing request just reports IN_PROGRESS (see claimVideoPaygoJobForFalSubmit's comment).
     if (!(await claimVideoPaygoJobForFalSubmit(job.id))) {
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     try {
       const audioBase64 = modalStatus.output?.audio_base64 as string | undefined;
@@ -105,16 +106,16 @@ export async function GET(req: NextRequest) {
         ? await submitFalJob(job.fal_endpoint, { image_url: job.input_image_url, audio_url: audioUrl })
         : await submitFalJob(job.fal_endpoint, buildFalInput(job.engine as VideoEngine, job.prompt, job.input_image_url, false, resolvedAudioSeconds, job.duration_seconds, job.aspect_ratio));
       await setVideoPaygoJobRequestId(job.id, requestId);
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Video submission failed";
       if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
   }
 
   if (!hasRealRequestId(job.fal_request_id) || !job.fal_endpoint) {
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
 
   // Lip-sync pass already submitted (real lip-sync via Kling's dedicated
@@ -137,7 +138,7 @@ export async function GET(req: NextRequest) {
     } catch {
       // Transient error checking status (not a real vendor failure) - try
       // again on the next poll instead of failing the job.
-      return NextResponse.json({ status: "IN_PROGRESS" });
+      return publicJson({ status: "IN_PROGRESS" });
     }
     if (mergeStatus === "COMPLETED") {
       try {
@@ -145,29 +146,29 @@ export async function GET(req: NextRequest) {
         const videoUrl = result.video?.url;
         if (!videoUrl) throw new Error(isVoiceover ? "audio merge result had no video url" : "lip-sync result had no video url");
         await completeVideoPaygoJob(job.id, videoUrl);
-        return NextResponse.json({ status: "COMPLETED", videoUrl, silentVideoUrl: job.silent_video_url });
+        return publicJson({ status: "COMPLETED", videoUrl, silentVideoUrl: job.silent_video_url });
       } catch (err) {
         const message = err instanceof Error ? err.message : isVoiceover ? "Failed to fetch the combined result" : "Failed to fetch lip-synced result";
         // Atomic claim - only refund if THIS call actually transitioned the
         // job to failed, so two overlapping polls can't both refund it.
         if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
-        return NextResponse.json({ status: "FAILED", error: message });
+        return publicJson({ status: "FAILED", error: message });
       }
     }
     if (mergeStatus === "FAILED") {
       if (await failVideoPaygoJob(job.id, isVoiceover ? "Adding your audio to the video failed" : "Lip-syncing your audio to the video failed")) {
         await refundVideoCredit(user.id);
       }
-      return NextResponse.json({ status: "FAILED", error: "Generation failed - your credit has been refunded" });
+      return publicJson({ status: "FAILED", error: "Generation failed - your credit has been refunded" });
     }
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
 
   let falStatus;
   try {
     falStatus = await getFalJobStatus(job.fal_endpoint, job.fal_request_id);
   } catch {
-    return NextResponse.json({ status: "IN_PROGRESS" });
+    return publicJson({ status: "IN_PROGRESS" });
   }
 
   if (falStatus === "COMPLETED") {
@@ -186,22 +187,22 @@ export async function GET(req: NextRequest) {
         // Same double-submit race as the phase-0 fix above, for this
         // second fal job (lipsync/merge) - claim before submitting.
         if (!(await claimVideoPaygoJobForMergeSubmit(job.id))) {
-          return NextResponse.json({ status: "IN_PROGRESS" });
+          return publicJson({ status: "IN_PROGRESS" });
         }
         const mergeRequestId =
           job.lip_sync_mode === "voiceover"
             ? await submitMergeAudioVideo(videoUrl, job.input_audio_url)
             : await submitLipsyncJob(videoUrl, job.input_audio_url);
         await setVideoPaygoJobMergeRequestId(job.id, mergeRequestId);
-        return NextResponse.json({ status: "IN_PROGRESS" });
+        return publicJson({ status: "IN_PROGRESS" });
       }
 
       await completeVideoPaygoJob(job.id, videoUrl);
-      return NextResponse.json({ status: "COMPLETED", videoUrl, silentVideoUrl: null });
+      return publicJson({ status: "COMPLETED", videoUrl, silentVideoUrl: null });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch result";
       if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
-      return NextResponse.json({ status: "FAILED", error: message });
+      return publicJson({ status: "FAILED", error: message });
     }
   }
 
@@ -209,8 +210,8 @@ export async function GET(req: NextRequest) {
     if (await failVideoPaygoJob(job.id, "Generation failed at the vendor (often a content-policy block)")) {
       await refundVideoCredit(user.id);
     }
-    return NextResponse.json({ status: "FAILED", error: "Generation failed - your credit has been refunded" });
+    return publicJson({ status: "FAILED", error: "Generation failed - your credit has been refunded" });
   }
 
-  return NextResponse.json({ status: "IN_PROGRESS" });
+  return publicJson({ status: "IN_PROGRESS" });
 }

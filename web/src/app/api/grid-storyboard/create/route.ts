@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { addGridStoryboardSlot, createGridStoryboardProject, initSchema } from "@/lib/db";
+import { publicJson } from "@/lib/mediaProxy";
 
 // Deliberately no brief, no auto-generated storyboard - the grid starts
 // with one empty slot the user fills in themselves (upload or generate an
@@ -10,16 +11,16 @@ export async function POST(req: NextRequest) {
   try {
     await initSchema();
     const user = await getSessionUser();
-    if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+    if (!user) return publicJson({ error: "Sign in required" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : null;
 
     const projectId = await createGridStoryboardProject(user.id, title);
     const firstSlot = await addGridStoryboardSlot(projectId);
-    return NextResponse.json({ projectId, slots: [firstSlot] });
+    return publicJson({ projectId, slots: [firstSlot] });
   } catch (err) {
     console.error("grid-storyboard create failed", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Could not create the storyboard" }, { status: 500 });
+    return publicJson({ error: err instanceof Error ? err.message : "Could not create the storyboard" }, { status: 500 });
   }
 }

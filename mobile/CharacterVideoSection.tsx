@@ -26,11 +26,11 @@ const COLORS = {
 // 2026-09-11 per direct real-ear feedback (see characters.ts's comment for
 // the full reasoning, including the deliberate Marcus/Mark accent tradeoff).
 const CHARACTERS = [
-  { id: "harper", name: "Harper", imageUrl: "https://v3b.fal.media/files/b/0aa9eb60/yOpTgTwUZNYQcFCLsa822_harper.jpg", defaultVoiceId: "harper" },
-  { id: "beth", name: "Beth", imageUrl: "https://v3b.fal.media/files/b/0aa9eb60/Y2m8E19pk2G12R1ewoEYH_beth.jpg", defaultVoiceId: "voice_business" },
-  { id: "vicky", name: "Jess", imageUrl: "https://v3b.fal.media/files/b/0aa9eb60/GCrI6ghEIlnUFmhtS8X7v_vicky.jpg", defaultVoiceId: "jess" },
-  { id: "marcus", name: "Mark", imageUrl: "https://v3b.fal.media/files/b/0aa9fa6a/n5HtFS9LwobmqSacIVRGL_marcus_v3.jpg", defaultVoiceId: "voice_mark" },
-  { id: "jack", name: "Jack", imageUrl: "https://v3b.fal.media/files/b/0aa9eb61/6_ml_AMMqKfis0tvQBm8G_jack.jpg", defaultVoiceId: "voice_tech" },
+  { id: "harper", name: "Harper", imageUrl: `${WEB_BASE}/characters/harper.jpg`, defaultVoiceId: "harper" },
+  { id: "beth", name: "Beth", imageUrl: `${WEB_BASE}/characters/beth.jpg`, defaultVoiceId: "voice_business" },
+  { id: "vicky", name: "Jess", imageUrl: `${WEB_BASE}/characters/vicky.jpg`, defaultVoiceId: "jess" },
+  { id: "marcus", name: "Mark", imageUrl: `${WEB_BASE}/characters/marcus.jpg`, defaultVoiceId: "voice_mark" },
+  { id: "jack", name: "Jack", imageUrl: `${WEB_BASE}/characters/jack.jpg`, defaultVoiceId: "voice_tech" },
 ];
 
 // Same 12 ids/labels as web/src/components/VoicePicker.tsx's PRESET_VOICES
@@ -150,7 +150,8 @@ export function CharacterVideoSection() {
         const statusRes = await fetch(`${WEB_BASE}/api/generate-character-video/status?jobId=${encodeURIComponent(jobId)}`);
         const statusData = await statusRes.json();
         if (statusData.status === "COMPLETED") {
-          setVideoUrl(statusData.videoUrl);
+          // The API returns our own relative /api/media/... link - make it absolute for the native player.
+          setVideoUrl(statusData.videoUrl?.startsWith("/") ? `${WEB_BASE}${statusData.videoUrl}` : statusData.videoUrl);
           break;
         }
         if (statusData.status === "FAILED") throw new Error(statusData.error ?? "Generation failed");
