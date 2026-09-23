@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { MakeStillsOutboundLinks } from "@/components/MakeStillsOutboundLinks";
+import type { StillEngine } from "@/lib/stillsPaygo";
 
 type PracticeCell = {
   id: string;
@@ -113,7 +114,14 @@ function PracticeDropCell({
   );
 }
 
-export function AdsHowToStoryboard({ onHide }: { onHide: () => void }) {
+export function AdsHowToStoryboard({
+  onHide,
+  onSelectLucyEngine,
+}: {
+  onHide: () => void;
+  /** Lucy chips stay on /ads — focus inline StillGenerateBox below Start a storyboard. */
+  onSelectLucyEngine?: (engine: StillEngine) => void;
+}) {
   const [cells, setCells] = useState<PracticeCell[]>(initialPracticeCells);
 
   useEffect(() => {
@@ -233,8 +241,18 @@ export function AdsHowToStoryboard({ onHide }: { onHide: () => void }) {
         same as Start a storyboard below.
       </p>
 
-      <MakeStillsOutboundLinks showHelper={false} className="mb-4" />
+      <MakeStillsOutboundLinks
+        showHelper={false}
+        className="mb-4"
+        onSelectLucyEngine={onSelectLucyEngine}
+      />
 
+      {onSelectLucyEngine && (
+        <p className="mb-3 text-[11px] text-muted">
+          GPT Image / Nano Banana Pro on Lucy open the generate canvas under{" "}
+          <strong className="text-foreground">Start a storyboard</strong> — you stay on this page.
+        </p>
+      )}
       <p className="mb-4 text-xs text-muted">
         This is how directors plan — stills first, then animate each square. Start a storyboard below to do it for
         real.
