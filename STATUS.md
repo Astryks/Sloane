@@ -184,3 +184,5 @@
 ## Legal Guardrails & Business
 - **Voice Cloning:** Requires a signed-in account + any paid tier (`starter`/`plus`/`video` - this project has no `pro`/`enterprise` tiers), a declared voice owner, and a typed, exact-match consent statement.
 - **Unit Economics:** Cost per video minute modeled at ~$0.097 maintaining >65% margins.
+
+- 2026-09-23: Trimmed AI models review — removed per-model notes, Harper script, lip-sync/caveat paragraphs, and storyboard CTA (one-photo claim was too absolute).
