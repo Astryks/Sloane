@@ -3,7 +3,9 @@
 // only the selected trim window is remuxed/re-encoded into a small temp file.
 
 import type { FFmpeg } from "@ffmpeg/ffmpeg";
-import { FFFSType } from "@ffmpeg/ffmpeg";
+
+/** WORKERFS string — avoid importing FFFSType (Turbopack SSR resolves @ffmpeg/ffmpeg to empty.mjs). */
+const WORKERFS = "WORKERFS";
 
 export const LARGE_SOURCE_BYTES = 500 * 1024 * 1024;
 export const LARGE_PROJECT_WARNING_BYTES = 1024 * 1024 * 1024;
@@ -38,7 +40,7 @@ async function mountSource(
   safeName: string,
 ): Promise<string> {
   await ffmpeg.createDir(mountPoint);
-  await ffmpeg.mount(FFFSType.WORKERFS, { blobs: [{ name: safeName, data: file }] }, mountPoint);
+  await ffmpeg.mount(WORKERFS as Parameters<FFmpeg["mount"]>[0], { blobs: [{ name: safeName, data: file }] }, mountPoint);
   return `${mountPoint}/${safeName}`;
 }
 
