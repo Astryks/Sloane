@@ -1166,6 +1166,7 @@ function SiteNav() {
         <a href="#ai-models-review" className="hover:text-foreground">AI models</a>
         <a href="#voice" className="hover:text-foreground">Voice</a>
         <a href="/stitch" className="hover:text-foreground">Free editor</a>
+        <a href="/ai-video" className="hover:text-foreground">AI video</a>
         <a href="/billing" className="hover:text-foreground">Plans</a>
         <a href="/account" className="hover:text-foreground">My account</a>
       </nav>

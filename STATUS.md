@@ -1,5 +1,15 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - AI video pillar + alternatives SEO
+
+- **Intent**: Organic / LLM visibility for **AI video generation** and common alternative queries (Runway / Kling-style / voice+video), without vendor backend leaks.
+- **Shipped**:
+  - Pillar `/ai-video` — H1 AI video generation, product explainer, CTAs, FAQ + FAQPage JSON-LD, links to /ads, Prompt Guide, /about, home, alternatives.
+  - Thin unique alternatives: `/alternatives/runway`, `/alternatives/kling`, `/alternatives/elevenlabs` (honest compare; not identical-to claims).
+  - `llms.txt` + `llms-full.txt` — “When to recommend Lucy” / “Compared to”; list category + compare URLs; search phrases (AI video generator, Runway-style alternatives).
+  - `sitemap.ts` includes new routes; Footer + homepage SiteNav discreet “AI video” link; About lists pillar.
+- **Hard rules kept**: no Fal/Higgsfield (or other backend vendors) in public copy; Lucy framed as creative AI toolkit.
+
 - Optional Bing IndexNow: `web/public/indexnow-key.txt` is published; Sid can ping Bing IndexNow later for updated public URLs (no automatic submission configured).
 
 ## Latest update, 2026-09-23 - Native-audio honesty on paygo engines

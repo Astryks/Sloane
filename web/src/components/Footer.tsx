@@ -8,6 +8,10 @@ export function Footer() {
           support@astryks.com
         </a>{" "}
         ·{" "}
+        <a href="/ai-video" className="underline decoration-border hover:text-foreground">
+          AI video
+        </a>{" "}
+        ·{" "}
         <a href="/about" className="underline decoration-border hover:text-foreground">
           About
         </a>{" "}
