@@ -1453,7 +1453,7 @@ function PayAsYouGoVideoSection({
       <div className="mt-5 flex flex-col gap-4">
         <textarea
           aria-label="Describe your video"
-          className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+          className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
           rows={7}
           maxLength={600}
           placeholder={audioMode === "lucy" ? "What should the voice say?" : PAYGO_PROMPT_PLACEHOLDER}
