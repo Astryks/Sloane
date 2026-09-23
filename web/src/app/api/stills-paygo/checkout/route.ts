@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { getOrCreatePaygoSessionUser } from "@/lib/auth";
 import { initSchema } from "@/lib/db";
-import { packFromId } from "@/lib/stillsPaygo";
+import { packFromId, stillPackStripeProductName } from "@/lib/stillsPaygo";
 import { publicJson } from "@/lib/mediaProxy";
 
 // One-time payment for a still-credit pack. Uses Checkout `price_data`
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
             currency: "usd",
             unit_amount: pack.priceUsdCents,
             product_data: {
-              name: pack.label,
+              name: stillPackStripeProductName(pack),
               description: `${pack.creditsCents}¢ still credit for Lucy image generation`,
             },
           },
