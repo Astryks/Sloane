@@ -1030,14 +1030,9 @@ function MultiAudioField({ audio }: { audio: ReturnType<typeof useMultiAudio> })
 
 // --- AI models review showcase: Harper + tumbler product ad across engines ---
 
-const PRODUCT_AD_SCRIPT =
-  "“I'm on a yoga mat. Now I'm in a corner office, forty floors up. Anything is possible when your tumbler " +
-  "works as hard as you do. Check out Lucy Labs.”";
-
 type ProductAdModel = {
   id: string;
   name: string;
-  note: string;
   videoUrl: string | null;
   blockedReason?: string;
 };
@@ -1046,31 +1041,26 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
   {
     id: "kling",
     name: "Kling",
-    note: "One of the two strongest results in this Lucy comparison (alongside Veo). Real lip-sync end to end (Kling's Avatar feature drives both scenes directly from the audio) - crisp logo and a genuine outfit + location change.",
     videoUrl: "/product-showcase/harper_final_kling.mp4",
   },
   {
     id: "grok",
     name: "Grok",
-    note: "Rendered each scene silently, then we added a real lip-sync pass afterward via Kling's dedicated lip-sync endpoint - logo, outfit, and location all came through well, but the actual mouth-sync quality is noticeably weaker than Kling's own Avatar path (see caveat below).",
     videoUrl: "/product-showcase/harper_final_grok.mp4",
   },
   {
     id: "minimax",
     name: "MiniMax",
-    note: "Same two-step process as Grok (silent render, then a real lip-sync pass) - crisp logo in both scenes, but same lip-sync-quality caveat as Grok below.",
     videoUrl: "/product-showcase/harper_final_minimax.mp4",
   },
   {
     id: "veo",
     name: "Veo",
-    note: "One of the two strongest results in this Lucy comparison (alongside Kling). Can't generate Harper specifically (see below), but here's an earlier real test showing it will incorporate our actual product when the person isn't a named identity - a generic, unnamed woman picking up the tumbler. Real caveat: watch the label closely - it double-exposes/ghosts for a moment instead of staying crisp, so logo fidelity isn't perfect here either.",
     videoUrl: "/product-showcase/veo_generic_cup.mp4",
   },
   {
     id: "seedance",
     name: "Seedance",
-    note: "Actually by far the best model for hyper realistic video right now — when you connect to Seedance directly. We offer Seedance on Lucy Labs, but we cannot get hyper realistic results through us.",
     videoUrl: null,
     blockedReason:
       "Seedance is by far the best model for hyper realistic videos when you connect to them directly. We offer Seedance on Lucy Labs, but we cannot get them to generate hyper realistic videos with us.",
@@ -1143,44 +1133,6 @@ function ProductAdSection() {
         ))}
       </div>
 
-      <p className="text-xs text-muted">{model.note}</p>
-
-      <div className="rounded-2xl bg-white/70 p-3">
-        <p className="text-xs font-semibold text-muted">The full script Harper says out loud:</p>
-        <p className="mt-1 text-xs italic text-muted">{PRODUCT_AD_SCRIPT}</p>
-      </div>
-
-      <p className="text-xs text-muted">
-        Of the results you can play above on Lucy, <strong>Kling</strong> and <strong>Veo</strong> came out
-        strongest. <strong>Seedance</strong> is actually by far the best model for hyper-realistic video when you
-        connect to them directly - we offer Seedance on Lucy, but we cannot get hyper-realistic results through us.
-        Separate Veo caveat: it flags prompts that read like a specific real person endorsing a named brand, so it
-        can&apos;t generate Harper by name - but as the clip above shows, it will render a generic, unnamed person
-        holding the real product once the named-identity part is dropped.
-      </p>
-
-      <p className="text-xs text-muted">
-        Lip-sync note: <strong>Kling&apos;s lip-sync is the best of the three dubbed clips</strong> - mouth and audio
-        together in one pass. Grok and MiniMax use a two-step process (silent video, then a separate lip-sync pass)
-        that works, but the mouth-to-word match is less convincing.
-      </p>
-
-      <p className="text-xs text-muted">
-        Honest caveat: a snapshot from 2026-09-12, not a permanent ranking - these models change constantly.
-      </p>
-
-      <div className="rounded-2xl border border-purple/20 bg-white/80 p-4 text-center">
-        <p className="text-sm font-bold text-foreground">Want to build an ad like this yourself?</p>
-        <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted">
-          Every engine above only accepts one photo per generation, so a multi-scene ad means building it one scene
-          at a time. That&apos;s exactly what our storyboard builder is for: bring in your own character/product
-          references (reused across every scene so they stay consistent), generate each scene&apos;s image and
-          video, then combine them into one ad.
-        </p>
-        <a href="/ads" className="mt-3 inline-block rounded-full bg-purple px-6 py-3 text-sm font-bold text-white shadow-soft">
-          Open the storyboard builder
-        </a>
-      </div>
     </Card>
   );
 }
