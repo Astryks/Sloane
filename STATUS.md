@@ -1,5 +1,10 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - /ads Lucy stills stay on page (inline generate canvas)
+
+- **Problem**: Make stills **GPT Image on Lucy** / **Nano Banana Pro on Lucy** chips linked to `/#prompt-guide` and left `/ads`.
+- **Fix**: Extracted `StillGenerateBox` → `web/src/components/StillGenerateBox.tsx` (Prompt Guide + Ads). `/ads` empty state shows large inline generate canvas (preview + textarea + Generate on Lucy / stills-paygo + collapsed Prompt guide tips). Lucy chips are buttons with `onSelectLucyEngine` (set engine + scroll/focus canvas) — never navigate home. Outside tools stay new-tab links; soft “Prompt guide (stills)” / full guide link remain secondary only. Stripe checkout accepts safe `returnPath` `/` or `/ads` so pack buy from Ads returns to `/ads?stills=1`. No fal/Higgsfield; pricing/auth unchanged.
+
 ## Latest update, 2026-09-23 - Lucy still options on /ads
 
 - Added primary **GPT Image on Lucy** and **Nano Banana Pro on Lucy** chips to the shared stills strip; outside generator links and Prompt guide remain available.

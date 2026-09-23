@@ -2,11 +2,13 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AdsHowToStoryboard } from "@/components/AdsHowToStoryboard";
 import { MakeStillsOutboundLinks } from "@/components/MakeStillsOutboundLinks";
+import { StillGenerateBox } from "@/components/StillGenerateBox";
+import type { StillEngine } from "@/lib/stillsPaygo";
 import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudioModels";
 import { expandCinematicPrompt, GENRE_STYLE_LIBRARY, ATMOSPHERE_LIBRARY, CAMERA_MOVEMENT_LIBRARY, type GenreKey } from "@/lib/directorMode";
 
@@ -884,6 +886,18 @@ export default function AdsGridPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showExample, setShowExample] = useState(true);
+  const [lucyEngine, setLucyEngine] = useState<StillEngine>("gpt");
+  const stillGenerateRef = useRef<HTMLDivElement | null>(null);
+
+  function selectLucyEngine(engine: StillEngine) {
+    setLucyEngine(engine);
+    // Reveal / focus the on-page generate canvas (never navigate to /#prompt-guide).
+    requestAnimationFrame(() => {
+      stillGenerateRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const ta = stillGenerateRef.current?.querySelector("textarea");
+      if (ta instanceof HTMLTextAreaElement) ta.focus({ preventScroll: true });
+    });
+  }
 
   async function start() {
     setBusy(true);
@@ -925,7 +939,12 @@ export default function AdsGridPage() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Ads" subtitle="Build a storyboard one scene at a time, then combine them into one video." />
       <main className="mx-auto max-w-5xl space-y-6 px-4 py-10">
-        {showExample && <AdsHowToStoryboard onHide={() => setShowExample(false)} />}
+        {showExample && (
+          <AdsHowToStoryboard
+            onHide={() => setShowExample(false)}
+            onSelectLucyEngine={!projectId ? selectLucyEngine : undefined}
+          />
+        )}
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
 
@@ -934,7 +953,21 @@ export default function AdsGridPage() {
             <button onClick={start} disabled={busy} className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50">
               {busy ? "Starting…" : "Start a storyboard"}
             </button>
-            <MakeStillsOutboundLinks />
+            <MakeStillsOutboundLinks onSelectLucyEngine={selectLucyEngine} />
+            <div id="ads-lucy-still-generate" ref={stillGenerateRef} className="scroll-mt-24">
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-purple">
+                Generate stills on Lucy
+              </p>
+              <StillGenerateBox
+                placeholder="Describe your still — or paste a cream template with red [blanks] filled in…"
+                draftSlot="ads"
+                engine={lucyEngine}
+                onEngineChange={setLucyEngine}
+                hideOthers
+                checkoutReturnPath="/ads"
+                className="mt-0"
+              />
+            </div>
           </div>
         ) : (
           <>
