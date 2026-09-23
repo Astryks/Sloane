@@ -553,6 +553,30 @@ export async function initSchema() {
   // createGuestUser. getSessionUser deliberately never returns a guest;
   // only the paygo routes use getPaygoSessionUser, which does.
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT false`;
+  // Vendor treasury ledger (2026-09-23): when Stripe grants still/video
+  // credits, record revenue vs estimated Fal COGS so Lucy can later buy
+  // matching Fal prepaid credits and keep the margin. Idempotent on
+  // stripe_event_id. status starts pending_fal_purchase; webhook sets
+  // blocked_no_api because Fal has no public purchase-credits API (see
+  // vendorTreasury.ts attemptPurchaseFalCredits). Manual Fal invoice /
+  // auto-recharge → settled. Never expose Fal names in client UI.
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_treasury (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      stripe_event_id TEXT UNIQUE NOT NULL,
+      product TEXT NOT NULL,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      revenue_cents INTEGER NOT NULL,
+      fal_cogs_cents INTEGER NOT NULL,
+      margin_cents INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending_fal_purchase',
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS vendor_treasury_status_idx ON vendor_treasury (status)`;
+  await sql`CREATE INDEX IF NOT EXISTS vendor_treasury_user_id_idx ON vendor_treasury (user_id)`;
 }
 
 // Every claim*ForFalSubmit/claim*ForMergeSubmit function below uses this
@@ -1290,6 +1314,79 @@ export async function spendStillCredits(userId: string, cents: number): Promise<
 
 export async function refundStillCredits(userId: string, cents: number) {
   await addStillCredits(userId, cents);
+}
+
+// --- Vendor treasury (Stripe revenue → Fal COGS ledger) ---
+
+export type VendorTreasuryRow = {
+  id: string;
+  stripe_event_id: string;
+  product: string;
+  user_id: string;
+  revenue_cents: number;
+  fal_cogs_cents: number;
+  margin_cents: number;
+  status: string;
+  notes: string | null;
+};
+
+export type VendorTreasuryStatusValue =
+  | "pending_fal_purchase"
+  | "blocked_no_api"
+  | "settled";
+
+/**
+ * Insert a treasury row keyed on stripe_event_id. Returns true when THIS
+ * call inserted the row (first delivery); false on conflict (idempotent
+ * with the webhook's processed_stripe_events / grant ledgers).
+ */
+export async function recordVendorTreasuryEntry(params: {
+  stripeEventId: string;
+  product: "still_credits" | "video_credits";
+  userId: string;
+  revenueCents: number;
+  falCogsCents: number;
+  marginCents: number;
+  status?: VendorTreasuryStatusValue;
+  notes?: string | null;
+}): Promise<boolean> {
+  const status = params.status ?? "pending_fal_purchase";
+  const notes = params.notes ?? null;
+  const rows = await sql`
+    INSERT INTO vendor_treasury (
+      stripe_event_id, product, user_id,
+      revenue_cents, fal_cogs_cents, margin_cents,
+      status, notes
+    )
+    VALUES (
+      ${params.stripeEventId}, ${params.product}, ${params.userId},
+      ${params.revenueCents}, ${params.falCogsCents}, ${params.marginCents},
+      ${status}, ${notes}
+    )
+    ON CONFLICT (stripe_event_id) DO NOTHING
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function markVendorTreasuryStatus(
+  stripeEventId: string,
+  status: VendorTreasuryStatusValue,
+  notes?: string | null,
+): Promise<void> {
+  if (notes == null) {
+    await sql`
+      UPDATE vendor_treasury
+      SET status = ${status}, updated_at = now()
+      WHERE stripe_event_id = ${stripeEventId}
+    `;
+    return;
+  }
+  await sql`
+    UPDATE vendor_treasury
+    SET status = ${status}, notes = ${notes}, updated_at = now()
+    WHERE stripe_event_id = ${stripeEventId}
+  `;
 }
 
 export type VideoPaygoJob = {
