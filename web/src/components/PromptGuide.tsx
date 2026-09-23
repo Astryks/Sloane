@@ -448,30 +448,287 @@ function StillGenerateBox({
 const STYLE_PATHS: {
   title: string;
   blurb: string;
+  imageNote: string;
+  tweakNotes: string;
   videoSrc?: string;
   prompt: string;
 }[] = [
   {
-    title: "1 · UGC product",
-    blurb: "Handheld selfie energy, product in hand, one genuine reaction.",
-    videoSrc: "/trailers/kirsty-kling-dub.mp4",
-    prompt:
-      "@Image1 (your character) in a bright bathroom, morning window light. Medium selfie-style handheld sway. She twists open @Image2 (product), applies it, presses lips together, genuine small smile. {\"Okay, this shade is unreal.\"} Warm natural light, iPhone UGC look. No subtitles beyond the product label.",
-  },
-  {
-    title: "2 · Cinematic short",
-    blurb: "One subject, one camera move, emotion through physical action.",
+    title: "A · Cinematic short",
+    blurb:
+      "Dramatic coverage, one camera move per beat, emotion through physical action — Seedance timestamps.",
+    imageNote:
+      "Add 2 images (typical): @Image1 character sheet or start keyframe, @Image2 empty location. Optional @Image3 product / @Image4 end keyframe.",
+    tweakNotes:
+      "Why these moves: tracking establishes geography; push-in buys intimacy on the reaction; static CU locks the payoff. Swap tracking for a slow pull-back if you want scale reveal instead.",
     videoSrc: "/trailers/kirsty-moon-veo-audio.mp4",
-    prompt:
-      "Cinematic wide shot: @Image1 walks slowly beside a lunar rover on the moon surface, dust kicking under her boots, Earth hanging in the black sky. Slow gentle tracking beside her. Dramatic side light, photoreal, 4K. No subtitles, no logos.",
+    prompt: `REFERENCE MAP
+@Image1 is the character (face, body, wardrobe — identity only, not lighting/background).
+@Image2 is the location (environment + lighting).
+
+INVENTORY / CONTINUITY LOCKS
+Same person as @Image1. Same place as @Image2. Relight subject to match @Image2 light direction and colour temperature. Soft breathing + tiny weight shifts. Hair, wardrobe, weather locked. No beauty filter.
+
+TIMED BEATS (~8s)
+0s-3s: Cinematic wide, slow gentle tracking beside her (choose tracking to keep her moving through space without a cut). @Image1 walks slowly through @Image2, dust or light haze drifting, feet planted with correct scale and contact shadow. Dramatic side light, photoreal 4K. Soft ambient bed.
+3s-6s: Medium shot, slow push-in (choose push-in when the emotion tightens). She stops; shoulders drop on a long exhale; jaw softens; gaze holds past the lens — no smile yet. One blink. Continuity: same light side as beat 1.
+6s-8s: Close-up, static hold (choose static to land the beat clean). Side light rakes pores and fine lines; hair edge drifts once; hold the final frame clean.
+
+CONSTRAINTS
+Do not add subtitles. No logos/watermarks. Photoreal pores. Matching shadows/scale to @Image2. One camera move per beat. Prefer Seedance.`,
   },
   {
-    title: "3 · Bullet time",
-    blurb: "Orbit the subject while the world holds still — prompt-only is fine.",
-    prompt:
-      "Medium shot of @Image1 frozen mid-stride in @Image2. Camera orbits 180° around her at chest height while she and the environment stay nearly still — only hair and coat edges drift. Crisp daylight, shallow depth, photoreal. No subtitles, no logos.",
+    title: "B · UGC product selling",
+    blurb:
+      "Bathroom or desk selfie energy, product in hand, genuine reaction dialogue — timed for Seedance.",
+    imageNote:
+      "Add 3 images: @Image1 character sheet (chest-up or split sheet), @Image2 empty bathroom/desk, @Image3 product packshot.",
+    tweakNotes:
+      "Why these moves: handheld sway = phone authenticity; close-up sway for the apply/demo; static hold so the label reads. Keep spoken lines under ~15 words per beat. Leave one silent reaction beat.",
+    videoSrc: "/trailers/kirsty-kling-dub.mp4",
+    prompt: `REFERENCE MAP
+@Image1 is the character (face, body, wardrobe — identity only, not lighting/background).
+@Image2 is the location (bright bathroom or desk — environment + lighting).
+@Image3 is the product (label, shape, colour — packaging lock).
+
+INVENTORY / CONTINUITY LOCKS
+Same person as @Image1. Same room as @Image2. Same product as @Image3. Relight subject to morning/afternoon window light from @Image2. Soft breathing throughout. Product shade/label never changes. No beauty filter.
+
+TIMED BEATS (~8s)
+0s-2s: Medium selfie-style handheld sway, eye-level (choose handheld for UGC authenticity). @Image1 holds @Image3 toward camera in @Image2, twists the cap or turns the pack so the label reads. Soft room tone, no music.
+2s-5s: Close-up, slight handheld sway. She uses @Image3 in one clear demo action, presses lips or nods once, corner of mouth tugs into a real small smile. {"Okay, this actually works."}
+5s-8s: Medium close-up, static hold (choose static so packaging stays sharp). She turns toward window light, holds @Image3 beside her face; pores and peach fuzz visible; silent beat — small satisfied exhale.
+
+CONSTRAINTS
+Do not add subtitles. No logos/watermarks beyond the product label. Photoreal pores, iPhone UGC look. One camera move per beat. Relight to @Image2.`,
+  },
+  {
+    title: "C · History-influencer explainer",
+    blurb:
+      "Modern-outfit Gen Z host dropped into a period-accurate location (never period costume) — walk-and-talk enter → watch → walk-away closing thoughts. History-influencer / explainer shorts energy; original Lucy prompts.",
+    imageNote:
+      "Add 2–3 images: @Image1 forever-modern character sheet (jeans/crop/hoodie — never period dress), @Image2 empty period location plate (exact year, materials, weather, ban anachronisms). Optional @Image3 start keyframe of her already in frame.",
+    tweakNotes:
+      "Keep wardrobe modern in every beat. Location plate carries the era. Ban phones in locals' hands, modern signage, cars, plastic, LED, sneakers on extras. Prefer Seedance for multi-image identity lock.",
+    prompt: `REFERENCE MAP
+@Image1 is the character (face, body, wardrobe — identity only). Wardrobe stays modern Gen Z streetwear forever — never period costume.
+@Image2 is the location (period environment + lighting only — exact year locked). Empty of modern people/props in the still.
+
+INVENTORY / CONTINUITY LOCKS
+Host identity = @Image1 only. Era = @Image2 only (e.g. London street, 1666 — timber frames, cobbles, smoke haze, late-afternoon amber light). Locals in background wear period dress only; host never changes into period clothes. Relight host to @Image2. Soft breathing, natural blinks, tiny weight shifts while walking. Ban anachronisms: no cars, phones, plastic, LED signs, modern logos, sneakers on extras.
+
+TIMED BEATS (~8s)
+0s-3s: Medium handheld selfie / walk-and-talk, slight sway (choose handheld so it feels like a phone vlog). @Image1 enters @Image2 from frame left, walking toward camera then turning to show the street; modern outfit contrasted against timber and smoke. {"Okay — so this is London, 1666, right before everything burns."} Distant period crowd murmur, wood-cart wheels, no music.
+3s-6s: Medium, slow tracking beside her (choose tracking to keep walking without a cut). She watches a smoke plume rise over rooftops; one slow blink; shoulders tense on a sharp inhale; points once with her free hand. Soft wind, distant shout in period language (do not subtitle).
+6s-8s: Medium, handheld as she walks away then glances back over her shoulder (choose walk-away for a closing thought). {"And nobody here knows what's coming."} Hold final frame clean — pores readable, no beauty filter.
+
+CONSTRAINTS
+Do not add subtitles. No logos/watermarks. Photoreal. Host wardrobe locked modern. Period accuracy locked to @Image2. One camera move per beat. Prefer Seedance.`,
   },
 ];
+
+/** Modular craft chips — scannable mix-ins, not a wall of text. */
+const CRAFT_TWEAKS: {
+  id: string;
+  title: string;
+  summary: string;
+  chips: string[];
+  body: string;
+}[] = [
+  {
+    id: "skin",
+    title: "Skin / pores",
+    summary: "Hyper-real vocabulary for stills + video constraints",
+    chips: [
+      "visible pores",
+      "fine lines",
+      "uneven tone",
+      "peach fuzz",
+      "light stubble",
+      "faint freckling",
+      "no beauty filter",
+      "no plastic skin",
+    ],
+    body: `Paste into stills or CONSTRAINTS:
+Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz or light stubble, faint freckling. No beauty filter, no plastic skin, no glossy retouching.`,
+  },
+  {
+    id: "expressions",
+    title: "Expressions (physical)",
+    summary: "Body beats — never mood labels like “happy” or “sad”",
+    chips: [
+      "slow blink",
+      "long exhale",
+      "shoulder drop",
+      "jaw unclenches",
+      "eyebrow lift",
+      "lips press then soft smile",
+      "weight to back foot",
+      "sharp inhale",
+    ],
+    body: `Write the body, not the mood word:
+• Shoulders drop; a long exhale; jaw unclenches.
+• One eyebrow lifts; corner of the mouth tugs, then settles.
+• Eyes glass slightly; blink is slow; gaze holds past the lens.
+• Lips press together, then break into a small real smile.
+• Weight shifts to the back foot; fingers fidget once on the product.
+• Chin tips up; nostrils flare; a sharp inhale before speaking.`,
+  },
+  {
+    id: "location",
+    title: "Location details",
+    summary: "Materials, weather, time of day, haze, period-safe crowds",
+    chips: [
+      "exact year",
+      "materials you can touch",
+      "time of day",
+      "weather / haze",
+      "empty still first",
+      "period-safe extras",
+      "ban anachronisms",
+    ],
+    body: `Empty place still first — no character.
+Name: place + exact year (if history) + 2–3 materials + light/weather.
+Crowds: only if period-safe; ban cars, phones, plastic, LED, modern logos.
+Match aspect to the character sheet (9:16 or 16:9).`,
+  },
+  {
+    id: "camera",
+    title: "Camera angles + moves",
+    summary: "What each does + when to choose it (director thinking)",
+    chips: [
+      "static hold",
+      "slow push-in",
+      "pull-back",
+      "pan",
+      "tilt",
+      "tracking",
+      "handheld sway",
+      "orbit / bullet time",
+      "whip pan",
+      "low / high angle",
+      "extreme CU → wide",
+    ],
+    body: `One move per beat. Describe the move, not gear names.
+• Static hold — land a payoff, read a label, freeze emotion. Choose when motion would distract.
+• Slow push-in / dolly in — intimacy, rising tension, product reveal. Choose when emotion tightens.
+• Pull-back — reveal scale or context. Choose after a tight beat.
+• Pan / tilt — redirect attention inside one space. Choose for a motivated look, not decoration.
+• Tracking — travel with a walker. Choose for walk-and-talk without cutting.
+• Handheld sway — phone / UGC authenticity. Choose for selfie energy (not shake-cam).
+• Orbit / bullet time — world holds, camera circles. Choose for spectacle or product hero.
+• Whip pan — fast blur between two clear end-frames. Use sparingly.
+• Low angle — power; high angle — vulnerability or overview.
+• Extreme CU → wide — start on pores/eyes, then reveal geography (stitch as two clips if needed).
+Snippet: Camera: medium shot, slow push-in, eye-level. One move only. Hold the final frame clean.`,
+  },
+  {
+    id: "micromotion",
+    title: "Blinking / breathing / weight",
+    summary: "Anti-mannequin micro-motion so the hold feels alive",
+    chips: [
+      "soft breathing",
+      "natural blink",
+      "tiny weight shift",
+      "hair drift",
+      "coat edge flutter",
+      "not a freeze",
+    ],
+    body: `On every living hold or quiet beat:
+Soft natural breathing, a natural blink every few seconds, tiny weight shift foot-to-foot. Hair or coat edge may drift. Not a mannequin freeze.`,
+  },
+  {
+    id: "bgmotion",
+    title: "Background motion",
+    summary: "Wind, crowd blur, dust, traffic — vs locked subject",
+    chips: [
+      "wind in hair",
+      "dust / haze drift",
+      "crowd murmur blur",
+      "traffic bokeh",
+      "subject locked",
+      "bg moves more",
+    ],
+    body: `Say what moves vs what stays:
+Background: light haze / dust drifting; distant crowd soft blur; wind in banners.
+Subject: mostly locked identity — only micro-breathing and blinks.
+Useful for bullet-time, history streets, and cinematic wides.`,
+  },
+  {
+    id: "light",
+    title: "Lighting / continuity / exclusions",
+    summary: "Colour temp, relight, continuity locks, no subtitles",
+    chips: [
+      "relight to scene",
+      "match shadow side",
+      "colour temperature",
+      "continuity locks",
+      "Do not add subtitles",
+      "no logos",
+    ],
+    body: `Relight the person to match the location — drop the character sheet's flat studio light.
+Match contact-shadow direction and colour temperature to the room.
+Continuity: hair, wardrobe, product label, weather locked across beats.
+Always: Do not add subtitles. No logos/watermarks unless you want them.`,
+  },
+  {
+    id: "images",
+    title: "@Image count + naming",
+    summary: "How many refs + how to bind each one in the prompt",
+    chips: [
+      "Seedance 2.0 ~9",
+      "Seedance 2.5 ~30",
+      "best 1–8 subjects",
+      "practical 2–4",
+      "@Image1 character",
+      "@Image2 location",
+    ],
+    body: `Add N images, then bind them in the prompt:
+• Seedance 2.0: up to ~9 refs. Seedance 2.5: up to ~30 images (soft best results with 1–8 image subjects).
+• Practical Lucy hyper-real recipe: typically 2–4 images — e.g. @Image1 character sheet (or chest-up), @Image2 location, optional @Image3 product / @Image4 start keyframe.
+• Write: "@Image1 is the character (face, body, wardrobe — identity only, not lighting/background)."
+• "@Image2 is the location (environment + lighting)."
+• "@Image3 is the product" if needed.
+• Use the same labels in every timed beat. Never re-describe the face in text once the sheet exists — attach the image.`,
+  },
+  {
+    id: "beats",
+    title: "Per-second Seedance beats",
+    summary: "Use 0s-3s / 3s-7s — not 0:00-0:03",
+    chips: [
+      "0s-3s",
+      "3s-7s",
+      "one move + action",
+      "light continuity",
+      "physical expression",
+      "optional dialogue/SFX",
+    ],
+    body: `Seedance timestamp syntax: 0s-3s / 3s-7s (NOT 0:00-0:03).
+Each beat: ONE camera move + subject action + light/weather continuity + physical expression (not mood words) + optional dialogue/SFX.
+Pack enough plot that the model doesn't improvise freely; don't overload or you'll get frantic cuts.
+Friendly lengths: ~8s clips for Seedance 2.0 / 2.5.`,
+  },
+];
+
+const HYPER_REAL_SEEDANCE_TEMPLATE = `REFERENCE MAP
+@Image1 is the character (face, body, wardrobe — identity only, not lighting/background).
+@Image2 is the location (environment + lighting).
+@Image3 is the product (optional — label/shape lock).
+@Image4 is the start keyframe (optional — opening composition).
+
+How many images: typically 2–4 for hyper-real Lucy clips. Seedance 2.0 accepts up to ~9 refs; Seedance 2.5 up to ~30 images (soft best with 1–8 image subjects). Never re-describe the face once the sheet exists — attach @Image1.
+
+INVENTORY / CONTINUITY LOCKS
+Same person as @Image1. Same place as @Image2. Relight subject to @Image2 (drop white-studio light). Feet grounded, contact shadow matching room light, correct scale. Soft breathing, natural blinks, tiny weight shifts. Hair / wardrobe / weather locked. Photoreal pores — no beauty filter.
+
+TIMED BEATS (~8s — Seedance 2.0/2.5 friendly)
+0s-3s: [framing + ONE camera move]. @Image1 [action] in @Image2. Light/weather continuity. Physical expression (not a mood word). Soft ambience.
+3s-6s: [framing + ONE different move]. Subject action advances the plot. Same light side. Optional {"short dialogue"} or <sfx>.
+6s-8s: [framing + static hold or tiny push-in]. Payoff action. Hold final frame clean.
+
+CONSTRAINTS
+Do not add subtitles. No logos/watermarks. Photoreal pores. Relight to scene. One move per beat. Matching shadows/scale. Prefer Seedance for this hyper-real path (Veo/Kling ok as alternatives).`;
+
 
 const PROMPT_STYLE_EXAMPLES: { category: string; title: string; prompt: string }[] = [
   {
@@ -480,10 +737,10 @@ const PROMPT_STYLE_EXAMPLES: { category: string; title: string; prompt: string }
     prompt:
       "[CHARACTER]\nA synthetic pursuer built for one purpose: relentless, unblinking pursuit. Broad-shouldered chrome endoskeleton visible through tears in scorched synthetic skin along one forearm, glowing red optical sensors, torn leather jacket, combat boots. Moves with mechanical, unnervingly steady precision - no hesitation, no fatigue.\n\n" +
       "[SCENE]\nA derelict multi-story parking garage at night. Flickering fluorescent tubes, concrete pillars streaked with rust, oil pooling under abandoned cars, a single exit ramp spiraling down into darkness.\n\n" +
-      "[SHOT SEQUENCE]\nSHOT 1 (0:00-0:02): Low-angle tracking shot, camera mounted street-level beside the motorcycle. The pursuer guns the engine, front wheel lifting slightly, sparks skittering off a support pillar as the handlebar clips it.\n" +
-      "SHOT 2 (0:02-0:05): Handheld chase cam, whip-panning between the bike and a support column - a fuel-drum rupture kicks an orange fireball skyward, trailing black smoke, debris scattering across the oil-stained floor.\n" +
-      "SHOT 3 (0:05-0:07): Close-up, static camera. The pursuer's face lit red by the fireball's glow - no fear, no flinch, optical sensors narrowing with mechanical focus.\n" +
-      "SHOT 4 (0:07-0:08): Wide shot, camera holds as the bike bursts through the exit-ramp shutter in a shower of sparks and torn metal, disappearing into the night.\n\n" +
+      "[SHOT SEQUENCE]\nSHOT 1 (0s-2s): Low-angle tracking shot, camera mounted street-level beside the motorcycle. The pursuer guns the engine, front wheel lifting slightly, sparks skittering off a support pillar as the handlebar clips it.\n" +
+      "SHOT 2 (2s-5s): Handheld chase cam, whip-panning between the bike and a support column - a fuel-drum rupture kicks an orange fireball skyward, trailing black smoke, debris scattering across the oil-stained floor.\n" +
+      "SHOT 3 (5s-7s): Close-up, static camera. The pursuer's face lit red by the fireball's glow - no fear, no flinch, optical sensors narrowing with mechanical focus.\n" +
+      "SHOT 4 (7s-8s): Wide shot, camera holds as the bike bursts through the exit-ramp shutter in a shower of sparks and torn metal, disappearing into the night.\n\n" +
       "[CONSTRAINTS]\nNo subtitles/logos/watermarks. Cinematic, high-contrast, 4K, desaturated blue-grey palette except the fire's orange glow.",
   },
   {
@@ -493,9 +750,9 @@ const PROMPT_STYLE_EXAMPLES: { category: string; title: string; prompt: string }
       "[REFERENCE]\n@Image1 - your character reference (from Cast & Locations). Use for face, hair, skin tone, and build only - not background or lighting. @Image2 - the lipstick.\n\n" +
       "[CHARACTER]\nMid-20s, warm brown skin, natural curls pulled into a loose bun, silky blush-pink slip dress, relaxed and confident.\n\n" +
       "[SCENE]\nA bright, clean bathroom. Morning light through a frosted window, softly catching the fabric of her dress and the edge of the mirror.\n\n" +
-      "[SHOT SEQUENCE]\nSHOT 1 (0:00-0:02): Medium shot, static camera, mirror reflection. She twists open @Image2, inspecting the shade with a small approving nod.\n" +
-      "SHOT 2 (0:02-0:05): Close-up, slight handheld sway (selfie-style). She applies it in one smooth stroke, presses her lips together, breaks into a genuine, pleased smile. {\"Okay, this shade is unreal.\"}\n" +
-      "SHOT 3 (0:05-0:08): Medium close-up, camera holds. She turns toward the window light, holding the product beside her face so the label reads clearly, natural light catching both skin and packaging.\n\n" +
+      "[SHOT SEQUENCE]\nSHOT 1 (0s-2s): Medium shot, static camera, mirror reflection. She twists open @Image2, inspecting the shade with a small approving nod.\n" +
+      "SHOT 2 (2s-5s): Close-up, slight handheld sway (selfie-style). She applies it in one smooth stroke, presses her lips together, breaks into a genuine, pleased smile. {\"Okay, this shade is unreal.\"}\n" +
+      "SHOT 3 (5s-8s): Medium close-up, camera holds. She turns toward the window light, holding the product beside her face so the label reads clearly, natural light catching both skin and packaging.\n\n" +
       "[CONSTRAINTS]\nNo subtitles/logos beyond the product's own label. Warm, soft-focus, natural light, iPhone-shot UGC aesthetic - not overly polished.",
   },
   {
@@ -505,9 +762,9 @@ const PROMPT_STYLE_EXAMPLES: { category: string; title: string; prompt: string }
       "[REFERENCE]\n@Image1 - your character reference. @Image2 - the product.\n\n" +
       "[CHARACTER]\nLate 20s, short textured hair, glasses, oversized knit sweater, easygoing and a little wry.\n\n" +
       "[SCENE]\nA cozy bedroom desk setup, string lights soft in the background, laptop open, afternoon light through a nearby window.\n\n" +
-      "[SHOT SEQUENCE]\nSHOT 1 (0:00-0:03): Medium shot, static camera, desk-level. He picks up @Image2, turning it over in his hands, one eyebrow raised, genuinely impressed. {\"Okay, I was not expecting this to actually be good.\"}\n" +
-      "SHOT 2 (0:03-0:06): Close-up, slow handheld push-in. He demonstrates the product's main feature to camera, focused and matter-of-fact.\n" +
-      "SHOT 3 (0:06-0:08): Medium shot, camera holds. He sets it down, leans back, shrugs with a small grin. {\"Yeah. It's going on the desk permanently.\"}\n\n" +
+      "[SHOT SEQUENCE]\nSHOT 1 (0s-3s): Medium shot, static camera, desk-level. He picks up @Image2, turning it over in his hands, one eyebrow raised, genuinely impressed. {\"Okay, I was not expecting this to actually be good.\"}\n" +
+      "SHOT 2 (3s-6s): Close-up, slow handheld push-in. He demonstrates the product's main feature to camera, focused and matter-of-fact.\n" +
+      "SHOT 3 (6s-8s): Medium shot, camera holds. He sets it down, leans back, shrugs with a small grin. {\"Yeah. It's going on the desk permanently.\"}\n\n" +
       "[CONSTRAINTS]\nNo subtitles/logos beyond the product's own branding. Casual, natural light, handheld UGC energy - not a polished commercial.",
   },
 ];
@@ -749,17 +1006,18 @@ export function PromptGuideSection({
       wash="bg-surface/90"
       iconColor="text-purple"
       icon="📝"
-      title="Our prompt guide"
-      subtitle="Character → place → embed → style → craft → longer cuts."
+      title="Prompt guide to make hyper realistic videos"
+      subtitle="Character + location stills → named @Image refs → per-second Seedance beats"
     >
       <p className="text-sm leading-relaxed text-muted">
-        Six steps from a locked character still to a finished clip. Enter the templates below into
-        ChatGPT or generate on Lucy, animate with the video engines on this page, then stitch longer
-        cuts in{" "}
+        Build hyper-real clips on Seedance: lock a character sheet, empty location, bind{" "}
+        <span className="font-semibold text-foreground">@Image</span> refs, then write timed beats
+        as <span className="font-semibold text-foreground">0s-3s</span> (not 0:00-0:03). Generate
+        stills in ChatGPT or on Lucy, animate here, stitch longer cuts in{" "}
         <a href="/stitch" className="font-semibold text-purple underline">
           /stitch
         </a>
-        .
+        . Veo/Kling remain fine as alternatives at the end.
       </p>
 
       <Step n={1} title="Character still">
@@ -770,10 +1028,13 @@ export function PromptGuideSection({
         <PasteBox>{CHARACTER_STILL_EXAMPLE}</PasteBox>
         <p className="text-xs font-semibold text-foreground">Here&apos;s the guide.</p>
         <ul className="list-disc space-y-1 pl-4 text-sm">
-          <li>Split-screen on white: left = full-body, right = chest-up</li>
+          <li>Split-screen on flat white: left = full-body, right = chest-up</li>
           <li>Fill age, build, features, hair, wardrobe, demeanor</li>
           <li>Push real skin — pores, uneven tone, peach fuzz (no beauty filter)</li>
-          <li>Once you have the sheet, never redescribe the face — only attach the image</li>
+          <li>
+            Once you have the sheet, <strong className="text-foreground">never re-describe the face</strong>{" "}
+            — only attach the image
+          </li>
         </ul>
         <p className="text-xs font-semibold text-foreground">Template to paste:</p>
         <PasteBox>{CHARACTER_STILL_PROMPT}</PasteBox>
@@ -792,10 +1053,10 @@ export function PromptGuideSection({
         <PasteBox>{LOCATION_STILL_EXAMPLE}</PasteBox>
         <p className="text-xs font-semibold text-foreground">Here&apos;s the guide.</p>
         <ul className="list-disc space-y-1 pl-4 text-sm">
-          <li>Empty place only — no character</li>
+          <li>Empty place only — no character (separate plate from the sheet)</li>
           <li>Match the character sheet&apos;s aspect (9:16 or 16:9)</li>
           <li>Name light / weather and materials you can almost touch</li>
-          <li>No people, no text, no logos</li>
+          <li>History paths: exact year + ban anachronisms; no people, text, or logos</li>
         </ul>
         <p className="text-xs font-semibold text-foreground">Template to paste:</p>
         <PasteBox>{LOCATION_STILL_PROMPT}</PasteBox>
@@ -810,7 +1071,10 @@ export function PromptGuideSection({
         <ul className="list-disc space-y-1.5 pl-4">
           <li>
             Make a <strong className="text-foreground">composite still</strong> first, or in video
-            use @Image1 for the person and @Image2 for the place.
+            bind explicitly:{" "}
+            <span className="text-foreground">
+              @Image1 is the character… @Image2 is the location…
+            </span>
           </li>
           <li>
             <strong className="text-foreground">Relight</strong> the person to match the place —
@@ -828,18 +1092,52 @@ Place @Image1 naturally inside @Image2. Relight the person to match the location
 Feet grounded on the floor, contact shadow matching the room’s light. Correct scale for the space.
 Same camera height as a documentary still. No beauty filter. No text, logos, or watermarks.`}</PasteBox>
         <p className="text-xs font-semibold text-foreground">Living hold (short video):</p>
-        <PasteBox>{`@Image1 person standing in @Image2 location. Relight subject to match the room. Soft natural breathing and a tiny weight shift. Static medium shot, one hold. No subtitles, no logos.`}</PasteBox>
+        <PasteBox>{`@Image1 is the character (identity only). @Image2 is the location (environment + lighting).
+@Image1 standing in @Image2. Relight subject to match the room. Soft natural breathing, a natural blink, tiny weight shift. Static medium shot, one hold. Do not add subtitles. No logos.`}</PasteBox>
       </Step>
 
-      <Step n={4} title="Pick a style path">
+      <Step n={4} title="Hyper-real Seedance video">
         <p>
-          Three starting points — each with a real Lucy clip (or prompt-only) and a pasteable prompt.
+          Add <strong className="text-foreground">2–4 images</strong> (practical Lucy recipe). In
+          the prompt write a REFERENCE MAP, then timed beats with Seedance syntax{" "}
+          <span className="font-semibold text-foreground">0s-3s / 3s-7s</span>.
+        </p>
+        <ul className="list-disc space-y-1 pl-4 text-sm">
+          <li>
+            Seedance 2.0: up to ~9 refs · Seedance 2.5: up to ~30 images (soft best with{" "}
+            <strong className="text-foreground">1–8 image subjects</strong>)
+          </li>
+          <li>
+            Typical hyper-real set: @Image1 character sheet · @Image2 location · optional @Image3
+            product · optional @Image4 start keyframe
+          </li>
+          <li>
+            Bind every image:{" "}
+            <span className="text-foreground">
+              “@Image1 is the character (face, body, wardrobe — identity only, not lighting/background)”
+            </span>
+          </li>
+          <li>
+            Each beat: ONE camera move + subject action + light continuity + physical expression +
+            optional dialogue/SFX — enough plot, not overloaded
+          </li>
+        </ul>
+        <p className="text-xs font-semibold text-foreground">Full paste template:</p>
+        <PasteBox>{HYPER_REAL_SEEDANCE_TEMPLATE}</PasteBox>
+      </Step>
+
+      <Step n={5} title="Three style paths (full per-second prompts)">
+        <p>
+          Pick a path, add the noted images, paste the prompt into Seedance (or try Veo/Kling). Each
+          block includes image map, timed beats, and why the camera moves were chosen.
         </p>
         <div className="grid gap-3">
           {STYLE_PATHS.map((path) => (
             <div key={path.title} className="rounded-2xl border border-border bg-cream/50 p-3">
               <p className="text-sm font-extrabold text-foreground">{path.title}</p>
               <p className="text-xs text-muted">{path.blurb}</p>
+              <p className="mt-1 text-[11px] font-semibold text-purple">{path.imageNote}</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted">{path.tweakNotes}</p>
               {path.videoSrc ? (
                 <video
                   className="mx-auto mt-2 w-full max-w-md rounded-xl"
@@ -851,7 +1149,7 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
                 />
               ) : (
                 <p className="mt-2 rounded-lg border border-dashed border-border bg-white/70 p-3 text-[11px] italic text-muted">
-                  Prompt-only example — no third-party clip embedded.
+                  Prompt-only example — original Lucy template, no third-party clip embedded.
                 </p>
               )}
               <PasteBox>{path.prompt}</PasteBox>
@@ -869,109 +1167,37 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
         </p>
       </Step>
 
-      <Step n={5} title="Craft details">
+      <Step n={6} title="Mix-and-match craft chips">
         <p>
-          One camera move, physical expression, weather/light, Seedance limits, keyframes — nested
-          below so the main path stays clean.
+          Easy tweakable pieces — open a chip, copy a line into your Seedance prompt. Mix skin +
+          camera + beats without reading a wall of text.
         </p>
-
-        <details className="rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-purple">
-            Camera angles + moves (paste snippets)
-          </summary>
-          <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
-            <li>
-              <strong className="text-foreground">Extreme close-up:</strong> eyes and mouth fill the
-              frame; shallow focus; pores readable.
-            </li>
-            <li>
-              <strong className="text-foreground">Close-up:</strong> face and shoulders; hold or tiny
-              push-in.
-            </li>
-            <li>
-              <strong className="text-foreground">Medium:</strong> waist-up; good for product demos
-              and dialogue.
-            </li>
-            <li>
-              <strong className="text-foreground">Wide / establishing:</strong> full body + room;
-              sets geography before closer coverage.
-            </li>
-            <li>
-              <strong className="text-foreground">Low angle:</strong> camera near the floor looking
-              up — subject feels powerful.
-            </li>
-            <li>
-              <strong className="text-foreground">High angle:</strong> looking down — vulnerability
-              or overview.
-            </li>
-            <li>
-              <strong className="text-foreground">Tracking:</strong> camera slides beside the subject
-              at matching pace — one direction only.
-            </li>
-            <li>
-              <strong className="text-foreground">Push / pull:</strong> slow dolly in for intimacy,
-              slow pull-back to reveal scale.
-            </li>
-            <li>
-              <strong className="text-foreground">Handheld sway:</strong> slight organic drift —
-              selfie / UGC energy, not shake-cam.
-            </li>
-            <li>
-              <strong className="text-foreground">Whip pan:</strong> fast horizontal blur between two
-              clear end-frames — use sparingly.
-            </li>
-          </ul>
-          <p className="mt-2 text-xs text-muted">
-            <strong className="text-foreground">One move only.</strong> Don&apos;t name gear as an
-            object (&quot;FPV drone&quot;) — describe the move (&quot;fast forward rush hugging the
-            ground, whip-tilting up at the end&quot;).
-          </p>
-          <PasteBox>{`Camera: medium shot, slow push-in, eye-level. One move only. Hold the final frame clean.`}</PasteBox>
-        </details>
-
-        <details className="rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-purple">
-            Expression library (physical detail, not labels)
-          </summary>
-          <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
-            <li>Shoulders drop; a long exhale; jaw unclenches.</li>
-            <li>One eyebrow lifts; corner of the mouth tugs, then settles.</li>
-            <li>Eyes glass slightly; blink is slow; gaze holds past the lens.</li>
-            <li>Lips press together, then break into a small real smile.</li>
-            <li>Weight shifts to the back foot; fingers fidget once on the product.</li>
-            <li>Chin tips up; nostrils flare; a sharp inhale before speaking.</li>
-            <li>Private almost-smile — mouth soft, eyes warmer, no teeth yet.</li>
-          </ul>
-          <p className="mt-2 text-xs text-muted">
-            Write the body, not the mood word. &quot;She&apos;s happy&quot; drifts; the physical beat
-            locks.
-          </p>
-        </details>
-
-        <details className="rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-purple">
-            Weather, light, Seedance limits, keyframes
-          </summary>
-          <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
-            <li>
-              Name <strong className="text-foreground">weather / light</strong> in the prompt
-              (golden hour shafts, overcast softbox sky, rain on glass) so the model commits.
-            </li>
-            <li>
-              <strong className="text-foreground">Seedance:</strong> 2.0 accepts up to ~9 reference
-              images; 2.5 up to ~30. Use 4–8 that matter. On Lucy, More options = 1 photo per
-              generation; for saved character/location libraries use{" "}
-              <a href="/ads" className="font-semibold text-purple underline">
-                /ads → Cast &amp; Locations
-              </a>
-              .
-            </li>
-            <li>
-              Lock <strong className="text-foreground">start + end keyframes</strong> (first and last
-              frame) for anything that must not change — face, product label, wardrobe.
-            </li>
-          </ul>
-        </details>
+        <div className="grid gap-2">
+          {CRAFT_TWEAKS.map((tweak) => (
+            <details
+              key={tweak.id}
+              className="rounded-2xl border border-border bg-white/70 p-3"
+            >
+              <summary className="cursor-pointer list-none">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-xs font-semibold text-purple">{tweak.title}</p>
+                  <p className="text-[11px] text-muted">{tweak.summary}</p>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {tweak.chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className="rounded-full border border-purple/25 bg-purple-wash/40 px-2 py-0.5 text-[10px] font-semibold text-purple"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              </summary>
+              <PasteBox>{tweak.body}</PasteBox>
+            </details>
+          ))}
+        </div>
 
         <details className="rounded-2xl border border-border bg-white/70 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-purple">
@@ -1023,18 +1249,18 @@ age + build + distinguishing features + hair + wardrobe + demeanor
 where, when, atmosphere, lighting/color tone - 2-3 sentences
 
 [SHOT SEQUENCE]
-SHOT 1 (0:00-0:03): camera framing + ONE movement - subject action. {dialogue}
-SHOT 2 (0:03-0:06): camera framing + movement - subject action. (music note)
-SHOT 3 (0:06-0:08): camera framing + movement - subject action. <sfx note>
+SHOT 1 (0s-3s): camera framing + ONE movement - subject action. {dialogue}
+SHOT 2 (3s-6s): camera framing + movement - subject action. (music note)
+SHOT 3 (6s-8s): camera framing + movement - subject action. <sfx note>
 
 [CONSTRAINTS]
-no subtitles/logos/watermarks unless wanted + a style anchor`}</pre>
+Do not add subtitles. No logos/watermarks unless wanted + a style anchor`}</pre>
             </div>
           </div>
         </details>
       </Step>
 
-      <Step n={6} title="Longer cuts + /stitch">
+      <Step n={7} title="Longer cuts + /stitch">
         <p>
           Break the story into beats. Generate each beat as its own short clip, then combine in{" "}
           <a href="/stitch" className="font-semibold text-purple underline">
