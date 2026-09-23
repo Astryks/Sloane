@@ -18,7 +18,6 @@ import {
   VIDEO_CREDIT_PACKS,
   VIDEO_PAYGO_PRICE_USD_CENTS,
   type VideoEngine,
-  PROMPT_DIRECTOR_LABEL,
 } from "@/lib/videoEngines";
 import {
   STILL_CREDIT_PACKS,
@@ -1391,7 +1390,6 @@ const PAYGO_DRAFT_KEY = "lucy_paygo_draft";
 type PaygoDraft = {
   prompt: string;
   engine: VideoEngine;
-  useDirector: boolean;
   durationSeconds: number | null;
   aspectRatio: string | null;
   audioMode: PaygoAudioMode;
@@ -1443,7 +1441,6 @@ function PayAsYouGoVideoSection({
   const [balance, setBalance] = useState(0);
   const [balanceLoaded, setBalanceLoaded] = useState(false);
   const [engine, setEngine] = useState<VideoEngine>("veo");
-  const [useDirector, setUseDirector] = useState(false);
   // Duration/aspect ratio choices (2026-09-15) - null means "use the
   // engine's own default". Reset whenever the engine changes since each
   // engine's real bounds/options differ (see videoPaygo.ts).
@@ -1461,15 +1458,12 @@ function PayAsYouGoVideoSection({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [result, setResult] = useState<{ videoUrl: string; jobId: string; silentVideoUrl: string | null } | null>(null);
-  const [directedPrompt, setDirectedPrompt] = useState<string | null>(null);
   const [buyingPack, setBuyingPack] = useState<string | null>(null);
   const [waitingForCredit, setWaitingForCredit] = useState(false);
   const pendingAutoGenerateRef = useRef(false);
   const optionsRef = useRef<HTMLDetailsElement | null>(null);
 
   const engineDef = VIDEO_PAYGO_ENGINES[engine];
-  const directorAvailable = audioMode !== "lucy";
-
   // Picks up a prompt/photo handed down from the examples' "try it
   // yourself" box (see TryYourOwnPromptCTA) - keyed on seedVersion so it
   // only fires on an actual new handoff, not every render.
@@ -1533,7 +1527,6 @@ function PayAsYouGoVideoSection({
     if (draft) {
       setPrompt(draft.prompt);
       if (VIDEO_PAYGO_ENGINES[draft.engine]) setEngine(draft.engine);
-      setUseDirector(draft.useDirector);
       setDurationSeconds(draft.durationSeconds);
       setAspectRatio(draft.aspectRatio);
       setAudioMode(draft.audioMode === "own" ? "none" : draft.audioMode);
@@ -1594,7 +1587,6 @@ function PayAsYouGoVideoSection({
     saveDraft({
       prompt,
       engine,
-      useDirector,
       durationSeconds,
       aspectRatio,
       audioMode,
@@ -1623,13 +1615,11 @@ function PayAsYouGoVideoSection({
     setLoading(true);
     setError(null);
     setResult(null);
-    setDirectedPrompt(null);
     try {
       const form = new FormData();
       form.append("engine", engine);
       form.append("prompt", prompt);
       form.append("audio_mode", audioMode);
-      if (useDirector && directorAvailable) form.append("director", "astra");
       if (audioMode !== "none") form.append("lip_sync_mode", lipSyncMode);
       if (durationSeconds != null && engineDef.supportsDurationChoice) {
         form.append("duration_seconds", String(durationSeconds));
@@ -1644,7 +1634,6 @@ function PayAsYouGoVideoSection({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Generation failed");
       setNotice(null);
-      if (data.directedPrompt) setDirectedPrompt(data.directedPrompt as string);
       const jobId = data.jobId as string;
       const { videoUrl, silentVideoUrl } = await pollVideoJob("/api/video-paygo/status", jobId);
       setResult({ videoUrl, jobId, silentVideoUrl });
@@ -1716,27 +1705,6 @@ function PayAsYouGoVideoSection({
           </p>
         </div>
 
-        <label
-          className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 transition ${
-            useDirector && directorAvailable ? "border-purple bg-white" : "border-border bg-white/70"
-          } ${directorAvailable ? "" : "cursor-not-allowed opacity-60"}`}
-        >
-          <input
-            type="checkbox"
-            className="mt-0.5 accent-purple"
-            checked={useDirector && directorAvailable}
-            disabled={!directorAvailable}
-            onChange={(e) => setUseDirector(e.target.checked)}
-          />
-          <span className="text-xs text-muted">
-            <span className="font-bold text-foreground">✨ Direct my prompt with {PROMPT_DIRECTOR_LABEL}</span>{" "}
-            <span className="rounded-full bg-purple/10 px-1.5 py-0.5 text-[10px] font-bold text-purple">OpenAI&apos;s latest · included</span>
-            <br />
-            GPT-6 Astra is a text model, so it doesn&apos;t make the video itself - it rewrites your idea into a proper
-            shot brief (one camera move, specific subject, lighting, style) before it goes to {engineDef.label}.
-            {!directorAvailable && " Not used with a Lucy voice, since your text is the exact script."}
-          </span>
-        </label>
 
         <details ref={optionsRef} className="rounded-2xl border border-border bg-white/70 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-purple">
@@ -1900,9 +1868,7 @@ function PayAsYouGoVideoSection({
           className="w-full rounded-2xl bg-purple py-4 text-base font-bold text-white shadow-soft disabled:opacity-50"
         >
           {loading
-            ? useDirector && directorAvailable
-              ? "Directing & generating… (usually 30-90s)"
-              : "Generating… (usually 30-90s)"
+            ? "Generating… (usually 30-90s)"
             : waitingForCredit && !hasCredit
               ? "Confirming your payment…"
               : hasCredit
@@ -1943,12 +1909,6 @@ function PayAsYouGoVideoSection({
 
         {notice && <p className="rounded-2xl bg-white/80 p-3 text-sm text-foreground">{notice}</p>}
         {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
-        {directedPrompt && (
-          <div className="rounded-2xl bg-white/80 p-3">
-            <p className="text-[11px] font-semibold text-muted">{PROMPT_DIRECTOR_LABEL} sent this prompt to {engineDef.label}:</p>
-            <p className="mt-1 text-xs italic text-muted">{directedPrompt}</p>
-          </div>
-        )}
         {result && (
           <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="paygo" silentVideoUrl={result.silentVideoUrl} />
         )}
