@@ -776,8 +776,9 @@ function VideoResultPlayer({
 
 // Shared image/video-upload control used by all 3 upload-driven video modes.
 // Accepts MULTIPLE photos/videos at once - upload a few and pick which one
-// actually gets used, since every engine we call (Kling Avatar, Veo image-
-// to-video) only takes a single reference image. A video is never sent to
+// Lucy paygo actually sends. Most single-scene engines use one still;
+// Seedance can take multiple references, but this control still sends one.
+// A video is never sent to
 // the server as-is for that image - a frame is grabbed client-side (see
 // @/lib/videoFrame.ts) the moment it's chosen.
 type ReferenceMediaItem = { blob: Blob; sourceFile: File | null; previewUrl: string; isVideo: boolean };
@@ -910,7 +911,7 @@ function ReferenceMediaField({ media, label }: { media: ReturnType<typeof useRef
         {media.extracting ? "Grabbing a frame…" : media.items.length > 0 ? "Add another photo/video" : label}
         <input type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => media.handleFiles(e.target.files)} />
       </label>
-      {media.items.length > 1 && <p className="text-xs text-muted">Tap one to pick which photo/video we actually use.</p>}
+      {media.items.length > 1 && <p className="text-xs text-muted">Tap one to pick which still Lucy sends — one per clip here. Seedance can use multiple references.</p>}
       {media.error && <p className="text-xs text-coral-dark">{media.error}</p>}
     </div>
   );
@@ -1063,7 +1064,7 @@ const PRODUCT_AD_MODELS: ProductAdModel[] = [
     name: "Seedance",
     videoUrl: null,
     blockedReason:
-      "Seedance is by far the best model for hyper realistic videos when you connect to them directly. We offer Seedance on Lucy Labs, but we cannot get them to generate hyper realistic videos with us.",
+      "Seedance is strongest for hyper-real people when you connect directly. We offer Seedance on Lucy Labs, but we cannot get hyper-real people results through Lucy.",
   },
 ];
 
@@ -1077,7 +1078,7 @@ function ProductAdSection() {
       iconColor="text-purple"
       icon="🥤"
       title="Our review of the AI models"
-      subtitle="We created an AI character, Harper. We made up a product, a Lucy Labs tumbler. We generated some videos without the detailed prompt structure. We can see the results from different models below. Kling and Veo are the best. Seedance is actually by far the best model right now but you need to connect to them directly to generate hyper realistic videos. We offer Seedance anyway but we cannot get them to generate hyper realistic videos with us."
+      subtitle="We created an AI character, Harper. We made up a product, a Lucy Labs tumbler. We generated some videos without the detailed prompt structure. In that Harper comparison, Kling and Veo looked strongest. Seedance is strongest for hyper-real people when you connect directly — we offer it on Lucy, but we cannot get hyper-real people results through Lucy."
     >
       <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">

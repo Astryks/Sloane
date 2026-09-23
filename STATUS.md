@@ -1,5 +1,17 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-23 - User-facing copy accuracy audit
+
+- **Audit**: homepage paygo / AI models review, Prompt Guide, `/ads` practice storyboard copy vs known truths.
+- **Inaccuracies found & fixed**:
+  1. AI models review used permanent ranking (“Kling and Veo are the best” / Seedance “by far the best”) → snapshot framing (“In that Harper comparison, Kling and Veo looked strongest”) + Seedance hyper-real people = direct only; Lucy cannot get those results.
+  2. Paygo multi-upload comment claimed every engine only takes one still → clarified most single-scene engines use one; Seedance can use multiple refs; Lucy paygo still sends one.
+  3. Paygo helper “Tap one…” implied engine limit → now says Lucy sends one still per clip; Seedance can use multiple refs.
+  4. Prompt Guide “Practical Lucy hyper-real” / “hyper-real Lucy clips” implied Lucy delivers hyper-real people → Seedance-direct recipe + intro caveat.
+  5. `/ads` practice line “animate each square… for real” could imply Start animates the practice grid → explicit: Starting a storyboard creates a real project; does not animate the practice grid.
+- **Already correct**: practice grid browser-only / not uploaded; GPT Image & Nano Banana Pro on Lucy labeled as Lucy products; no Fal/Higgsfield in UI.
+- **Also**: PR #28 (paygo prompt `text-sm`) merged; PR #26 closed as superseded; PR #27 (trim notes + storyboard CTA) confirmed on `main`.
+
 ## Latest update, 2026-09-23 - Homepage AI models review; cinematic section removed
 
 - **Where**: lucylabs.app homepage (`web/src/app/page.tsx`) + PromptGuide cross-link.
