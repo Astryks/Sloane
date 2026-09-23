@@ -1,6 +1,11 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - /ads teaching: video → storyboard → practice drop grid
+## Latest update, 2026-09-23 - /ads teaching: museum study links + 15-cell practice grid
+
+- **Where**: `lucylabs.app/ads` How-this-works card (`web/src/components/AdsHowToStoryboard.tsx`). Real ReferenceLibrary / SlotCard / Start storyboard / APIs untouched.
+- **Layout (Sid)**: Title + Hide. **(1)** Big JoJo Facebook finished-ad embed. **(2)** JoJo storyboard stills grid. **(3)** Outbound Academy Museum credit links (Hitchcock Story gallery + Spielberg Jaws exhibition) — open in new tab; short note we don't host their boards. **(4)** Empty practice drop grid: **15 cells (5×3 desktop, fewer cols on small screens)** + **+ Add cell**; `URL.createObjectURL` / revoke only — muted note: photos stay in this browser only and are not uploaded. Hide + homepage `#jojo-case-study` link kept. No Hitchcock/Spielberg artwork hosted. No fal/Higgsfield in UI.
+
+## Previous update, 2026-09-23 - /ads teaching: video → storyboard → practice drop grid
 
 - **Where**: `lucylabs.app/ads` How-this-works card (`web/src/components/AdsHowToStoryboard.tsx`). Real `ReferenceLibrary`, `SlotCard`, Start storyboard / APIs untouched.
 - **Layout (Sid)**: Title **Storyboard → finished ad (real example)** + Hide. **(1)** Big JoJo finished-ad Facebook embed at top. **(2)** 8 JoJo storyboard stills in a row/grid under the video (`/public/product-showcase/jojo/`, Scene 1–8 captions). **(3)** Client-only practice drop grid below (“Your scene 1…” + Drop or choose photo + optional **+ Add cell**; `URL.createObjectURL` / revoke). One-liner: directors plan stills first, then animate — Start a storyboard below for real. Cast-strip competing demo removed.
