@@ -17,7 +17,14 @@ export type VideoEngineInfo = {
   versionLabel: string; // shown in the UI so the picker is honest about the exact model version
   durationSeconds: number; // default/max clip length, priced in videoPaygo.ts's cost table
   popular: boolean; // "Popular" group in the picker
-  pickerNote: string; // one short, honest line next to the engine name
+  // Capability line next to the engine name (audio disclaimer is appended
+  // by videoEnginePickerNote when supportsNativeAudio is false - keep that
+  // one source of truth rather than duplicating "no native audio" here).
+  pickerNote: string;
+  // True when buildFalInput passes generate_audio (Veo confirmed; Seedance
+  // 2.5 + Kling v3 also send the flag - Seedance 2.5's field name is less
+  // schema-verified). False = silent unless the user adds own audio / Lucy voice.
+  supportsNativeAudio: boolean;
   aspectRatioOptions?: string[]; // undefined = no manual control on this engine
   supportsDurationChoice?: boolean; // gets the duration slider
   supportsNegativePrompt?: boolean; // recorded, not wired into the UI yet
@@ -43,7 +50,8 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     // 4s duration made it read as a downgrade next to 2.0's 8s when shown
     // with equal billing; still a real option, just not front-and-center.
     popular: false,
-    pickerNote: "Shortest clip here (4s) - sharpest detail, native audio",
+    pickerNote: "Shortest clip here (4s) · sharpest detail · native audio",
+    supportsNativeAudio: true, // generate_audio flag (field less schema-verified than Veo)
     aspectRatioOptions: ["16:9", "9:16", "1:1"],
     supportsDurationChoice: true,
   },
@@ -53,6 +61,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     durationSeconds: 8,
     popular: true,
     pickerNote: "8s clip · strong all-rounder",
+    supportsNativeAudio: false,
     aspectRatioOptions: ["16:9", "9:16", "1:1"],
     supportsDurationChoice: true,
   },
@@ -61,7 +70,8 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     versionLabel: "Veo 3.1 Fast",
     durationSeconds: 8,
     popular: true,
-    pickerNote: "8s clip · only engine with its own native voice",
+    pickerNote: "8s clip · production-proven native voice",
+    supportsNativeAudio: true, // generate_audio confirmed in production
     aspectRatioOptions: ["16:9", "9:16"],
     supportsDurationChoice: true,
     supportsNegativePrompt: true,
@@ -72,6 +82,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     durationSeconds: 5,
     popular: true,
     pickerNote: "5s clip · best proven real lip-sync of the set",
+    supportsNativeAudio: false, // lip-sync via Avatar / lipsync pass, not baked native voice
     aspectRatioOptions: ["16:9", "9:16", "1:1"],
     supportsNegativePrompt: true,
   },
@@ -100,7 +111,8 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     versionLabel: "Kling 3.0 Pro",
     durationSeconds: 10,
     popular: false,
-    pickerNote: "Longest clip here (10s) · no lip-sync yet",
+    pickerNote: "Longest clip here (10s) · native audio · no lip-sync yet",
+    supportsNativeAudio: true, // generate_audio flag on v3 schema
     supportsDurationChoice: true,
     supportsNegativePrompt: true,
   },
@@ -110,6 +122,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     durationSeconds: 8,
     popular: false,
     pickerNote: "8s clip · 768p",
+    supportsNativeAudio: false,
     aspectRatioOptions: ["16:9", "9:16", "1:1"],
     supportsDurationChoice: true,
   },
@@ -119,10 +132,46 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     durationSeconds: 8,
     popular: false,
     pickerNote: "8s clip · 720p",
+    supportsNativeAudio: false,
     aspectRatioOptions: ["16:9", "9:16", "1:1"],
     supportsDurationChoice: true,
   },
 };
+
+const NO_NATIVE_AUDIO_NOTE = "no native audio — add your own or a Lucy voice";
+
+/** Full picker line: capability note + explicit no-audio when supportsNativeAudio is false. */
+export function videoEnginePickerNote(info: VideoEngineInfo): string {
+  if (info.supportsNativeAudio) return info.pickerNote;
+  return `${info.pickerNote} · ${NO_NATIVE_AUDIO_NOTE}`;
+}
+
+/** Sound helper under More options - driven by supportsNativeAudio so lists stay accurate. */
+export function videoEnginesSoundBlurb(): string {
+  const entries = Object.values(VIDEO_PAYGO_ENGINES);
+  const withNative = entries.filter((e) => e.supportsNativeAudio).map((e) => e.label);
+  const silent = entries.filter((e) => !e.supportsNativeAudio).map((e) => e.label);
+  const otherNative = withNative.filter((l) => l !== "Veo");
+  const otherNativePhrase =
+    otherNative.length === 0
+      ? ""
+      : otherNative.length === 1
+        ? `${otherNative[0]} also attempts native audio`
+        : `${otherNative.slice(0, -1).join(", ")} and ${otherNative[otherNative.length - 1]} also attempt native audio`;
+  const silentPhrase =
+    silent.length === 0
+      ? ""
+      : silent.length === 1
+        ? silent[0]
+        : `${silent.slice(0, -1).join(", ")}, and ${silent[silent.length - 1]}`;
+  // Veo is the production-proven native voice; Seedance 2.5 / Kling v3 also
+  // send generate_audio (see buildFalInput). Silent engines need uploaded or Lucy audio.
+  return (
+    `Veo is production-proven for its own native voice` +
+    (otherNativePhrase ? ` (${otherNativePhrase})` : "") +
+    `. ${silentPhrase} render silent unless you add your own audio or pick a Lucy voice.`
+  );
+}
 
 // Real per-engine minimum duration, confirmed directly against each
 // endpoint (not guessed) - see audioDuration.ts's module comment for the

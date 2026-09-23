@@ -17,6 +17,8 @@ import {
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
   VIDEO_CREDIT_PACKS,
   VIDEO_PAYGO_PRICE_USD_CENTS,
+  videoEnginePickerNote,
+  videoEnginesSoundBlurb,
   type VideoEngine,
 } from "@/lib/videoEngines";
 import {
@@ -1486,7 +1488,7 @@ function PayAsYouGoVideoSection({
                   Popular
                 </div>
                 <div className="mt-1 font-bold">{e.label}</div>
-                <div className={`mt-0.5 text-[11px] leading-snug ${engine === id ? "text-white/90" : "text-muted"}`}>{e.pickerNote}</div>
+                <div className={`mt-0.5 text-[11px] leading-snug ${engine === id ? "text-white/90" : "text-muted"}`}>{videoEnginePickerNote(e)}</div>
               </button>
             ))}
           </div>
@@ -1568,8 +1570,7 @@ function PayAsYouGoVideoSection({
                 ))}
               </div>
               <p className="mt-1.5 text-[11px] text-muted">
-                Only Veo can speak on its own with no audio given - every other model renders silent unless you add
-                your own audio or pick a Lucy voice.
+                {videoEnginesSoundBlurb()}
               </p>
             </div>
 
