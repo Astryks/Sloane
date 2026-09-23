@@ -1355,9 +1355,11 @@ function ProductAdSection() {
 type PaygoAudioMode = "none" | "own" | "lucy";
 
 const PAYGO_PROMPT_PLACEHOLDER =
-  "Prompting is everything - the models honestly work best one scene at a time. Create a storyboard of your " +
-  "video and study how the movies and ads you like are made. Add images of your character and location (under " +
-  "More options), and make your prompt extremely detailed, one scene at a time.";
+  "Add your prompt here and select a video. We have a detailed prompt guide below - prompting is everything. " +
+  "The more detailed the better. Use ChatGPT or any image model to create an image of your character and location. " +
+  "Then use Seedance, Veo or any model you like to generate a video. Honestly, these videos work best one scene at " +
+  "a time, use our guide to choose camera angle and other details, and play around with it! Really pay attention to " +
+  "your favourite movie directors and learn how they shoot their shots and have fun with it!";
 
 // Logo + section links, shown as the top of the generator card so the
 // brand and the first thing to do read as one block.
@@ -1668,7 +1670,7 @@ function PayAsYouGoVideoSection({
         <textarea
           aria-label="Describe your video"
           className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-          rows={4}
+          rows={7}
           maxLength={600}
           placeholder={audioMode === "lucy" ? "What should the voice say?" : PAYGO_PROMPT_PLACEHOLDER}
           value={prompt}
