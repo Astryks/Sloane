@@ -1,5 +1,7 @@
 # Sloane Project Status
 
+- Optional Bing IndexNow: `web/public/indexnow-key.txt` is published; Sid can ping Bing IndexNow later for updated public URLs (no automatic submission configured).
+
 ## Latest update, 2026-09-23 - Native-audio honesty on paygo engines
 
 - **Problem**: Homepage Sound helper said "Only Veo can speak on its own…" and Veo's picker note claimed it was the only native-voice engine — understating Seedance 2.5 / Kling v3 (both pass `generate_audio` in `buildFalInput`) and not naming which engines stay silent.
