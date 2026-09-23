@@ -1,6 +1,11 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23 - /ads teaching: museum study links + 15-cell practice grid
+## Latest update, 2026-09-23 - /ads Make stills outbound links (GPT + generators)
+
+- **Where**: empty state under **Start a storyboard** on `lucylabs.app/ads` (`web/src/app/ads/page.tsx`) + practice note in `AdsHowToStoryboard.tsx`. Shared strip: `MakeStillsOutboundLinks.tsx`. Create/auth APIs untouched; practice grid stays browser-only (no upload).
+- **UX**: Primary CTA unchanged. Muted line: stills first — make them here after you start, or outside and upload into each scene. Compact new-tab chips (noopener): ChatGPT / GPT Image, Gemini, Midjourney, Ideogram + `/#prompt-guide` (existing hash). Flux skipped (Prompt Guide “via other tools” / no clean generator URL). No fal/Higgsfield; no iframes; does not claim Start animates demo drops.
+
+## Previous update, 2026-09-23 - /ads teaching: museum study links + 15-cell practice grid
 
 - **Where**: `lucylabs.app/ads` How-this-works card (`web/src/components/AdsHowToStoryboard.tsx`). Real ReferenceLibrary / SlotCard / Start storyboard / APIs untouched.
 - **Layout (Sid)**: Title + Hide. **(1)** Big JoJo Facebook finished-ad embed. **(2)** JoJo storyboard stills grid. **(3)** Outbound Academy Museum credit links (Hitchcock Story gallery + Spielberg Jaws exhibition) — open in new tab; short note we don't host their boards. **(4)** Empty practice drop grid: **15 cells (5×3 desktop, fewer cols on small screens)** + **+ Add cell**; `URL.createObjectURL` / revoke only — muted note: photos stay in this browser only and are not uploaded. Hide + homepage `#jojo-case-study` link kept. No Hitchcock/Spielberg artwork hosted. No fal/Higgsfield in UI.

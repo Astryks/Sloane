@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AdsHowToStoryboard } from "@/components/AdsHowToStoryboard";
+import { MakeStillsOutboundLinks } from "@/components/MakeStillsOutboundLinks";
 import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudioModels";
 import { expandCinematicPrompt, GENRE_STYLE_LIBRARY, ATMOSPHERE_LIBRARY, CAMERA_MOVEMENT_LIBRARY, type GenreKey } from "@/lib/directorMode";
 
@@ -887,9 +888,12 @@ export default function AdsGridPage() {
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
 
         {!projectId ? (
-          <button onClick={start} disabled={busy} className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50">
-            {busy ? "Starting…" : "Start a storyboard"}
-          </button>
+          <div className="space-y-3">
+            <button onClick={start} disabled={busy} className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50">
+              {busy ? "Starting…" : "Start a storyboard"}
+            </button>
+            <MakeStillsOutboundLinks />
+          </div>
         ) : (
           <>
             <ReferenceLibrary
