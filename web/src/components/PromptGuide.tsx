@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  VIDEO_PAYGO_ENGINES,
+  type VideoEngine,
+} from "@/lib/videoEngines";
 
 function GuideCard({
   wash,
@@ -72,14 +76,122 @@ function Step({
   );
 }
 
-// Real character-description formula + shot-list examples, written in our
-// own words and entirely original prompts - not reproduced from any
-// third-party tutorial (see STATUS.md 2026-09-15 for the two real YouTube
-// prompt-engineering videos this technique was generalized from: their
-// exact wording/videos are deliberately NOT reproduced here, same
-// copyright discipline as the JoJo storyboard - only the general
-// structural approach (reference block, character lock, timecoded shots)
-// is reused, which is technique, not their copyrightable expression).
+// Client-safe still prices (2026-09-23). Inference vendor stays server-only —
+// never surface vendor names or URLs in this UI.
+const STILL_ENGINES = [
+  { id: "gpt" as const, label: "GPT Image", priceUsd: 0.19 },
+  { id: "nanobanana" as const, label: "Nano Banana Pro", priceUsd: 0.29 },
+];
+
+/**
+ * StillGenerateBox — prompt + engine chips + price + Generate.
+ *
+ * TODO(stripe-stills): wire real Stripe checkout for stills, then call the
+ * authenticated image-generate path (server uses generateImageVariants).
+ * Until then, Generate deep-links to /ads Cast & Locations so visitors can
+ * make character/location stills there without exposing any vendor to the
+ * client. Paste-outside (any strong image model) remains valid.
+ */
+function StillGenerateBox({
+  placeholder,
+  defaultPrompt,
+}: {
+  placeholder: string;
+  defaultPrompt?: string;
+}) {
+  const [prompt, setPrompt] = useState(defaultPrompt ?? "");
+  const [engineId, setEngineId] = useState<(typeof STILL_ENGINES)[number]["id"]>("gpt");
+  const selected = STILL_ENGINES.find((e) => e.id === engineId) ?? STILL_ENGINES[0];
+
+  function handleGenerate() {
+    // Deep-link to Cast & Locations until Stripe stills ships.
+    const q = prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}` : "";
+    window.location.href = `/ads${q}`;
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl border border-border bg-white/90 p-3">
+      <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+        Generate a still on Lucy
+      </p>
+      <textarea
+        className="w-full rounded-xl border border-border bg-cream/60 p-3 text-xs placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+        rows={4}
+        placeholder={placeholder}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {STILL_ENGINES.map((e) => (
+          <button
+            key={e.id}
+            type="button"
+            aria-pressed={engineId === e.id}
+            onClick={() => setEngineId(e.id)}
+            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+              engineId === e.id
+                ? "border-purple bg-purple text-white"
+                : "border-border bg-white text-muted hover:border-purple/40"
+            }`}
+          >
+            {e.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted">
+          <strong className="text-foreground">${selected.priceUsd.toFixed(2)}</strong> per still ·{" "}
+          {selected.label}
+        </p>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          className="rounded-full bg-purple px-4 py-1.5 text-xs font-bold text-white shadow-soft"
+        >
+          Generate
+        </button>
+      </div>
+      <p className="mt-2 text-[11px] text-muted">
+        Opens{" "}
+        <a href="/ads" className="font-semibold text-purple underline">
+          /ads → Cast &amp; Locations
+        </a>{" "}
+        to generate with your account. Or paste the cream prompt into any strong image model and
+        bring the still back here.
+      </p>
+    </div>
+  );
+}
+
+// Original Lucy prompts only — technique generalized, not third-party wording.
+const STYLE_PATHS: {
+  title: string;
+  blurb: string;
+  videoSrc?: string;
+  prompt: string;
+}[] = [
+  {
+    title: "1 · UGC product",
+    blurb: "Handheld selfie energy, product in hand, one genuine reaction.",
+    videoSrc: "/trailers/kirsty-kling-dub.mp4",
+    prompt:
+      "@Image1 (your character) in a bright bathroom, morning window light. Medium selfie-style handheld sway. She twists open @Image2 (product), applies it, presses lips together, genuine small smile. {\"Okay, this shade is unreal.\"} Warm natural light, iPhone UGC look. No subtitles beyond the product label.",
+  },
+  {
+    title: "2 · Cinematic short",
+    blurb: "One subject, one camera move, emotion through physical action.",
+    videoSrc: "/trailers/kirsty-moon-veo-audio.mp4",
+    prompt:
+      "Cinematic wide shot: @Image1 walks slowly beside a lunar rover on the moon surface, dust kicking under her boots, Earth hanging in the black sky. Slow gentle tracking beside her. Dramatic side light, photoreal, 4K. No subtitles, no logos.",
+  },
+  {
+    title: "3 · Bullet time",
+    blurb: "Orbit the subject while the world holds still — prompt-only is fine.",
+    prompt:
+      "Medium shot of @Image1 frozen mid-stride in @Image2. Camera orbits 180° around her at chest height while she and the environment stay nearly still — only hair and coat edges drift. Crisp daylight, shallow depth, photoreal. No subtitles, no logos.",
+  },
+];
+
 const PROMPT_STYLE_EXAMPLES: { category: string; title: string; prompt: string }[] = [
   {
     category: "Cinematic action",
@@ -119,37 +231,25 @@ const PROMPT_STYLE_EXAMPLES: { category: string; title: string; prompt: string }
   },
 ];
 
-// The director's actual storyboard for the JoJo case study below, shared
-// with us directly for this purpose (2026-09-15, per direct request -
-// "embed the word doc too, that's the storyboard they need to see").
-// Transcribed scene-by-scene from her original document rather than
-// linking/embedding the raw .docx file itself, so it reads natively on
-// the page and works on mobile - real audio/video columns, not paraphrased.
-// Per-scene reference images (2026-09-15): the storyboard's real reference
-// images are almost all downloaded stock/editorial photography used as
-// internal mood-board references (one has a visible Getty Images
-// watermark, confirmed by looking at the actual embedded images before
-// adding anything) - not ours to republish. Scenes 1/17/18 use JoJo's own
-// brand assets instead (their logo, app-store badges, end card - no
-// third-party photography in any of them). Every other scene (2-16) uses
-// an original illustration generated from that scene's own shot
-// description, in a consistent flat-illustration storyboard style - not a
-// recreation of her actual reference photos, a new image made from the
-// same brief, so visitors can see what a real storyboard image + video
-// pairing looks like without reproducing anyone else's copyrighted photos.
+// Director's JoJo storyboard (shared 2026-09-15). Brand assets on 1/17/18;
+// other scenes use original illustrations from the shot brief — not stock.
 const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
   {
-    audio: "Are you ready to take a ride on #PASABAYDELIVERY?\n\nWith Jojo, where I'm going I'll bring it there\nSa Jojo, sabay kita!",
-    video: "Opening credit shows the two talents going across the screen with one pushing the other's chair, having fun. The #pasabaydelivery hashtag appears behind them as they leave the screen.\n\nLogo Jojo with blinking eye",
+    audio:
+      "Are you ready to take a ride on #PASABAYDELIVERY?\n\nWith Jojo, where I'm going I'll bring it there\nSa Jojo, sabay kita!",
+    video:
+      "Opening credit shows the two talents going across the screen with one pushing the other's chair, having fun. The #pasabaydelivery hashtag appears behind them as they leave the screen.\n\nLogo Jojo with blinking eye",
     image: "/product-showcase/jojo/jojo-logo-sabaykita.png",
   },
   {
     audio: "Meet Bea.",
-    video: "Show an online seller surrounded by packages to be sent. Incidental props show her very millennial office space - plants, inspirational quotes.",
+    video:
+      "Show an online seller surrounded by packages to be sent. Incidental props show her very millennial office space - plants, inspirational quotes.",
     image: "/product-showcase/jojo/scene-2.png",
   },
   {
-    audio: "She is in Pasig and she needs to send a package to Makati.\n\nNasa Pasig siya at kailangan niyang magpadala ng package to Makati.",
+    audio:
+      "She is in Pasig and she needs to send a package to Makati.\n\nNasa Pasig siya at kailangan niyang magpadala ng package to Makati.",
     video: "Image of a map or something similar, then there's an arrow going from point A to B",
     image: "/product-showcase/jojo/scene-3.png",
   },
@@ -159,8 +259,10 @@ const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
     image: "/product-showcase/jojo/scene-4.png",
   },
   {
-    audio: "He is also from Pasig but he commutes to Makati every day.\n\nTaga-Pasig rin siya pero nagko-commute siya papuntang Makati every day.",
-    video: "Show Mario in a crowded MRT.\nClose up of hand hanging on a hand grip\nFull shot Mario sideways, getting through the train motion and handling the hand grip",
+    audio:
+      "He is also from Pasig but he commutes to Makati every day.\n\nTaga-Pasig rin siya pero nagko-commute siya papuntang Makati every day.",
+    video:
+      "Show Mario in a crowded MRT.\nClose up of hand hanging on a hand grip\nFull shot Mario sideways, getting through the train motion and handling the hand grip",
     image: "/product-showcase/jojo/scene-5.png",
   },
   {
@@ -170,7 +272,8 @@ const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
   },
   {
     audio: "It's possible with #PASABAYDELIVERY or Crowdshipping",
-    video: "“#PasabayDelivery” term appears on screen and when it is mentioned, the characters can smile as if in agreement",
+    video:
+      "“#PasabayDelivery” term appears on screen and when it is mentioned, the characters can smile as if in agreement",
     image: "/product-showcase/jojo/scene-7.png",
   },
   {
@@ -180,42 +283,52 @@ const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
   },
   {
     audio: "pwedeng ipasabay ni Bea ang package niya kay Mario",
-    video: "Frontal shot of Bea holding the phone with Jojo app.\n\nWe show a graphic with 'We found a match'\nWe split the screen again with the mid shot of Mario, with his phone and smiling.",
+    video:
+      "Frontal shot of Bea holding the phone with Jojo app.\n\nWe show a graphic with 'We found a match'\nWe split the screen again with the mid shot of Mario, with his phone and smiling.",
     image: "/product-showcase/jojo/scene-9.png",
   },
   {
     audio: "at pwedeng kumita si Mario ng extra money on his way to Makati.",
-    video: "Show Mario getting the box from Bea and heading to Makati with it.\nClose up & mid shot of package delivery, full shot of Mario commuting with package",
+    video:
+      "Show Mario getting the box from Bea and heading to Makati with it.\nClose up & mid shot of package delivery, full shot of Mario commuting with package",
     image: "/product-showcase/jojo/scene-10.png",
   },
   {
     audio: "The sender gets fast, secure and convenient shipping",
-    video: "Show a smiling Bea looking at her phone. Split screen with the app animation showing the confirmed booking",
+    video:
+      "Show a smiling Bea looking at her phone. Split screen with the app animation showing the confirmed booking",
     image: "/product-showcase/jojo/scene-11.png",
   },
   {
     audio: "while helping a fellow Filipino turn his commute into cash.",
-    video: "The receiver is typing on a computer, Mario enters the frame in a funny way and delivers the item.\nNext frame, a blue piggy bank and Mario inserting a bill inside.",
+    video:
+      "The receiver is typing on a computer, Mario enters the frame in a funny way and delivers the item.\nNext frame, a blue piggy bank and Mario inserting a bill inside.",
     image: "/product-showcase/jojo/scene-12.png",
   },
   {
-    audio: "Ang mga Jojo transporters ay verified at rated by the community.\n\nPwede pang i-track ang delivery live via the app para siguradong in good hands ang package mo.",
-    video: "Jojo Transporter profile tagged as 4.9 stars rating plus the number of trips\n\nReal-time app tracking screenshot - show movement",
+    audio:
+      "Ang mga Jojo transporters ay verified at rated by the community.\n\nPwede pang i-track ang delivery live via the app para siguradong in good hands ang package mo.",
+    video:
+      "Jojo Transporter profile tagged as 4.9 stars rating plus the number of trips\n\nReal-time app tracking screenshot - show movement",
     image: "/product-showcase/jojo/scene-13.png",
   },
   {
     audio: "Hindi diyan nagtatapos ang pagtutulungan sa Jojo!",
-    video: "Show Bea and Mario talking with the package. The two are being replicated to represent other senders and transporters.",
+    video:
+      "Show Bea and Mario talking with the package. The two are being replicated to represent other senders and transporters.",
     image: "/product-showcase/jojo/scene-14.png",
   },
   {
-    audio: "Ang bawat #PasabayDelivery ay nakakatulong rin sa pagbawas ng traffic at polusyon sa Pilipinas.",
+    audio:
+      "Ang bawat #PasabayDelivery ay nakakatulong rin sa pagbawas ng traffic at polusyon sa Pilipinas.",
     video: "We see Mario blowing a dark cloud out of the frame",
     image: "/product-showcase/jojo/scene-15.png",
   },
   {
-    audio: "After all, no extra cars or trucks will be added on the road, wala rin extra wrapping bags ang kailangan kapag nagpasabay ka kay Jojo!",
-    video: "We see Bea, air in the wind, breathing clean air while the many moving vehicles are slowly reduced",
+    audio:
+      "After all, no extra cars or trucks will be added on the road, wala rin extra wrapping bags ang kailangan kapag nagpasabay ka kay Jojo!",
+    video:
+      "We see Bea, air in the wind, breathing clean air while the many moving vehicles are slowly reduced",
     image: "/product-showcase/jojo/scene-16.png",
   },
   {
@@ -224,17 +337,105 @@ const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
     image: "/product-showcase/jojo/jojo-app-badges.png",
   },
   {
-    audio: "If you want to know more about us, visit myJojo.com or follow us on social media at @Jojodelivers.",
+    audio:
+      "If you want to know more about us, visit myJojo.com or follow us on social media at @Jojodelivers.",
     video: "MyJojo.com\n\nFB, TW, IG, YT\n@Jojodelivers",
     image: "/product-showcase/jojo/jojo-endcard.png",
   },
 ];
 
-export function PromptGuideSection() {
+const CHARACTER_STILL_PROMPT = `Split-screen character reference sheet, 2K, [16:9 or 9:16].
+
+LEFT half: full-body standing, head-to-toe, facing camera, relaxed neutral stance.
+RIGHT half: tight chest-up portrait of the SAME person, same wardrobe, same lighting.
+
+Subject: [age], [build], [2–3 distinguishing features], [hair], wearing [wardrobe], [demeanor].
+
+Background: pure white seamless void, empty, no props, no floor line distraction.
+Lighting: flat soft even studio light, frontal, no rim, no colour cast, no dramatic shadows.
+Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz or light stubble, faint freckling. No beauty filter, no plastic skin, no glossy retouching.
+
+Photorealistic. Identity must match exactly across both panels.`;
+
+const LOCATION_STILL_PROMPT = `Empty boxing gym interior, 2K, 9:16 vertical.
+
+Worn wooden floor with scuffs, heavy bags in the mid-ground, ropes of a ring visible on the right, chalk dust in the air.
+Late-afternoon light from high windows on the left — warm shafts cutting through cooler shadow in the corners.
+Materials: scuffed timber, worn leather bags, dusty air.
+No people, no text, no logos. Photorealistic, natural colour, slight film grain.`;
+
+function TryOnLucy({
+  onTryVideo,
+}: {
+  onTryVideo: (prompt: string, engine: VideoEngine) => void;
+}) {
+  const engineEntries = Object.entries(VIDEO_PAYGO_ENGINES) as [
+    VideoEngine,
+    (typeof VIDEO_PAYGO_ENGINES)[VideoEngine],
+  ][];
+  const ordered = [
+    ...engineEntries.filter(([, e]) => e.popular),
+    ...engineEntries.filter(([, e]) => !e.popular),
+  ];
+  const [prompt, setPrompt] = useState(
+    "@Image1 standing in @Image2. Relight to match the room. Soft breathing, tiny weight shift. Static medium shot. No subtitles.",
+  );
+  const [engine, setEngine] = useState<VideoEngine>("veo");
+
+  function handleTry() {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    onTryVideo(trimmed, engine);
+    document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  return (
+    <div className="rounded-2xl border border-purple/30 bg-purple-wash/50 p-4">
+      <p className="text-sm font-extrabold text-foreground">Try on Lucy</p>
+      <p className="mt-1 text-xs text-muted">
+        Paste a video prompt, pick an engine, and jump to pay-as-you-go with it prefilled.
+      </p>
+      <textarea
+        className="mt-3 w-full rounded-2xl border border-border bg-white p-3 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+        rows={3}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {ordered.map(([id, e]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={engine === id}
+            onClick={() => setEngine(id)}
+            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+              engine === id
+                ? "border-purple bg-purple text-white"
+                : "border-border bg-white text-muted hover:border-purple/40"
+            }`}
+          >
+            {e.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={handleTry}
+        className="mt-3 w-full rounded-full bg-purple py-2.5 text-sm font-bold text-white shadow-soft"
+      >
+        Use this in pay as you go
+      </button>
+    </div>
+  );
+}
+
+export function PromptGuideSection({
+  onTryVideo,
+}: {
+  onTryVideo?: (prompt: string, engine: VideoEngine) => void;
+}) {
   const jojoDetailsRef = useRef<HTMLDetailsElement | null>(null);
 
-  // Auto-opens the JoJo storyboard disclosure when arriving via a direct
-  // link to it (e.g. the "See a real example" link on /ads).
   useEffect(() => {
     if (window.location.hash === "#jojo-case-study" && jojoDetailsRef.current) {
       jojoDetailsRef.current.open = true;
@@ -248,130 +449,284 @@ export function PromptGuideSection() {
       iconColor="text-purple"
       icon="📝"
       title="Our prompt guide"
-      subtitle="Character → place → video — pasteable prompts at every step."
+      subtitle="Character → place → embed → style → craft → longer cuts."
     >
       <p className="text-sm leading-relaxed text-muted">
-        Six easy steps. At each one you get a short explanation, then a cream box you can copy-paste.
-        Stack: make stills in ChatGPT / GPT Image (or any strong image model) → animate with Seedance,
-        Veo, Kling, or another engine on this page → stitch longer cuts in{" "}
+        Six steps from a locked character still to a finished clip. Generate stills with GPT Image or
+        Nano Banana Pro (or paste from any strong image model), animate with Seedance 2.5, Seedance
+        2.0, Veo, Kling, Kling v3, MiniMax, or Grok on this page, then stitch longer cuts in{" "}
         <a href="/stitch" className="font-semibold text-purple underline">
           /stitch
         </a>
         .
       </p>
 
-      <Step n={1} title="Create your character image">
+      <Step n={1} title="Character still">
         <p>
-          Use ChatGPT / GPT Image (or any strong image model). Aim for 2K, and match the aspect you
-          want later (16:9, 9:16, etc.).
-        </p>
-        <p>
-          Ask for a <strong className="text-foreground">split-screen sheet</strong>: left = full-body
-          standing head-to-toe, right = tight chest-up. Same person both sides. Pure white / empty
-          seamless background. Flat, soft, even light — boring on purpose (no rim light, no colour
-          cast).
+          Formula:{" "}
+          <strong className="text-foreground">
+            age + build + features + hair + wardrobe + demeanor
+          </strong>
+          . Push pores and real skin — uneven tone, peach fuzz, faint freckling. No beauty filter.
         </p>
         <p>
-          Push hyper-real skin: visible pores, fine lines, uneven tone, peach fuzz or stubble, faint
-          freckling. No beauty filter, no plastic skin, no glossy magazine look.
+          Ask for a <strong className="text-foreground">split-screen sheet</strong> on white flat
+          light: left = full-body head-to-toe, right = tight chest-up. Same person both sides.
         </p>
         <p>
-          Once this sheet exists, <strong className="text-foreground">never describe the face in text
-          again</strong> — only attach the image.
+          Once the sheet exists,{" "}
+          <strong className="text-foreground">never redescribe the face</strong> — only attach the
+          image.
         </p>
-        <p className="text-xs">
-          <strong className="text-foreground">Good:</strong> pores, faint freckles, slightly uneven
-          tone under the eyes.{" "}
-          <strong className="text-foreground">Plastic:</strong> porcelain skin, beauty-filter glow,
-          perfect symmetry.
-        </p>
-        <PasteBox>{`Split-screen character reference sheet, 2K, [16:9 or 9:16].
-
-LEFT half: full-body standing, head-to-toe, facing camera, relaxed neutral stance.
-RIGHT half: tight chest-up portrait of the SAME person, same wardrobe, same lighting.
-
-Subject: [age], [features — build, hair, skin, 2–3 distinguishing details], wearing [wardrobe].
-
-Background: pure white seamless void, empty, no props, no floor line distraction.
-Lighting: flat soft even studio light, frontal, no rim, no colour cast, no dramatic shadows.
-Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz or light stubble, faint freckling. No beauty filter, no plastic skin, no glossy retouching.
-
-Photorealistic. Identity must match exactly across both panels.`}</PasteBox>
+        <PasteBox>{CHARACTER_STILL_PROMPT}</PasteBox>
+        <StillGenerateBox
+          placeholder="Paste or tweak your character still prompt…"
+          defaultPrompt={CHARACTER_STILL_PROMPT}
+        />
       </Step>
 
-      <Step n={2} title="Create your location image">
+      <Step n={2} title="Location still">
         <p>
-          Generate this separately — <strong className="text-foreground">no character in frame</strong>.
-          Match the same aspect ratio you used for the character (9:16 or 16:9).
+          Generate separately — <strong className="text-foreground">empty, no character</strong>.
+          Match the character sheet&apos;s aspect (9:16 or 16:9). Name light / weather and materials
+          so the place feels tangible.
         </p>
-        <p>
-          Pick a real place with clear light direction and depth. Empty enough that a person can
-          stand in it later without fighting clutter.
-        </p>
-        <PasteBox>{`Empty boxing gym interior, 2K, 9:16 vertical.
-
-Worn wooden floor with scuffs, heavy bags in the mid-ground, ropes of a ring visible on the right, chalk dust in the air.
-Late-afternoon light from high windows on the left — warm shafts cutting through cooler shadow in the corners.
-No people, no text, no logos. Photorealistic, natural colour, slight film grain.`}</PasteBox>
+        <PasteBox>{LOCATION_STILL_PROMPT}</PasteBox>
+        <StillGenerateBox
+          placeholder="Paste or tweak your empty location prompt…"
+          defaultPrompt={LOCATION_STILL_PROMPT}
+        />
       </Step>
 
-      <Step n={3} title="Put the character IN the location (don’t look fake)">
+      <Step n={3} title="Embed the character in the place">
         <ul className="list-disc space-y-1.5 pl-4">
           <li>
-            Make a <strong className="text-foreground">combined still first</strong>, or in video use
-            @Image1 for the person and @Image2 for the place.
+            Make a <strong className="text-foreground">composite still</strong> first, or in video
+            use @Image1 for the person and @Image2 for the place.
           </li>
           <li>
             <strong className="text-foreground">Relight</strong> the person to match the place —
-            discard the sheet&apos;s flat studio light.
+            drop the sheet&apos;s flat studio light.
           </li>
-          <li>Feet planted on the ground, shadow direction matching the room, correct scale.</li>
-          <li>Avoid opposite colour temperatures fighting (warm subject / cold background).</li>
+          <li>Feet planted, shadow direction matching the room, correct scale.</li>
           <li>
-            Add living micro-motion later (breathing, weight shift) — not a mannequin freeze.
+            Then a living hold: soft breathing, tiny weight shift — not a mannequin freeze.
           </li>
         </ul>
-        <p className="text-xs font-semibold text-foreground">Pasteable still (composite):</p>
+        <p className="text-xs font-semibold text-foreground">Composite still:</p>
         <PasteBox>{`Photoreal still. @Image1 is the person (face, hair, body, wardrobe — identity lock). @Image2 is the location (environment + lighting only).
 
 Place @Image1 naturally inside @Image2. Relight the person to match the location’s light direction and colour temperature — do not keep the white-studio light from the character sheet.
 Feet grounded on the floor, contact shadow matching the room’s light. Correct scale for the space.
 Same camera height as a documentary still. No beauty filter. No text, logos, or watermarks.`}</PasteBox>
-        <p className="text-xs font-semibold text-foreground">Pasteable short video:</p>
+        <p className="text-xs font-semibold text-foreground">Living hold (short video):</p>
         <PasteBox>{`@Image1 person standing in @Image2 location. Relight subject to match the room. Soft natural breathing and a tiny weight shift. Static medium shot, one hold. No subtitles, no logos.`}</PasteBox>
       </Step>
 
-      <Step n={4} title="Write the video prompt (one scene)">
+      <Step n={4} title="Pick a style path">
         <p>
-          Formula: <strong className="text-foreground">who (@Image) + where + what happens + ONE
-          camera move + light + no subtitles</strong>.
+          Three starting points — each with a real Lucy clip (or prompt-only) and a pasteable prompt.
         </p>
-        <p className="text-xs font-semibold text-foreground">UGC product:</p>
-        <PasteBox>{`@Image1 (your character) in a bright bathroom, morning window light. Medium selfie-style handheld sway. She twists open @Image2 (product), applies it, presses lips together, genuine small smile. {"Okay, this shade is unreal."} Warm natural light, iPhone UGC look. No subtitles beyond the product label.`}</PasteBox>
-        <p className="text-xs font-semibold text-foreground">Cinematic close-up:</p>
-        <PasteBox>{`@Image1 close-up, static camera. Soft side light from a window. She exhales, shoulders drop, eyes soften — a private almost-smile. Shallow depth of field. No dialogue, no subtitles, no logos.`}</PasteBox>
-        <p className="text-xs font-semibold text-foreground">Extreme wide:</p>
-        <PasteBox>{`Extreme wide shot of @Image1 small in @Image2 landscape. Slow gentle pull-back. Natural wind in clothing/hair. Golden-hour light. No subtitles, no logos.`}</PasteBox>
-        <p>
-          <strong className="text-foreground">Pick one camera</strong> (one-liners): static hold ·
-          slow push-in · gentle pull-back · slight handheld sway · low tracking beside subject ·
-          slow pan following motion.
-        </p>
-        <p>
-          <strong className="text-foreground">Trap:</strong> don&apos;t name gear as an object
-          (&quot;FPV drone&quot;) — describe the move (&quot;fast forward rush hugging the ground,
-          whip-tilting up at the end&quot;).
-        </p>
-        <p>
-          <strong className="text-foreground">Sound:</strong> write per-shot dialogue/SFX, or say
-          &quot;no music&quot; and add score later in /stitch.
-        </p>
-        <p>
-          Draft cheap first, then upscale the keeper — one clean take beats ten muddy ones.
+        <div className="grid gap-3">
+          {STYLE_PATHS.map((path) => (
+            <div key={path.title} className="rounded-2xl border border-border bg-cream/50 p-3">
+              <p className="text-sm font-extrabold text-foreground">{path.title}</p>
+              <p className="text-xs text-muted">{path.blurb}</p>
+              {path.videoSrc ? (
+                <video
+                  className="mx-auto mt-2 w-full max-w-md rounded-xl"
+                  src={path.videoSrc}
+                  controls
+                  loop
+                  muted
+                  playsInline
+                />
+              ) : (
+                <p className="mt-2 rounded-lg border border-dashed border-border bg-white/70 p-3 text-[11px] italic text-muted">
+                  Prompt-only example — no third-party clip embedded.
+                </p>
+              )}
+              <PasteBox>{path.prompt}</PasteBox>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted">
+          More product-ad results:{" "}
+          <a href="#harper" className="font-semibold text-purple underline">
+            Harper
+          </a>
+          {" · "}
+          <span className="text-foreground">/product-showcase/veo_generic_cup.mp4</span> and Harper
+          clips under <span className="text-foreground">/product-showcase/</span>.
         </p>
       </Step>
 
-      <Step n={5} title="Longer than ~15 seconds">
+      <Step n={5} title="Craft details">
+        <p>
+          One camera move, physical expression, weather/light, Seedance limits, keyframes — nested
+          below so the main path stays clean.
+        </p>
+
+        <details className="rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">
+            Camera angles + moves (paste snippets)
+          </summary>
+          <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
+            <li>
+              <strong className="text-foreground">Extreme close-up:</strong> eyes and mouth fill the
+              frame; shallow focus; pores readable.
+            </li>
+            <li>
+              <strong className="text-foreground">Close-up:</strong> face and shoulders; hold or tiny
+              push-in.
+            </li>
+            <li>
+              <strong className="text-foreground">Medium:</strong> waist-up; good for product demos
+              and dialogue.
+            </li>
+            <li>
+              <strong className="text-foreground">Wide / establishing:</strong> full body + room;
+              sets geography before closer coverage.
+            </li>
+            <li>
+              <strong className="text-foreground">Low angle:</strong> camera near the floor looking
+              up — subject feels powerful.
+            </li>
+            <li>
+              <strong className="text-foreground">High angle:</strong> looking down — vulnerability
+              or overview.
+            </li>
+            <li>
+              <strong className="text-foreground">Tracking:</strong> camera slides beside the subject
+              at matching pace — one direction only.
+            </li>
+            <li>
+              <strong className="text-foreground">Push / pull:</strong> slow dolly in for intimacy,
+              slow pull-back to reveal scale.
+            </li>
+            <li>
+              <strong className="text-foreground">Handheld sway:</strong> slight organic drift —
+              selfie / UGC energy, not shake-cam.
+            </li>
+            <li>
+              <strong className="text-foreground">Whip pan:</strong> fast horizontal blur between two
+              clear end-frames — use sparingly.
+            </li>
+          </ul>
+          <p className="mt-2 text-xs text-muted">
+            <strong className="text-foreground">One move only.</strong> Don&apos;t name gear as an
+            object (&quot;FPV drone&quot;) — describe the move (&quot;fast forward rush hugging the
+            ground, whip-tilting up at the end&quot;).
+          </p>
+          <PasteBox>{`Camera: medium shot, slow push-in, eye-level. One move only. Hold the final frame clean.`}</PasteBox>
+        </details>
+
+        <details className="rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">
+            Expression library (physical detail, not labels)
+          </summary>
+          <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
+            <li>Shoulders drop; a long exhale; jaw unclenches.</li>
+            <li>One eyebrow lifts; corner of the mouth tugs, then settles.</li>
+            <li>Eyes glass slightly; blink is slow; gaze holds past the lens.</li>
+            <li>Lips press together, then break into a small real smile.</li>
+            <li>Weight shifts to the back foot; fingers fidget once on the product.</li>
+            <li>Chin tips up; nostrils flare; a sharp inhale before speaking.</li>
+            <li>Private almost-smile — mouth soft, eyes warmer, no teeth yet.</li>
+          </ul>
+          <p className="mt-2 text-xs text-muted">
+            Write the body, not the mood word. &quot;She&apos;s happy&quot; drifts; the physical beat
+            locks.
+          </p>
+        </details>
+
+        <details className="rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">
+            Weather, light, Seedance limits, keyframes
+          </summary>
+          <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
+            <li>
+              Name <strong className="text-foreground">weather / light</strong> in the prompt
+              (golden hour shafts, overcast softbox sky, rain on glass) so the model commits.
+            </li>
+            <li>
+              <strong className="text-foreground">Seedance:</strong> 2.0 accepts up to ~9 reference
+              images; 2.5 up to ~30. Use 4–8 that matter. On Lucy, More options = 1 photo per
+              generation; for saved character/location libraries use{" "}
+              <a href="/ads" className="font-semibold text-purple underline">
+                /ads → Cast &amp; Locations
+              </a>
+              .
+            </li>
+            <li>
+              Lock <strong className="text-foreground">start + end keyframes</strong> (first and last
+              frame) for anything that must not change — face, product label, wardrobe.
+            </li>
+          </ul>
+        </details>
+
+        <details className="rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">
+            More worked prompts (by style)
+          </summary>
+          <div className="mt-3 space-y-4">
+            {PROMPT_STYLE_EXAMPLES.map((ex, i) => (
+              <div key={i} className="rounded-xl bg-cream p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-purple">
+                  {ex.category}
+                </p>
+                <p className="text-sm font-semibold text-foreground">{ex.title}</p>
+                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted">
+                  {ex.prompt}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className="rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">
+            Full template block structure
+          </summary>
+          <div className="mt-3 space-y-3 text-xs leading-relaxed text-muted">
+            <div>
+              <p className="font-semibold text-foreground">
+                Character text (only when you still need it)
+              </p>
+              <p className="mt-1">
+                age + build + features + hair + wardrobe + demeanor. Prefer attaching the sheet once
+                it exists.
+              </p>
+              <p className="mt-1 rounded-lg bg-cream p-2 italic">
+                &quot;Late 20s, lean athletic build, faint scar above the left eyebrow, cropped dark
+                hair, wearing a weathered leather jacket over a grease-stained white tank top, moves
+                with coiled, watchful tension.&quot;
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">The full block structure</p>
+              <pre className="mt-1 overflow-x-auto rounded-lg bg-cream p-2 text-[11px] leading-relaxed text-foreground">{`[REFERENCE]
+@Image1 - who/what. Use for face/body/wardrobe/identity only, not background or lighting.
+
+[CHARACTER]
+age + build + distinguishing features + hair + wardrobe + demeanor
+
+[SCENE]
+where, when, atmosphere, lighting/color tone - 2-3 sentences
+
+[SHOT SEQUENCE]
+SHOT 1 (0:00-0:03): camera framing + ONE movement - subject action. {dialogue}
+SHOT 2 (0:03-0:06): camera framing + movement - subject action. (music note)
+SHOT 3 (0:06-0:08): camera framing + movement - subject action. <sfx note>
+
+[CONSTRAINTS]
+no subtitles/logos/watermarks unless wanted + a style anchor`}</pre>
+            </div>
+          </div>
+        </details>
+      </Step>
+
+      <Step n={6} title="Longer cuts + /stitch">
         <p>
           Break the story into beats. Generate each beat as its own short clip, then combine in{" "}
           <a href="/stitch" className="font-semibold text-purple underline">
@@ -393,8 +748,10 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
               <tr className="align-top">
                 <td className="border-b border-border py-1.5 pr-2 text-foreground">1. Hook</td>
                 <td className="border-b border-border py-1.5 pr-2">Medium, slight handheld</td>
-                <td className="border-b border-border py-1.5 pr-2">She looks to camera, lifts product</td>
-                <td className="border-b border-border py-1.5">{"\"Wait — try this.\""}</td>
+                <td className="border-b border-border py-1.5 pr-2">
+                  She looks to camera, lifts product
+                </td>
+                <td className="border-b border-border py-1.5">&quot;Wait — try this.&quot;</td>
               </tr>
               <tr className="align-top">
                 <td className="border-b border-border py-1.5 pr-2 text-foreground">2. Demo</td>
@@ -406,208 +763,18 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
                 <td className="border-b border-border py-1.5 pr-2 text-foreground">3. Payoff</td>
                 <td className="border-b border-border py-1.5 pr-2">Medium, static hold</td>
                 <td className="border-b border-border py-1.5 pr-2">Smile, holds product to label</td>
-                <td className="border-b border-border py-1.5">{"\"Yeah. Keeping this.\""}</td>
+                <td className="border-b border-border py-1.5">&quot;Yeah. Keeping this.&quot;</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p>
-          <strong className="text-foreground">Seedance:</strong> 2.0 accepts up to ~9 reference
-          images; 2.5 up to ~30. Use 4–8 that matter. On Lucy, More options = 1 photo per generation;
-          for saved character/location libraries use{" "}
-          <a href="/ads" className="font-semibold text-purple underline">
-            /ads → Cast &amp; Locations
-          </a>
-          . Prefer generating directly in Seedance (or Veo / Kling) on this page — no extra middleware
-          required.
-        </p>
-        <p>
-          Lock start + end keyframes (first and last frame) for anything that must not change —
-          face, product label, wardrobe.
+        <p className="text-xs text-muted">
+          Draft cheap first, then upscale the keeper. Sound: write per-shot dialogue/SFX, or say
+          &quot;no music&quot; and add score later in /stitch.
         </p>
       </Step>
 
-      <Step n={6} title="Results — see it working">
-        <p>Real clips we generated with this approach:</p>
-        <video
-          className="mx-auto w-full max-w-xl rounded-xl"
-          src="/trailers/kirsty-moon-veo-audio.mp4"
-          controls
-          loop
-          muted
-          playsInline
-        />
-        <p className="text-xs">
-          More product-ad examples:{" "}
-          <a href="#harper" className="font-semibold text-purple underline">
-            jump to Harper
-          </a>
-          .
-        </p>
-      </Step>
-
-      <details className="rounded-2xl border border-border bg-white/70 p-3">
-        <summary className="cursor-pointer text-xs font-semibold text-purple">
-          Camera angles + moves (paste snippets)
-        </summary>
-        <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
-          <li>
-            <strong className="text-foreground">Extreme close-up:</strong> eyes and mouth fill the
-            frame; shallow focus; pores readable.
-          </li>
-          <li>
-            <strong className="text-foreground">Close-up:</strong> face and shoulders; hold or tiny
-            push-in.
-          </li>
-          <li>
-            <strong className="text-foreground">Medium:</strong> waist-up; good for product demos and
-            dialogue.
-          </li>
-          <li>
-            <strong className="text-foreground">Wide / establishing:</strong> full body + room; sets
-            geography before closer coverage.
-          </li>
-          <li>
-            <strong className="text-foreground">Low angle:</strong> camera near the floor looking up —
-            subject feels powerful.
-          </li>
-          <li>
-            <strong className="text-foreground">High angle:</strong> looking down — vulnerability or
-            overview.
-          </li>
-          <li>
-            <strong className="text-foreground">Tracking:</strong> camera slides beside the subject at
-            matching pace — one direction only.
-          </li>
-          <li>
-            <strong className="text-foreground">Push / pull:</strong> slow dolly in for intimacy, slow
-            pull-back to reveal scale.
-          </li>
-          <li>
-            <strong className="text-foreground">Handheld sway:</strong> slight organic drift —
-            selfie / UGC energy, not shake-cam.
-          </li>
-          <li>
-            <strong className="text-foreground">Whip pan:</strong> fast horizontal blur between two
-            clear end-frames — use sparingly.
-          </li>
-        </ul>
-        <PasteBox>{`Camera: medium shot, slow push-in, eye-level. One move only. Hold the final frame clean.`}</PasteBox>
-      </details>
-
-      <details className="rounded-2xl border border-border bg-white/70 p-3">
-        <summary className="cursor-pointer text-xs font-semibold text-purple">
-          Expression library (physical detail, not labels)
-        </summary>
-        <ul className="mt-3 list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted">
-          <li>Shoulders drop; a long exhale; jaw unclenches.</li>
-          <li>One eyebrow lifts; corner of the mouth tugs, then settles.</li>
-          <li>Eyes glass slightly; blink is slow; gaze holds past the lens.</li>
-          <li>Lips press together, then break into a small real smile.</li>
-          <li>Weight shifts to the back foot; fingers fidget once on the product.</li>
-          <li>Chin tips up; nostrils flare; a sharp inhale before speaking.</li>
-          <li>Private almost-smile — mouth soft, eyes warmer, no teeth yet.</li>
-        </ul>
-        <p className="mt-2 text-xs text-muted">
-          Write the body, not the mood word. &quot;She&apos;s happy&quot; drifts; the physical beat
-          locks.
-        </p>
-      </details>
-
-      <details className="rounded-2xl border border-border bg-white/70 p-3">
-        <summary className="cursor-pointer text-xs font-semibold text-purple">
-          More worked prompts (by style)
-        </summary>
-        <div className="mt-3 space-y-4">
-          {PROMPT_STYLE_EXAMPLES.map((ex, i) => (
-            <div key={i} className="rounded-xl bg-cream p-3">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-purple">{ex.category}</p>
-              <p className="text-sm font-semibold text-foreground">{ex.title}</p>
-              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted">{ex.prompt}</pre>
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 text-[11px] italic text-muted">
-          The UGC examples show how to bring in your own{" "}
-          <strong>Cast &amp; Locations</strong> references (your character photo, your product photo)
-          and change everything else — setting, wardrobe, dialogue — freely around them.
-        </p>
-      </details>
-
-      <details className="rounded-2xl border border-border bg-white/70 p-3">
-        <summary className="cursor-pointer text-xs font-semibold text-purple">
-          Full template block structure
-        </summary>
-        <div className="mt-3 space-y-3 text-xs leading-relaxed text-muted">
-          <div>
-            <p className="font-semibold text-foreground">Describing a character (when you still need text)</p>
-            <p className="mt-1">
-              Formula:{" "}
-              <strong>
-                age + build + 2–3 distinguishing features + hair + wardrobe (2–3 specific items) +
-                demeanor
-              </strong>
-              . Prefer attaching the character sheet instead once it exists.
-            </p>
-            <p className="mt-1 rounded-lg bg-cream p-2 italic">
-              &quot;Late 20s, lean athletic build, faint scar above the left eyebrow, cropped dark
-              hair, wearing a weathered leather jacket over a grease-stained white tank top, moves
-              with coiled, watchful tension.&quot;
-            </p>
-          </div>
-          <div>
-            <p className="font-semibold text-foreground">The full block structure</p>
-            <pre className="mt-1 overflow-x-auto rounded-lg bg-cream p-2 text-[11px] leading-relaxed text-foreground">{`[REFERENCE]
-@Image1 - who/what. Use for face/body/wardrobe/identity only, not background or lighting.
-
-[CHARACTER]
-age + build + distinguishing features + hair + wardrobe + demeanor
-
-[SCENE]
-where, when, atmosphere, lighting/color tone - 2-3 sentences
-
-[SHOT SEQUENCE]
-SHOT 1 (0:00-0:03): camera framing + ONE movement - subject action. {dialogue}
-SHOT 2 (0:03-0:06): camera framing + movement - subject action. (music note)
-SHOT 3 (0:06-0:08): camera framing + movement - subject action. <sfx note>
-
-[CONSTRAINTS]
-no subtitles/logos/watermarks unless wanted + a style anchor`}</pre>
-          </div>
-          <div>
-            <p className="font-semibold text-foreground">What a director thinks about that most prompts skip</p>
-            <ul className="mt-1 list-disc space-y-1 pl-4">
-              <li>
-                <strong>Shot size, chosen on purpose</strong> — extreme close-up, close-up, medium,
-                wide/establishing. Don&apos;t default to medium every time.
-              </li>
-              <li>
-                <strong>Coverage</strong> — a wide shot that establishes the space, then close-ups on
-                top of it, reads as directed.
-              </li>
-              <li>
-                <strong>The 180-degree rule</strong> — keep people on the same screen-left/right side
-                across cuts in a conversation.
-              </li>
-              <li>
-                <strong>Sound as 4 separate layers</strong> — dialogue, ambience, sound effects,
-                score. Silence is also a deliberate choice.
-              </li>
-              <li>
-                <strong>Cut rhythm matches the emotional beat</strong> — fast cuts for energy, long
-                holds for intimacy or dread.
-              </li>
-              <li>
-                <strong>Color and mood</strong> — warm vs. cool, high-key vs. low-key.
-              </li>
-              <li>
-                <strong>Name the physical detail, not the label</strong> — not &quot;an
-                explosion&quot;, but the fuel-tank rupture and the orange fireball.
-              </li>
-            </ul>
-          </div>
-        </div>
-      </details>
+      {onTryVideo && <TryOnLucy onTryVideo={onTryVideo} />}
 
       <div id="jojo-case-study" className="rounded-2xl border border-purple/20 bg-white/80 p-4">
         <p className="text-xs font-bold uppercase tracking-wide text-purple">Real case study</p>
@@ -626,7 +793,10 @@ no subtitles/logos/watermarks unless wanted + a style anchor`}</pre>
           bigger mission (less traffic and pollution) plus a clear call to download. Every scene has
           its own shot description and its own line of narration — a storyboard, not just a script.
         </p>
-        <details ref={jojoDetailsRef} className="mt-3 rounded-2xl border border-border bg-white/70 p-3">
+        <details
+          ref={jojoDetailsRef}
+          className="mt-3 rounded-2xl border border-border bg-white/70 p-3"
+        >
           <summary className="cursor-pointer text-xs font-semibold text-purple">
             View the full storyboard (her actual document, scene by scene)
           </summary>
@@ -650,7 +820,7 @@ no subtitles/logos/watermarks unless wanted + a style anchor`}</pre>
                         <img
                           src={scene.image}
                           alt={`Scene ${i + 1} storyboard image`}
-                          className="h-24 w-24 rounded-lg border border-border object-cover bg-white"
+                          className="h-24 w-24 rounded-lg border border-border bg-white object-cover"
                         />
                       )}
                     </td>
@@ -677,13 +847,6 @@ no subtitles/logos/watermarks unless wanted + a style anchor`}</pre>
 
         <div className="mx-auto mt-3 max-w-md overflow-hidden rounded-2xl border border-border">
           <iframe
-            // Real fix (live QA find, 2026-09-17): the descriptive slug
-            // ("jojo-pasabay-delivery") in the href's video permalink isn't
-            // something the video.php plugin resolves - it silently failed
-            // to embed and fell through to a broken/blank iframe instead.
-            // Facebook's own embed-code generator for this exact video
-            // (confirmed by opening its Embed panel directly) omits the
-            // slug entirely, so match that canonical form.
             src="https://www.facebook.com/plugins/video.php?height=314&href=https%3A%2F%2Fwww.facebook.com%2FmyJoJo.live%2Fvideos%2F2521431254554554%2F&show_text=false&width=560&t=0"
             width="100%"
             height="314"
@@ -696,7 +859,8 @@ no subtitles/logos/watermarks unless wanted + a style anchor`}</pre>
         </div>
         <p className="mt-2 text-xs text-muted">
           That&apos;s the real, finished ad, embedded directly from JoJo&apos;s own Facebook page —
-          not made by us, shown here purely as a real example of a storyboard becoming a finished ad.
+          not made by us, shown here purely as a real example of a storyboard becoming a finished
+          ad.
         </p>
       </div>
     </GuideCard>

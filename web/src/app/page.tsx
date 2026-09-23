@@ -1425,11 +1425,13 @@ const PAYGO_PRICE_LABEL = `$${(VIDEO_PAYGO_PRICE_USD_CENTS / 100).toFixed(2)}`;
 function PayAsYouGoVideoSection({
   seedPrompt,
   seedImageBlob,
+  seedEngine,
   seedVersion,
   header,
 }: {
   seedPrompt: string | null;
   seedImageBlob: Blob | null;
+  seedEngine: VideoEngine | null;
   seedVersion: number;
   header?: React.ReactNode;
 }) {
@@ -1470,6 +1472,7 @@ function PayAsYouGoVideoSection({
   useEffect(() => {
     if (seedVersion === 0) return;
     if (seedPrompt) setPrompt(seedPrompt);
+    if (seedEngine) setEngine(seedEngine);
     if (seedImageBlob) {
       media.addItem(seedImageBlob);
       if (optionsRef.current) optionsRef.current.open = true;
@@ -2022,11 +2025,17 @@ export default function Home() {
   const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
   const [seedImageBlob, setSeedImageBlob] = useState<Blob | null>(null);
   const [seedVersion, setSeedVersion] = useState(0);
+  const [seedEngine, setSeedEngine] = useState<VideoEngine | null>(null);
 
-  function handleTryItYourself(prompt: string, imageBlob: Blob | null) {
+  function handleTryItYourself(prompt: string, imageBlob: Blob | null, engine?: VideoEngine) {
     setSeedPrompt(prompt);
     setSeedImageBlob(imageBlob);
+    setSeedEngine(engine ?? null);
     setSeedVersion((v) => v + 1);
+  }
+
+  function handleTryVideoFromGuide(prompt: string, engine: VideoEngine) {
+    handleTryItYourself(prompt, null, engine);
   }
 
   // Page order (2026-09-23, per direct request): 1) the generator - prompt,
@@ -2037,8 +2046,8 @@ export default function Home() {
     <div className="min-h-screen px-4 py-10 sm:px-6 sm:py-16">
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
 
-        <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedVersion={seedVersion} header={<SiteNav />} />
-        <PromptGuideSection />
+        <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} />
+        <PromptGuideSection onTryVideo={handleTryVideoFromGuide} />
         <ProductAdSection />
         <CinematicExamplesSection onTryItYourself={handleTryItYourself} />
 
