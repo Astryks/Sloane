@@ -1,6 +1,16 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-23, evening - cleaned Prompt Guide + Stripe still credits (images-left tracker)
+## Latest update, 2026-09-23 - free /stitch editor: large-file export, independent audio, mask/unmask, Draft vs Final
+
+- **Where**: free browser editor at `lucylabs.app/stitch` (`web/src/app/stitch`). No Stripe/CLAIMING changes in this work.
+- **Large multi-GB sources**: Export no longer copies whole originals into ffmpeg MEMFS. Clips/overlays/audio are mounted via **WORKERFS** when available; only the **selected trim window** is extracted into a small temp file, then the existing scale/concat/xfade pipeline runs. Soft warnings talk about *selected-section payload*, not raw upload size. Progress shows “extracting section from large file…”.
+- **Independent audio under later clips**: On each main-sequence clip — **Lift audio** creates a dialogue bar from that clip’s current trim and mutes the clip; **Audio thru** does the same and extends the bar through the end of the main sequence (clip1 dialogue under clip2+clip3, then lift clip4 later).
+- **Timeline usability**: Fit uses the real scroll-container width; zoom can go down to ~0.5px/s; dragging near edges auto-scrolls; long projects prefer Fit; duration badges on blocks; “Use entire source” confirms when the file is >5 minutes.
+- **Mask / unmask**: Drag the **amber left/right edges** on a video (or audio/overlay) bar to crop start/end. **Right-click** a clip to **unmask** — video restores `trim` to the full source (with the same long-file confirm as “Use entire source”); audio restores `sourceStart`/`sourceEnd` to the full file (mirrors “Use entire audio”, track stays); overlays restore full source window and expand the bar. Already-full clips no-op. Hint under the timeline: “Drag amber edges to mask start/end · Right-click clip to unmask”.
+- **Draft vs Final export**: **Download Final** (default path) ≈1080p, `veryfast`, CRF 18, loudnorm. **Download Draft (faster)** ≈720p, `ultrafast`, CRF 23, skips loudnorm / lower AAC bitrate — for timing/layout checks before a Final deliverable.
+- **Honest residual limits**: Exporting an uninterrupted full ~45-minute / multi-GB window is still heavy in single-thread wasm. Multi-thread ffmpeg-core was **not** wired: it needs COOP/COEP / `SharedArrayBuffer`, and this app does not set those headers today (would risk breaking other pages). Follow-up if Sid wants a measured MT speed pass. WORKERFS depends on `@ffmpeg/ffmpeg` 0.12.x + browser File support (Chrome/Edge best). If WORKERFS mount fails and the file is >500MB, export refuses a full `writeFile` rather than risk tab death.
+
+## Previous update, 2026-09-23, evening - cleaned Prompt Guide + Stripe still credits (images-left tracker)
 
 - **Done for this ask (merged to `main`)**: PRs [#4](https://github.com/Astryks/Sloane/pull/4) (six-step Prompt Guide), [#5](https://github.com/Astryks/Sloane/pull/5) (Stripe still paygo + simpler Steps 1–2), [#7](https://github.com/Astryks/Sloane/pull/7) (images-left tracker + stills panel in `#pay-as-you-go`). Tip of main at this writeup: `ca50616`.
 - **Prompt Guide** (`web/src/components/PromptGuide.tsx`, `#prompt-guide`): character → location → embed → style paths (UGC / cinematic / bullet time) → craft details (collapsible) → longer cuts + `/stitch`; JoJo + `#jojo-case-study` kept. Steps 1–2: go to ChatGPT or pick below → example → short guide → paste box → **Popular** / **Others** generators. End of guide seeds video prompt + engine into pay-as-you-go.
@@ -9,6 +19,7 @@
 - **Vendor invisible**: stills use `generateImageVariants` + `publicJson` / `/api/media` — no fal names/URLs in UI, links, Stripe labels, or download filenames.
 - **Still to confirm on production traffic** (no inference keys on the build machine for a live dry-run): first real still-pack purchase → webhook credit → Generate on Lucy → proxied image + images-left decrement. Same open item as video: first real paid guest video end-to-end.
 - **Open follow-ups (unchanged / related)**: dedicated `MEDIA_URL_SECRET`; privacy-policy lawyer pass; mobile vendor-free release + mobile sign-in for clone; optional deeper `/ads` prefill from guide (`?prompt=` only today).
+
 
 ## Previous update, 2026-09-23, later - vendor (fal) fully hidden from visitors; header joined into the generator card
 

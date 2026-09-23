@@ -48,7 +48,7 @@ import {
 type VideoItem = { file: File; id: string; previewUrl: string };
 type Status = "idle" | "loading-ffmpeg" | "processing" | "done" | "error";
 type AspectPreset = "16:9" | "9:16" | "1:1";
-type ExportQuality = "1080p" | "720p";
+type ExportQuality = "final" | "draft"; // final≈1080p+loudnorm; draft≈720p/ultrafast, skips loudnorm
 
 // A single audio layer placed on the COMBINED video's own timeline - e.g.
 // "this song plays from 1:23 to 1:45 of the final video" - not a trim of
@@ -792,7 +792,7 @@ function StitchPageInner() {
   const [progress, setProgress] = useState(0);
   const [exportDetail, setExportDetail] = useState("");
   const [aspectPreset, setAspectPreset] = useState<AspectPreset>("16:9");
-  const [exportQuality, setExportQuality] = useState<ExportQuality>("1080p");
+  const [exportQuality, setExportQuality] = useState<ExportQuality>("final");
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
@@ -1047,7 +1047,7 @@ function StitchPageInner() {
       setTextOverlays(saved.textOverlays);
       setItemTrims(saved.itemTrims);
       setAspectPreset(saved.aspectPreset);
-      setExportQuality(saved.exportQuality);
+      setExportQuality(saved.exportQuality === "draft" || (saved.exportQuality as string) === "720p" ? "draft" : "final");
       setDuckMusic(saved.duckMusic ?? false);
       setError("");
       setSyncMessage("Project loaded from this device.");
@@ -1441,7 +1441,7 @@ function StitchPageInner() {
   // A transparent local estimate before export. Actual size varies with
   // content, but this is intentionally conservative enough to help users
   // spot an unexpectedly huge download before encoding begins.
-  const estimatedOutputBytes = Math.round(totalVideoDuration * (exportQuality === "1080p" ? 8_200_000 : 3_200_000) / 8);
+  const estimatedOutputBytes = Math.round(totalVideoDuration * (exportQuality === "final" ? 8_200_000 : 3_200_000) / 8);
 
   // Every real cut point in the final video's timeline (2026-09-16, per
   // direct follow-up) - 0, the boundary between each pair of clips, and
@@ -1502,6 +1502,52 @@ function StitchPageInner() {
       const current = prev[id];
       if (!current) return prev;
       return { ...prev, [id]: { ...current, ...patch } };
+    });
+  }
+
+  function unmaskMainClip(itemId: string) {
+    const trim = itemTrims[itemId];
+    const fullDuration = itemDurations[itemId];
+    if (!trim || fullDuration == null || fullDuration <= 0) return;
+    const alreadyFull = trim.start <= 0.001 && Math.abs(trim.end - fullDuration) < 0.05;
+    if (alreadyFull) return;
+    if (fullDuration > LONG_SOURCE_SECONDS) {
+      const ok = window.confirm(
+        `This source is ${formatTime(fullDuration)} long. Unmasking uses the entire file and can make the timeline huge and export heavy. Continue?`,
+      );
+      if (!ok) return;
+    }
+    updateItemTrim(itemId, { start: 0, end: fullDuration });
+  }
+
+  function unmaskAudioTrack(trackId: string) {
+    const track = audioTracks.find((candidate) => candidate.id === trackId);
+    if (!track || track.sourceDuration <= 0) return;
+    const sourceStart = track.sourceStart ?? 0;
+    const sourceEnd = track.sourceEnd ?? track.sourceDuration;
+    const alreadyFull = sourceStart <= 0.001 && Math.abs(sourceEnd - track.sourceDuration) < 0.05;
+    if (alreadyFull) return;
+    updateAudioTrack(trackId, { sourceStart: 0, sourceEnd: track.sourceDuration });
+  }
+
+  function unmaskVideoOverlay(overlayId: string) {
+    const overlay = videoOverlays.find((candidate) => candidate.id === overlayId);
+    if (!overlay || overlay.sourceDuration <= 0) return;
+    const alreadyFull =
+      overlay.sourceStart <= 0.001 &&
+      Math.abs(overlay.sourceEnd - overlay.sourceDuration) < 0.05 &&
+      Math.abs(overlay.endSec - overlay.startSec - overlay.sourceDuration) < 0.05;
+    if (alreadyFull) return;
+    if (overlay.sourceDuration > LONG_SOURCE_SECONDS) {
+      const ok = window.confirm(
+        `This overlay source is ${formatTime(overlay.sourceDuration)} long. Unmasking expands it to the full file. Continue?`,
+      );
+      if (!ok) return;
+    }
+    updateVideoOverlay(overlayId, {
+      sourceStart: 0,
+      sourceEnd: overlay.sourceDuration,
+      endSec: overlay.startSec + overlay.sourceDuration,
     });
   }
 
@@ -2473,7 +2519,9 @@ function StitchPageInner() {
     return ffmpeg;
   }
 
-  async function handleCombine() {
+  async function handleCombine(qualityOverride?: ExportQuality) {
+    const activeQuality: ExportQuality = qualityOverride ?? exportQuality;
+    if (qualityOverride) setExportQuality(qualityOverride);
     if (items.length < 1) return;
     setError("");
     if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -2503,9 +2551,13 @@ function StitchPageInner() {
       // portrait, or square without any server-side processing.
       const baseW = aspectPreset === "9:16" ? 1080 : 1920;
       const baseH = aspectPreset === "9:16" ? 1920 : 1080;
-      const qualityScale = exportQuality === "720p" ? 2 / 3 : 1;
+      // Draft = ~720p + faster encode; Final = full 1080p canvas.
+      const qualityScale = activeQuality === "draft" ? 2 / 3 : 1;
       const outputW = Math.round((baseW * qualityScale) / 2) * 2;
       const outputH = Math.round((baseH * qualityScale) / 2) * 2;
+      const encodePreset = activeQuality === "draft" ? "ultrafast" : "veryfast";
+      const encodeCrf = activeQuality === "draft" ? "23" : "18";
+      const skipLoudnorm = activeQuality === "draft";
       // Each clip's real in/out range (2026-09-16, per direct request:
       // "can it also mask parts of the video clips... users want only a
       // part of the clip"). Re-clamped here against this clip's ACTUAL
@@ -2578,7 +2630,7 @@ function StitchPageInner() {
       );
       if (payloadEstimate > ABSURD_EXPORT_PAYLOAD_BYTES) {
         throw new Error(
-          `Selected sections still total ~${Math.round(payloadEstimate / (1024 * 1024))}MB of footage. Shorten the windows (or use 720p) — exporting uninterrupted multi-GB / multi-hour sources can exhaust browser memory even with streaming extracts.`,
+          `Selected sections still total ~${Math.round(payloadEstimate / (1024 * 1024))}MB of footage. Shorten the windows (or use Draft) — exporting uninterrupted multi-GB / multi-hour sources can exhaust browser memory even with streaming extracts.`,
         );
       }
 
@@ -2656,7 +2708,8 @@ function StitchPageInner() {
           // range, which speeds[i] is already clamped to) - applied right
           // after the timestamp reset, before fade/loudnorm operate on
           // what's now this clip's real POST-speed audio.
-          return `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,atempo=${speeds[i]},${fade}loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100[a${i}]`;
+          const loudness = skipLoudnorm ? "" : "loudnorm=I=-16:TP=-1.5:LRA=11,";
+          return `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,atempo=${speeds[i]},${fade}${loudness}aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100[a${i}]`;
         })
         .join(";");
 
@@ -2807,9 +2860,9 @@ function StitchPageInner() {
         // target - crf still controls that). The right lever for "slow" is
         // this, not lowering crf, which would actually reduce quality.
         "-preset",
-        "veryfast",
+        encodePreset,
         "-crf",
-        "18",
+        encodeCrf,
         "-pix_fmt",
         "yuv420p",
         "-c:a",
@@ -2823,7 +2876,7 @@ function StitchPageInner() {
       exportStep = "encoding the MP4";
       setExportDetail("encoding selected sections…");
       const stage1ExitCode = await ffmpeg.exec(args);
-      if (stage1ExitCode !== 0) throw new Error("The local video engine could not write the first export pass. Try 720p or shorter selected windows — large uninterrupted originals can still exceed browser memory even after section extract.");
+      if (stage1ExitCode !== 0) throw new Error("The local video engine could not write the first export pass. Try Draft export or shorter selected windows — large uninterrupted originals can still exceed browser memory even after section extract.");
 
       // Image overlays (logos/watermarks/photos) and text titles/captions
       // (2026-09-16, per direct request - "how can they add images and
@@ -2952,7 +3005,7 @@ function StitchPageInner() {
         if (pass2FilterComplex) {
           const pass2AudioLabel = pass2AudioLabels.length > 1 ? "[overlaymix]" : "[0:a]";
           if (pass2AudioLabels.length > 1) pass2FilterComplex += `;${pass2AudioLabels.join("")}amix=inputs=${pass2AudioLabels.length}:duration=first:normalize=0${pass2AudioLabel}`;
-          pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", pass2AudioLabel, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "final.mp4");
+          pass2Args.push("-filter_complex", pass2FilterComplex, "-map", pass2VideoLabel, "-map", pass2AudioLabel, "-c:v", "libx264", "-preset", encodePreset, "-crf", encodeCrf, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", activeQuality === "draft" ? "128k" : "192k", "final.mp4");
           exportStep = "applying overlays to the MP4";
           const overlayExitCode = await ffmpeg.exec(pass2Args);
           if (overlayExitCode !== 0) throw new Error("The local video engine could not write the overlay pass. Try 720p or shorten the selected windows.");
@@ -3387,7 +3440,12 @@ function StitchPageInner() {
                             transform: isDragging ? `translateX(${reorderDrag!.offsetPx}px)` : undefined,
                             zIndex: isDragging ? 20 : undefined,
                           }}
-                          title={`Video ${itemIndex + 1}: ${formatTime(timelineEntry?.timelineStart ?? 0)}–${formatTime(timelineEntry?.timelineEnd ?? duration)}. Drag the amber edges to trim.`}
+                          title={`Video ${itemIndex + 1}: ${formatTime(timelineEntry?.timelineStart ?? 0)}–${formatTime(timelineEntry?.timelineEnd ?? duration)}. Drag amber edges to mask start/end. Right-click to unmask (use full source).`}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            unmaskMainClip(item.id);
+                          }}
                           className={`group relative h-16 shrink-0 overflow-hidden rounded-none border-y border-r border-white/35 bg-white/10 bg-cover bg-center first:rounded-l-lg last:rounded-r-lg ${itemIndex > 0 ? "border-l-2 border-l-emerald-300/80" : "border-l border-white/35"} ${isDragging ? "opacity-90 shadow-xl" : ""}`}
                         >
                           <div className="pointer-events-none absolute left-1 top-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-white">
@@ -3551,8 +3609,8 @@ function StitchPageInner() {
                                   [...clipBoundaries, previewTime],
                                 )}
                                 style={{ touchAction: "none" }}
-                                className="absolute inset-y-0 left-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
-                                title="Drag this left edge to trim the start"
+                                className="absolute inset-y-0 left-0 z-50 flex w-6 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                                title="Drag this left edge to mask/crop the start"
                               ><span className="pointer-events-none">‹</span></div>
                               <div
                                 onPointerDown={makeAxisDragHandler(
@@ -3561,8 +3619,8 @@ function StitchPageInner() {
                                   [...clipBoundaries, previewTime],
                                 )}
                                 style={{ touchAction: "none" }}
-                                className="absolute inset-y-0 right-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
-                                title="Drag this right edge to trim the end"
+                                className="absolute inset-y-0 right-0 z-50 flex w-6 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                                title="Drag this right edge to mask/crop the end"
                               ><span className="pointer-events-none">›</span></div>
                               {/* Fade in/out (2026-09-16, per direct request
                                   - "give the ability to fade audio and
@@ -3633,13 +3691,21 @@ function StitchPageInner() {
               <div className="space-y-1">
                 {videoOverlays.map((overlay) => (
                   <div key={overlay.id} className="relative h-10 rounded-lg bg-fuchsia-500/10">
-                    <div style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }} className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
+                    <div
+                      style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        unmaskVideoOverlay(overlay.id);
+                      }}
+                      title="Drag edges to mask start/end. Right-click to unmask (use full source)."
+                      className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
                       <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
-                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this narrow edge right to cut off the beginning" className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize bg-fuchsia-300/80" />
-                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => { const nextEnd = Math.max(overlay.startSec + 0.2, v); const cut = overlay.endSec - nextEnd; updateVideoOverlay(overlay.id, { endSec: nextEnd, sourceEnd: Math.max(overlay.sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - cut)) }); }, clipBoundaries)(e); }} title="Drag this narrow edge left to cut off the end" className="absolute inset-y-0 right-0 z-20 w-2 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this edge right to mask/crop the beginning" className="absolute inset-y-0 left-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => { const nextEnd = Math.max(overlay.startSec + 0.2, v); const cut = overlay.endSec - nextEnd; updateVideoOverlay(overlay.id, { endSec: nextEnd, sourceEnd: Math.max(overlay.sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - cut)) }); }, clipBoundaries)(e); }} title="Drag this edge left to mask/crop the end" className="absolute inset-y-0 right-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
                     </div>
                   </div>
                 ))}
@@ -3674,7 +3740,12 @@ function StitchPageInner() {
                       <div
                         style={{ marginLeft: track.startSec * timelinePixelsPerSecond, width: Math.max(24, (track.endSec - track.startSec) * timelinePixelsPerSecond) }}
                         onClick={() => setSelectedAudioTrackId(track.id)}
-                        title="Click this track, then use Fade in or Fade out above"
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          unmaskAudioTrack(track.id);
+                        }}
+                        title="Click to select. Drag amber edges to trim placement. Right-click to unmask (use entire audio source)."
                         className={`group absolute inset-y-0 cursor-pointer overflow-hidden rounded-lg border bg-emerald-700/70 px-1 ${selectedAudioTrackId === track.id ? "border-emerald-100 ring-2 ring-emerald-300/50" : "border-emerald-300/40"}`}
                       >
                         {/* Body drag = reposition (both start/end shift together,
@@ -3779,8 +3850,8 @@ function StitchPageInner() {
                             )(e);
                           }}
                           style={{ touchAction: "none" }}
-                          className="absolute inset-y-0 left-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
-                          title="Drag this left edge to trim the audio start"
+                          className="absolute inset-y-0 left-0 z-50 flex w-6 cursor-ew-resize items-center justify-center border-r-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                          title="Drag this left edge to mask/crop the audio start"
                         ><span className="pointer-events-none">‹</span></div>
                         <div
                           onPointerDown={(e) => {
@@ -3799,8 +3870,8 @@ function StitchPageInner() {
                             )(e);
                           }}
                           style={{ touchAction: "none" }}
-                          className="absolute inset-y-0 right-0 z-50 flex w-5 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
-                          title="Drag this right edge to trim the audio end"
+                          className="absolute inset-y-0 right-0 z-50 flex w-6 cursor-ew-resize items-center justify-center border-l-2 border-amber-300 bg-amber-400/90 text-[13px] font-black text-black shadow-[-2px_0_0_rgba(0,0,0,0.35)] transition hover:bg-amber-200 active:bg-amber-100"
+                          title="Drag this right edge to mask/crop the audio end"
                         ><span className="pointer-events-none">›</span></div>
                         {/* Fade in/out (2026-09-16, per direct request -
                             "give the ability to fade audio and video clips
@@ -4059,8 +4130,11 @@ function StitchPageInner() {
               </div>
             </div>
           </div>
+          <p className="mb-1 text-[11px] font-medium text-amber-200/80">
+            Drag amber edges to mask start/end · Right-click clip to unmask
+          </p>
           <p className="text-[11px] text-white/40">
-            Drag files onto either track above to add clips. Drag the amber handles on either side of a video or audio bar to cut off its start or end. Drag the middle to move the clip or choose a different source window without deleting the original. Video&apos;s top grip strip reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a transition button (fade/dissolve/wipe/slide - blends into that clip from the one before it). Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
+            Drag files onto either track above to add clips. Drag the amber handles on either side of a video or audio bar to cut off its start or end (right-click a clip to unmask / restore the full source). Drag the middle to move the clip or choose a different source window without deleting the original. Video&apos;s top grip strip reorders instead. The small amber dots at each bottom corner fade that clip/track in or out. Each video block also has a speed button (0.5x-2x) and a transition button (fade/dissolve/wipe/slide - blends into that clip from the one before it). Each block has its own ▶/× for play/delete. Shot with a separate camera and mic? An audio track&apos;s 🔗 auto-syncs it to whichever clip it&apos;s near, by matching the real sound in both. Add more than one audio track if you want, say, dialogue and music playing together - they layer/overlap freely. Text titles/captions and image logos/watermarks work the same way - drag to place and size them, and their own small buttons cycle position/size.
             {totalVideoDuration > 0 && ` Your combined video is currently ~${formatTime(totalVideoDuration)} long.`}
           </p>
         </div>
@@ -4185,23 +4259,34 @@ function StitchPageInner() {
             <option value="1:1">Square 1:1</option>
           </select>
         </label>
-        <label className="mr-2 inline-flex items-center gap-2 text-sm text-muted">
-          Quality
-          <select value={exportQuality} onChange={(e) => setExportQuality(e.target.value as ExportQuality)} className="rounded-full border border-border bg-white px-3 py-2 text-sm text-ink">
-            <option value="1080p">1080p</option>
-            <option value="720p">720p (faster)</option>
-          </select>
-        </label>
-
         <button
-          onClick={handleCombine}
+          onClick={() => void handleCombine("final")}
           disabled={items.length < 1 || status === "loading-ffmpeg" || status === "processing"}
+          title="Full quality: ~1080p, loudness-matched audio, veryfast encode"
           className="rounded-full bg-purple px-6 py-3 text-sm font-bold text-white disabled:opacity-50"
         >
-          {status === "loading-ffmpeg" ? "Loading video engine…" : status === "processing" ? `Exporting ${exportQuality}… ${progress}%` : `Download ${exportQuality}`}
+          {status === "loading-ffmpeg"
+            ? "Loading video engine…"
+            : status === "processing" && exportQuality === "final"
+              ? `Exporting Final… ${progress}%`
+              : "Download Final"}
+        </button>
+        <button
+          onClick={() => void handleCombine("draft")}
+          disabled={items.length < 1 || status === "loading-ffmpeg" || status === "processing"}
+          title="Faster check: ~720p, ultrafast encode, skips loudnorm — use for timing/layout, then Final for deliverable"
+          className="ml-2 rounded-full border border-purple/40 bg-white px-5 py-3 text-sm font-bold text-purple disabled:opacity-50"
+        >
+          {status === "processing" && exportQuality === "draft" ? `Exporting Draft… ${progress}%` : "Download Draft (faster)"}
         </button>
         {status === "processing" && exportDetail && <p className="mt-2 text-xs text-muted">{exportDetail}</p>}
-        {items.length > 0 && status !== "processing" && <span className="ml-2 text-xs text-muted">Estimated download: ~{formatBytes(estimatedOutputBytes)}{hasLargeSource ? " · large sources: only selected sections are encoded" : ""}</span>}
+        {items.length > 0 && status !== "processing" && (
+          <span className="ml-2 text-xs text-muted">
+            Estimated Final download: ~{formatBytes(estimatedOutputBytes)}
+            {hasLargeSource ? " · large sources: only selected sections are encoded" : ""}
+            {" · "}Draft is quicker (~720p, skips loudnorm)
+          </span>
+        )}
 
         {status === "processing" && (
           <button onClick={cancelCombine} className="ml-2 rounded-full border border-border px-4 py-3 text-sm font-semibold text-muted">
