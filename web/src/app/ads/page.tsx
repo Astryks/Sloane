@@ -3,8 +3,8 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
+import { AdsHowToStoryboard } from "@/components/AdsHowToStoryboard";
 import { AD_STUDIO_MODELS, CAMERA_PROMPT_EXAMPLES } from "@/lib/adStudioModels";
 import { expandCinematicPrompt, GENRE_STYLE_LIBRARY, ATMOSPHERE_LIBRARY, CAMERA_MOVEMENT_LIBRARY, type GenreKey } from "@/lib/directorMode";
 
@@ -882,111 +882,7 @@ export default function AdsGridPage() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Ads" subtitle="Build a storyboard one scene at a time, then combine them into one video." />
       <main className="mx-auto max-w-5xl space-y-6 px-4 py-10">
-        {showExample && (
-          <div className="rounded-2xl border border-border bg-surface p-5 text-sm">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="font-bold">How this works: create a storyboard, one scene at a time</p>
-              <button onClick={() => setShowExample(false)} className="text-xs text-muted underline">
-                Hide
-              </button>
-            </div>
-
-            <ol className="mb-4 list-decimal space-y-1 pl-5 text-muted">
-              <li>Research your favourite ads or movie scenes.</li>
-              <li>Create a storyboard with images.</li>
-              <li>Use the best AI models to animate it.</li>
-              <li>Stitch all scenes together and bring your ad to life!</li>
-            </ol>
-
-            <p className="mb-2 text-xs font-semibold text-muted">What that looks like below:</p>
-            <div className="mb-4 overflow-x-auto">
-              <div className="flex min-w-max items-center gap-2 py-1">
-                <div className="w-28 shrink-0 rounded-xl border border-border bg-white p-2 text-center text-[10px] text-muted">
-                  <p className="text-xl">👤🏞️</p>
-                  Cast &amp; Locations
-                </div>
-                <span className="text-muted">→</span>
-                <div className="w-28 shrink-0 rounded-xl border border-border bg-white p-2 text-center text-[10px] text-muted">
-                  <p className="text-xl">🖼️</p>
-                  Scene 1: image
-                </div>
-                <span className="text-muted">→</span>
-                <div className="w-28 shrink-0 rounded-xl border border-purple/40 bg-purple-wash p-2 text-center text-[10px] text-muted">
-                  <p className="text-xl">🎬</p>
-                  Scene 1: animated
-                </div>
-                <span className="text-muted">→</span>
-                <div className="w-28 shrink-0 rounded-xl border border-border bg-white p-2 text-center text-[10px] text-muted">
-                  <p className="text-xl">🖼️</p>
-                  Scene 2: image
-                </div>
-                <span className="text-muted">→</span>
-                <div className="w-28 shrink-0 rounded-xl border border-purple/40 bg-purple-wash p-2 text-center text-[10px] text-muted">
-                  <p className="text-xl">🎬</p>
-                  Scene 2: animated
-                </div>
-                <span className="text-muted">→</span>
-                <div className="w-28 shrink-0 rounded-xl border border-dashed border-border p-2 text-center text-[10px] text-muted">
-                  <p className="text-xl">➕</p>
-                  Repeat as needed
-                </div>
-                <span className="text-muted">→</span>
-                <div className="w-28 shrink-0 rounded-xl border border-mint bg-mint/10 p-2 text-center text-[10px] text-muted">
-                  <p className="text-xl">🧵</p>
-                  Create full ad
-                </div>
-              </div>
-            </div>
-
-            <p className="mb-1 text-xs font-semibold text-muted">The details:</p>
-            <ul className="list-disc space-y-1.5 pl-5 text-muted">
-              <li>
-                <strong>Cast & Locations first.</strong> Nail down each character, location, and product once - design them with any AI chat you like and upload the result, or generate
-                one right here with GPT Image or Nano Banana Pro (included, no extra charge - only turning a scene into video costs a credit).
-              </li>
-              <li>
-                <strong>Add a scene</strong> and bring in the references it needs - drag an image in, upload one, or generate one. A new scene starts with the same references as your
-                last one, so mood and lighting carry through by default - this is what keeps it feeling like one ad, not random clips stitched together. Deselect any you don&apos;t
-                want for that scene.
-              </li>
-              <li>
-                <strong>Describe the shot simply:</strong> shot type, camera move, and the action - that&apos;s usually enough. A few keywords work as well as a long paragraph.
-              </li>
-              <li>
-                <strong>Pick a video model from the dropdown and generate</strong> - each generation is 1 credit, so you only ever pay for scenes you actually want. The animated
-                result appears right in that scene&apos;s square. Iterate with any model - Veo, Kling, Seedance, MiniMax, or Grok.
-              </li>
-              <li>
-                Click <strong>+ Add scene</strong> and repeat for as many scenes as your story needs - each one becomes its own square in the grid.
-              </li>
-              <li>
-                When you&apos;re done, click <strong>Create full ad</strong> below - it hands your finished scenes straight to the combine tool, already loaded in order.
-              </li>
-            </ul>
-
-            <Link
-              href="/#jojo-case-study"
-              className="mt-4 flex items-center gap-3 rounded-2xl border border-purple/20 bg-purple-wash p-3 text-left transition hover:shadow-soft"
-            >
-              <span className="text-2xl">🎬</span>
-              <span>
-                <span className="block text-xs font-bold text-foreground">See a real one: storyboard → 1.7M views on Facebook</span>
-                <span className="block text-xs text-muted">A director&apos;s real storyboard for JoJo, scene by scene, next to the finished ad it became.</span>
-              </span>
-            </Link>
-
-            <Link
-              href="/#cinematic-storyboard"
-              className="mt-3 flex items-center gap-3 rounded-2xl border border-purple/20 bg-purple-wash p-3 text-left transition hover:shadow-soft"
-            >
-              <span className="text-2xl">🎬</span>
-              <span>
-                <span className="block text-xs font-bold text-foreground">Making a short film instead? See how to storyboard one</span>
-                <span className="block text-xs text-muted">Same idea applied to a cinematic scene - one shot list, broken into a real sequence.</span>
-              </span>
-            </Link>
-          </div>
-        )}
+        {showExample && <AdsHowToStoryboard onHide={() => setShowExample(false)} />}
 
         {error && <p className="rounded-2xl bg-coral-dark/10 p-3 text-sm text-coral-dark">{error}</p>}
 
