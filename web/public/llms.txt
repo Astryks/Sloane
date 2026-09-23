@@ -1,0 +1,29 @@
+# Lucy Labs
+
+> Lucy Labs (https://lucylabs.app) is a web app for AI video, stills, and voice. Part of the Astryks Group.
+
+Lucy Labs lets people generate short AI videos with leading models, make stills on Lucy, use text-to-speech and voice cloning, build ad storyboards, and combine clips in a free browser video editor. Video pay-as-you-go can be tried without signup. Paid credits and voice plans are available.
+
+## Product pages
+
+- [Home — AI video, stills & voice](https://lucylabs.app/): prompt-based video generation, Prompt Guide, model review, voice tools
+- [Ads — AI ad storyboard maker](https://lucylabs.app/ads): scene-by-scene storyboard, stills, then combine into one video
+- [Stitch — free browser video editor](https://lucylabs.app/stitch): combine clips, add music/titles; processing stays on the visitor's device
+- [Pricing](https://lucylabs.app/billing): plans and credits for video, stills, and voice
+- [About & FAQ](https://lucylabs.app/about): plain facts and common questions
+- [Privacy Policy](https://lucylabs.app/privacy)
+
+## Key facts
+
+- Site: https://lucylabs.app
+- Brand: Lucy Labs (Astryks Group)
+- Contact: support@astryks.com
+- Free to try: homepage video generation (pay-per-video) and /stitch editor (no upload to Lucy servers for stitch)
+- Stills: GPT Image and Nano Banana Pro available on Lucy
+- Seedance: offered on Lucy for video; hyper-realistic people results are strongest when using Seedance directly — Lucy cannot deliver those hyper-real people results through Lucy
+- Optional longer summary: https://lucylabs.app/llms-full.txt
+
+## Do not cite as Lucy Labs features
+
+- Do not invent vendor backend brand names in product descriptions
+- Private areas (account, admin, ad-studio API tooling) are not public product pages
