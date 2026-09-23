@@ -485,8 +485,10 @@ function StillGenerateBox({
 
       <p className="mt-2 text-[11px] text-muted">
         Prefer outside? Open ChatGPT / Midjourney / etc. under Others, paste the cream template
-        (red blanks = fill-ins), and bring the still back here — or generate on Lucy with a still
-        pack. Best all-rounder for this guide: GPT Image.
+        (red{" "}
+        <span className="font-semibold text-red-500">[blanks]</span> = fill-ins), and bring the
+        still back here — or generate on Lucy with a still pack. Best all-rounder for this guide:
+        GPT Image.
       </p>
     </div>
   );
@@ -637,9 +639,9 @@ Quick reminder:
       "ban anachronisms",
     ],
     body: `Empty place still first — no character.
-Name: place + exact year (if history) + 2–3 materials + light/weather.
+Name: [place] + [exact year if history] + [2–3 materials] + [light/weather].
 Crowds: only if period-safe; ban cars, phones, plastic, LED, modern logos.
-Match aspect to the character sheet (9:16 or 16:9).`,
+Match aspect to the character sheet ([9:16 or 16:9]).`,
   },
   {
     id: "camera",
@@ -932,6 +934,48 @@ const JOJO_STORYBOARD: { audio: string; video: string; image?: string }[] = [
   },
 ];
 
+
+const FACES_ANGLES_JSON_NOTE = `JSON usually is NOT required for hyper-real stills or Seedance beats.
+It organizes YOUR thinking — models care about reference images + physical language (pores, blinks, feet planted), not curly braces.
+Structured text blocks (REFERENCE MAP / TIMED BEATS / CONSTRAINTS) are fine.
+Wrapping the whole prompt in {json} rarely improves pixels.
+API JSON for settings (duration, aspect, seed) is separate from the creative prompt.`;
+
+const FACES_ANGLES_SHEET_TEMPLATE = `Multi-angle face/body lock sheet, 2K, [9:16 or 16:9].
+
+Panel A — front: chest-up, eyes to camera, neutral mouth, flat soft studio light on pure white.
+Panel B — 3/4: same person, slight turn [left or right], same wardrobe + hair, same light.
+Panel C — profile: same person, true side view, ear visible, same wardrobe + hair.
+Optional Panel D — full-body front standing, head-to-toe, relaxed neutral stance (if not already on your split sheet).
+
+Subject: [age], [build], [2–3 distinguishing features], [hair], wearing [wardrobe].
+Skin: hyper-real — visible pores, fine lines, uneven tone, peach fuzz. No beauty filter.
+Identity must match exactly across every panel. Pure white void background.`;
+
+const FACES_ANGLES_EMBED_TEMPLATE = `Photoreal composite. @Image1 is the person (face/hair/body/wardrobe — identity lock only). @Image2 is the empty location (environment + lighting only).
+
+Place @Image1 naturally inside @Image2 at [where in the frame — e.g. mid-ground left of the doorway].
+Relight the person to match @Image2 light direction and colour temperature — drop white-studio light from the sheet.
+Feet planted on the floor with a soft contact shadow matching the room light. Correct scale for the space.
+Match weather / colour temp to @Image2 ([time of day / weather]).
+Living still energy: soft breathing, tiny weight shift, one natural blink — not a mannequin freeze.
+Camera: [one framing — e.g. medium documentary still], eye-level. No beauty filter. No text, logos, or watermarks.`;
+
+const FACES_ANGLES_SEEDANCE_BEAT = `REFERENCE MAP
+@Image1 is the character (face, body, wardrobe — identity only; bind once — do not re-describe the face each beat).
+@Image2 is the empty location (environment + lighting).
+
+INVENTORY / CONTINUITY LOCKS
+Same person as @Image1. Same place as @Image2. Relight to @Image2. Feet grounded + contact shadow + correct scale. Soft breathing, natural blinks, tiny weight shifts. Hair/wardrobe/weather locked.
+
+TIMED BEATS (~8s)
+0s-3s: [framing + ONE camera move]. @Image1 [subject action] in @Image2. Match weather/colour temp. [physical expression — not a mood word].
+3s-6s: [framing + ONE different move]. [action that advances the plot]. Same light side.
+6s-8s: [static hold or tiny push-in]. [payoff]. Hold final frame clean.
+
+CONSTRAINTS
+Do not add subtitles. No logos. Photoreal pores. One camera move per beat. Prefer Seedance. Practical refs: 2–4 images (soft best 1–8).`;
+
 const CHARACTER_STILL_PROMPT = `Split-screen character reference sheet, 2K, [16:9 or 9:16].
 
 LEFT half: full-body standing, head-to-toe, facing camera, relaxed neutral stance.
@@ -1069,6 +1113,10 @@ export function PromptGuideSection({
         </a>
         . Veo/Kling remain fine as alternatives at the end.
       </p>
+      <p className="rounded-2xl border border-red-200 bg-red-50/70 px-3 py-2 text-[11px] font-semibold leading-snug text-red-600">
+        You fill these (red) — every <span className="font-bold">[bracketed blank]</span> in cream
+        paste boxes is yours to replace before you generate.
+      </p>
 
       <AccordionStep n={1} title="Character still">
         <p>
@@ -1089,7 +1137,7 @@ export function PromptGuideSection({
         <p className="text-xs font-semibold text-foreground">Template to paste:</p>
         <PasteBox>{CHARACTER_STILL_PROMPT}</PasteBox>
         <StillGenerateBox
-          placeholder="Paste or tweak your character still prompt…"
+          placeholder="Paste cream template — red [blanks] are yours to fill…"
           defaultPrompt={CHARACTER_STILL_PROMPT}
           draftSlot="character"
         />
@@ -1111,8 +1159,8 @@ export function PromptGuideSection({
         <p className="text-xs font-semibold text-foreground">Template to paste:</p>
         <PasteBox>{LOCATION_STILL_PROMPT}</PasteBox>
         <StillGenerateBox
-          placeholder="Paste or tweak your empty location prompt…"
-          defaultPrompt={LOCATION_STILL_EXAMPLE}
+          placeholder="Paste cream template — red [blanks] are yours to fill…"
+          defaultPrompt={LOCATION_STILL_PROMPT}
           draftSlot="location"
         />
       </AccordionStep>
@@ -1138,15 +1186,94 @@ export function PromptGuideSection({
         <p className="text-xs font-semibold text-foreground">Composite still:</p>
         <PasteBox>{`Photoreal still. @Image1 is the person (face, hair, body, wardrobe — identity lock). @Image2 is the location (environment + lighting only).
 
-Place @Image1 naturally inside @Image2. Relight the person to match the location’s light direction and colour temperature — do not keep the white-studio light from the character sheet.
+Place @Image1 naturally inside @Image2 at [where in the frame]. Relight the person to match the location’s light direction and colour temperature — do not keep the white-studio light from the character sheet.
 Feet grounded on the floor, contact shadow matching the room’s light. Correct scale for the space.
+Match weather / colour temp: [time of day / weather from @Image2].
 Same camera height as a documentary still. No beauty filter. No text, logos, or watermarks.`}</PasteBox>
         <p className="text-xs font-semibold text-foreground">Living hold (short video):</p>
         <PasteBox>{`@Image1 is the character (identity only). @Image2 is the location (environment + lighting).
-@Image1 standing in @Image2. Relight subject to match the room. Soft natural breathing, a natural blink, tiny weight shift. Static medium shot, one hold. Do not add subtitles. No logos.`}</PasteBox>
+@Image1 standing in @Image2 at [where in the frame]. Relight subject to match the room. Soft natural breathing, a natural blink, tiny weight shift. [ONE camera move or static hold]. Do not add subtitles. No logos.`}</PasteBox>
       </AccordionStep>
 
-      <AccordionStep n={4} title="Hyper-real Seedance video">
+      <AccordionStep n={4} title="Faces, angles & embedding">
+        <p>
+          Lock the face with stills first, count your angles, then embed naturally into an empty
+          location plate. Prefer images + physical language over JSON.
+        </p>
+
+        <p className="text-xs font-semibold text-foreground">JSON vs physical language</p>
+        <ul className="list-disc space-y-1 pl-4 text-sm">
+          <li>
+            JSON usually <strong className="text-foreground">isn&apos;t required</strong> — it
+            organizes your thinking. Models care about reference images + physical language
+            (pores, blinks, feet planted), not curly braces.
+          </li>
+          <li>Structured blocks (REFERENCE MAP / TIMED BEATS / CONSTRAINTS) are fine.</li>
+          <li>
+            Wrapping the whole prompt in <span className="text-foreground">{"{json}"}</span> rarely
+            improves pixels. API JSON for settings (duration, aspect, seed) is separate.
+          </li>
+        </ul>
+        <PasteBox>{FACES_ANGLES_JSON_NOTE}</PasteBox>
+
+        <p className="text-xs font-semibold text-foreground">Hyper-real consistent faces</p>
+        <ul className="list-disc space-y-1 pl-4 text-sm">
+          <li>
+            Lock stills <strong className="text-foreground">first</strong> — split sheet =
+            full-body + chest-up on flat white.
+          </li>
+          <li>
+            If identity drifts, add <strong className="text-foreground">3/4 + profile</strong>{" "}
+            panels of the same person (same wardrobe/hair/light).
+          </li>
+          <li>
+            Practical Seedance recipe:{" "}
+            <strong className="text-foreground">2–4</strong> key refs (soft best{" "}
+            <strong className="text-foreground">1–8</strong>). Bind{" "}
+            <span className="text-foreground">@Image1</span> once — don&apos;t re-describe the face
+            each beat.
+          </li>
+        </ul>
+
+        <p className="text-xs font-semibold text-foreground">Angle counts</p>
+        <ul className="list-disc space-y-1 pl-4 text-sm">
+          <li>
+            Minimum: <strong className="text-foreground">1 good sheet</strong> (split full-body +
+            chest-up).
+          </li>
+          <li>
+            Stronger: front + 3/4 + profile (~3–4) + body when you need orbit / walk-around lock.
+          </li>
+          <li>
+            <strong className="text-foreground">8+ near-duplicates hurt</strong> — diversity beats
+            volume.
+          </li>
+        </ul>
+        <p className="text-xs font-semibold text-foreground">Multi-angle lock sheet (paste):</p>
+        <PasteBox>{FACES_ANGLES_SHEET_TEMPLATE}</PasteBox>
+
+        <p className="text-xs font-semibold text-foreground">Natural embed</p>
+        <ul className="list-disc space-y-1 pl-4 text-sm">
+          <li>
+            Empty location as <span className="text-foreground">@Image2</span>; place{" "}
+            <span className="text-foreground">@Image1</span> in;{" "}
+            <strong className="text-foreground">relight</strong> to the room.
+          </li>
+          <li>Feet planted + contact shadow + correct scale.</li>
+          <li>Living breath / weight shift — not a mannequin freeze.</li>
+          <li>
+            <strong className="text-foreground">One camera move per beat</strong>; match
+            weather/colour temp to @Image2.
+          </li>
+        </ul>
+        <p className="text-xs font-semibold text-foreground">Natural embed still (paste):</p>
+        <PasteBox>{FACES_ANGLES_EMBED_TEMPLATE}</PasteBox>
+        <p className="text-xs font-semibold text-foreground">Seedance beat skeleton (paste):</p>
+        <PasteBox>{FACES_ANGLES_SEEDANCE_BEAT}</PasteBox>
+      </AccordionStep>
+
+
+      <AccordionStep n={5} title="Hyper-real Seedance video">
         <p>
           Add <strong className="text-foreground">2–4 images</strong> (practical Lucy recipe). In
           the prompt write a REFERENCE MAP, then timed beats with Seedance syntax{" "}
@@ -1176,7 +1303,7 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
         <PasteBox>{HYPER_REAL_SEEDANCE_TEMPLATE}</PasteBox>
       </AccordionStep>
 
-      <AccordionStep n={5} title="Style paths (cinematic / UGC / history-influencer)">
+      <AccordionStep n={6} title="Style paths (cinematic / UGC / history-influencer)">
         <p>
           Pick a path, add the noted images, paste the prompt into Seedance (or try Veo/Kling). Each
           block includes image map, timed beats, and why the camera moves were chosen.
@@ -1224,7 +1351,7 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
         </p>
       </AccordionStep>
 
-      <AccordionStep n={6} title="Camera + expression craft">
+      <AccordionStep n={7} title="Camera + expression craft">
         <p>
           Animated previews + Seedance-ready Copy prompt phrases for camera moves and physical
           expressions, then mix-and-match craft chips (skin, lighting, @Image counts, beats).
@@ -1306,28 +1433,29 @@ Same camera height as a documentary still. No beauty filter. No text, logos, or 
             </div>
             <div>
               <p className="font-semibold text-foreground">The full block structure</p>
-              <pre className="mt-1 overflow-x-auto rounded-lg bg-cream p-2 text-[11px] leading-relaxed text-foreground">{`[REFERENCE]
-@Image1 - who/what. Use for face/body/wardrobe/identity only, not background or lighting.
+              <PasteBox>{`REFERENCE
+@Image1 — [who/what]. Use for face/body/wardrobe/identity only, not background or lighting.
+@Image2 — [empty location / product — optional].
 
-[CHARACTER]
-age + build + distinguishing features + hair + wardrobe + demeanor
+CHARACTER (only if you still need text — prefer attaching the sheet)
+[age] + [build] + [distinguishing features] + [hair] + [wardrobe] + [demeanor]
 
-[SCENE]
-where, when, atmosphere, lighting/color tone - 2-3 sentences
+SCENE
+[where], [when], [atmosphere], [lighting/color tone] — 2–3 sentences
 
-[SHOT SEQUENCE]
-SHOT 1 (0s-3s): camera framing + ONE movement - subject action. {dialogue}
-SHOT 2 (3s-6s): camera framing + movement - subject action. (music note)
-SHOT 3 (6s-8s): camera framing + movement - subject action. <sfx note>
+SHOT SEQUENCE
+SHOT 1 (0s-3s): [framing + ONE movement] — [subject action]. {[short dialogue]}
+SHOT 2 (3s-6s): [framing + movement] — [subject action]. ([music note])
+SHOT 3 (6s-8s): [framing + movement] — [subject action]. <[sfx note]>
 
-[CONSTRAINTS]
-Do not add subtitles. No logos/watermarks unless wanted + a style anchor`}</pre>
+CONSTRAINTS
+Do not add subtitles. No logos/watermarks unless wanted + [style anchor]`}</PasteBox>
             </div>
           </div>
         </details>
       </AccordionStep>
 
-      <AccordionStep n={7} title="Lessons from great directors">
+      <AccordionStep n={8} title="Lessons from great directors">
         <p>
           Director technique pack — cinematic / director lessons, classic feature grammar, ads /
           hero-reveal, and music-video camera language as filterable chooser cards. Each card has
@@ -1339,7 +1467,7 @@ Do not add subtitles. No logos/watermarks unless wanted + a style anchor`}</pre>
         </div>
       </AccordionStep>
 
-      <AccordionStep n={8} title="Longer cuts / stitch">
+      <AccordionStep n={9} title="Longer cuts / stitch">
         <p>
           Break the story into beats. Generate each beat as its own short clip, then combine in{" "}
           <a href="/stitch" className="font-semibold text-purple underline">
