@@ -348,7 +348,7 @@ Always: Do not add subtitles. No logos/watermarks unless you want them.`,
     ],
     body: `Add N images, then bind them in the prompt:
 • Seedance 2.0: up to ~9 refs. Seedance 2.5: up to ~30 images (soft best results with 1–8 image subjects).
-• Practical Lucy hyper-real recipe: typically 2–4 images — e.g. @Image1 character sheet (or chest-up), @Image2 location, optional @Image3 product / @Image4 start keyframe.
+• Practical Seedance hyper-real recipe (best connecting to Seedance directly — Lucy offers Seedance but cannot get hyper-real people results through Lucy): typically 2–4 images — e.g. @Image1 character sheet (or chest-up), @Image2 location, optional @Image3 product / @Image4 start keyframe.
 • Write: "@Image1 is the character (face, body, wardrobe — identity only, not lighting/background)."
 • "@Image2 is the location (environment + lighting)."
 • "@Image3 is the product" if needed.
@@ -379,7 +379,7 @@ const HYPER_REAL_SEEDANCE_TEMPLATE = `REFERENCE MAP
 @Image3 is [your product — optional label/shape lock].
 @Image4 is [start keyframe — optional opening composition].
 
-How many images: typically 2–4 for hyper-real Lucy clips. Seedance 2.0 accepts up to ~9 refs; Seedance 2.5 up to ~30 images (soft best with 1–8 image subjects). Never re-describe the face once the sheet exists — attach @Image1.
+How many images: typically 2–4 for hyper-real Seedance clips (direct Seedance; not hyper-real people through Lucy). Seedance 2.0 accepts up to ~9 refs; Seedance 2.5 up to ~30 images (soft best with 1–8 image subjects). Never re-describe the face once the sheet exists — attach @Image1.
 
 INVENTORY / CONTINUITY LOCKS
 Same person as @Image1. Same place as @Image2. Relight subject to @Image2 (drop white-studio light). Feet grounded, contact shadow matching room light, correct scale. Soft breathing, natural blinks, tiny weight shifts. Hair / wardrobe / weather locked. Photoreal pores — no beauty filter.
@@ -722,7 +722,8 @@ export function PromptGuideSection({
         <a href="/stitch" className="font-semibold text-purple underline">
           /stitch
         </a>
-        . Veo/Kling remain fine as alternatives at the end.
+        . Hyper-real people work best on Seedance directly — Lucy offers Seedance but cannot get
+        those results through Lucy. Veo/Kling remain fine as alternatives at the end.
       </p>
       <p className="rounded-2xl border border-red-200 bg-red-50/70 px-3 py-2 text-[11px] font-semibold leading-snug text-red-600">
         You fill these (red) — every <span className="font-bold">[bracketed blank]</span> in cream

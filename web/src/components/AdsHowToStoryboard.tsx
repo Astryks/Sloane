@@ -254,8 +254,8 @@ export function AdsHowToStoryboard({
         </p>
       )}
       <p className="mb-4 text-xs text-muted">
-        This is how directors plan — stills first, then animate each square. Start a storyboard below to do it for
-        real.
+        Directors plan stills first, then generate video per scene. Starting a storyboard below creates a
+        real project — it does not animate this practice grid.
       </p>
 
       <Link
