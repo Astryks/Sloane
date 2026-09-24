@@ -1,14 +1,32 @@
 # Sloane Project Status
 
-## Latest update, 2026-09-24 - Seedance → BytePlus ModelArk (not fal)
+## Latest update, 2026-09-24 - ModelArk key live; Seedance activation blocked on ~$30 pack
+
+- **Code**: [#39](https://github.com/Astryks/Sloane/pull/39) on `main` (squash `60ed3dc`); STATUS note `be4c37f`. Production redeploy with new env **READY** (`dpl_5rEznALtKLwhweqspgmR3zh6VGEp` → lucylabs.app).
+- **Routing**: Seedance 2.0 (`seedance`) + 2.5 (`seedance25`) → BytePlus ModelArk (`web/src/lib/modelArk.ts` + `videoInference.ts`). Kling / Veo / MiniMax / Grok stay on fal.
+- **Vercel env (set, all targets)**:
+  - `BYTEPLUS_ARK_API_KEY` (sensitive) — key name in ModelArk console: `lucy-labs-production`
+  - `BYTEPLUS_ARK_BASE_URL` = `https://ark.ap-southeast.bytepluses.com/api/v3`
+  - `BYTEPLUS_SEEDANCE_20_MODEL` = `dreamina-seedance-2-0-fast-260128`
+  - `BYTEPLUS_SEEDANCE_25_MODEL` = `dreamina-seedance-2-5-260628`
+- **ModelArk account**: Region **ap-southeast-1**; ~$10 USD credits; Free Credits Only Mode enabled; **no** Resource Pack / AI Savings Plan purchased (Sid: do not buy yet).
+- **Activation gate (blocker)**: Console left Dreamina Seedance **2.0 / 2.0-fast / 2.5** as **Not activated**. Confirm after Free Credits Only Mode still requires purchasing a **$30+ AI Savings Plan or Resource Pack**. No purchase made.
+- **Smoke test**: `POST …/contents/generations/tasks` → HTTP **404** `ModelNotOpen` (key + path OK; model not open). No task ID.
+- **Billing / UX**: Users still buy Lucy Stripe credits only. Prefer ModelArk PAYG once models open; treasury notes ModelArk funding on video-credit purchase. No Fal/BytePlus/ModelArk in user-facing copy. Missing ARK key → Lucy-branded 503 before credit spend.
+- **COGS** (ModelArk 720p +15% buffer): seedance Fast 8s ≈ **$1.10** (~$2.47 after Stripe); seedance25 8s ≈ **$2.13** (~$1.44). Flat $3.99; Seedance 2.5 default 8s. ACR ~$14k/yr (faces/QPM) **not** required for basic API — not purchased.
+- **Next steps (Sid)**:
+  1. When ready: buy smallest ~$30 Resource Pack / AI Savings Plan in ModelArk, then activate Seedance 2.0 / 2.0-fast / 2.5.
+  2. Re-run smoke test until a task ID returns (not `ModelNotOpen`).
+  3. Spot-check one Seedance paygo clip on lucylabs.app (Lucy-only UX).
+  4. Optional later: fal sales / invoice auto-recharge (still no public buy API); ACR only if faces/QPM needed.
+
+## Prior, 2026-09-24 - Seedance → BytePlus ModelArk (not fal)
 
 - **Merged**: [#39](https://github.com/Astryks/Sloane/pull/39) on `main` (squash `60ed3dc`).
-- **Routing**: User-facing **Seedance 2.0** (`seedance`) and **Seedance 2.5** (`seedance25`) — paygo, product-ad, ad-studio, grid-storyboard — submit/poll via ModelArk (`web/src/lib/modelArk.ts` + `videoInference.ts`). Kling / Veo / MiniMax / Grok stay on fal.
-- **Env (Sid must set on Vercel before Seedance works in prod)**: `BYTEPLUS_ARK_API_KEY` or `ARK_API_KEY`; optional `BYTEPLUS_ARK_BASE_URL`, `BYTEPLUS_SEEDANCE_20_MODEL`, `BYTEPLUS_SEEDANCE_25_MODEL`. See `web/.env.example`.
-- **Billing**: Users still buy Lucy Stripe credits only. Prefer ModelArk **postpaid PAYG** (no user-facing vendor UI). Treasury logs ModelArk funding note on video-credit purchase; fal still has no public buy API.
-- **COGS** (ModelArk 720p +15% buffer): seedance Fast 8s ≈ **$1.10** (~$2.47 profit after Stripe); seedance25 8s ≈ **$2.13** (~$1.44). Flat $3.99 kept; Seedance 2.5 duration raised to 8s (was 4s under fal). Both clear ≥$1 floor.
-- **ACR $14k/yr** is Advanced Creation Rights (faces/QPM) — **not** required for basic PAYG. Not purchased here.
-- **UI**: No Fal / BytePlus / ModelArk brand names in user-facing copy. Missing ARK key → Lucy-branded 503 before credit spend.
+- **Routing**: User-facing **Seedance 2.0** (`seedance`) and **Seedance 2.5** (`seedance25`) — paygo, product-ad, ad-studio, grid-storyboard — submit/poll via ModelArk. Kling / Veo / MiniMax / Grok stay on fal.
+- **Env**: Documented in `web/.env.example` (now also set on Vercel — see latest update above).
+- **Billing**: Lucy Stripe credits only; prefer postpaid PAYG; treasury logs ModelArk funding note.
+- **COGS / ACR / UI**: Same as latest update; ACR not purchased; vendors invisible in UI.
 
 ## Latest update, 2026-09-23 - Camera moves + job hubs + filmmaking study library
 
