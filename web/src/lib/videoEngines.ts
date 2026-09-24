@@ -34,24 +34,15 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   seedance25: {
     label: "Seedance 2.5",
     versionLabel: "Seedance 2.5",
-    // 4s, not 8s like 2.0 - real cost is ~$0.473/s at 720p (fal's own
-    // pricing page, checked 2026-09-15) vs 2.0's $0.2419/s, almost double.
-    // 4s is the longest duration that still clears the $1/video profit
-    // floor at the flat $3.99 price - see VIDEO_PAYGO_ENGINE_COST_USD.
-    // Schema's exact duration field wasn't fully confirmed (the fal
-    // playground showed a "Duration: auto" selector, not a documented
-    // enum) - verify the real accepted value against
-    // bytedance/seedance-2.5/text-to-video's OpenAPI schema before this
-    // engine's first real production generation, same as every other
-    // engine's schema in this file was checked directly rather than
-    // assumed.
-    durationSeconds: 4,
-    // Moved out of "Popular" per direct request (2026-09-15) - its capped
-    // 4s duration made it read as a downgrade next to 2.0's 8s when shown
-    // with equal billing; still a real option, just not front-and-center.
+    // Duration raised to 8s (2026-09-24) after routing Seedance through
+    // BytePlus ModelArk PAYG instead of fal. ModelArk 720p ~$0.231/s →
+    // 8s ≈ $1.85 raw, ~$2.13 buffered — still clears the $1/video profit
+    // floor at flat $3.99 after Stripe (see VIDEO_PAYGO_ENGINE_COST_USD).
+    // Previously capped at 4s under fal's ~$0.473/s rate.
+    durationSeconds: 8,
     popular: false,
-    pickerNote: "Shortest clip here (4s) · sharpest detail · native audio",
-    supportsNativeAudio: true, // generate_audio flag (field less schema-verified than Veo)
+    pickerNote: "8s clip · sharpest detail · native audio",
+    supportsNativeAudio: true,
     aspectRatioOptions: ["16:9", "9:16", "1:1"],
     supportsDurationChoice: true,
   },
@@ -195,10 +186,8 @@ export function videoEnginesSoundBlurb(): string {
 // - minimax: confirmed 2026-09-12 - duration=2 was rejected ("must be >=
 //   5") while testing the Harper round; this file's existing default of 8
 //   was already proven working in the same round.
-// - seedance25: NOT verified against the real schema (see the engine
-//   entry's own comment) - deliberately set equal to its own 4s default
-//   rather than guessing a lower floor, so this engine can't be shrunk to
-//   an unconfirmed duration value before that's checked.
+// - seedance25: ModelArk Dreamina Seedance 2.5 documents 4–30s; floor
+//   kept at 4s (schema min). Default duration is 8s (priced).
 // Exported (not just used internally) so the UI's duration slider can read
 // the same real bounds this file's pricing already depends on, rather than
 // a second, potentially-drifting copy of the numbers.

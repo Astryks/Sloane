@@ -11,7 +11,9 @@ import {
   spendVideoCredit,
 } from "@/lib/db";
 import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from "@/lib/adStudio";
-import { hasEnoughFalBalanceToGenerate, submitFalJob } from "@/lib/fal";
+import { hasEnoughFalBalanceToGenerate } from "@/lib/fal";
+import { submitVideoInferenceJob } from "@/lib/videoInference";
+import { hasModelArkCredentialsConfigured, isModelArkEngine, MODELARK_UNAVAILABLE_USER_ERROR } from "@/lib/modelArk";
 import { publicJson } from "@/lib/mediaProxy";
 
 export async function POST(req: NextRequest) {
@@ -32,8 +34,12 @@ export async function POST(req: NextRequest) {
     if (!scene) return publicJson({ error: "Scene not found" }, { status: 404 });
     if (!scene.image_url) return publicJson({ error: "Approve the scene's image before generating video" }, { status: 400 });
 
-    if (!(await hasEnoughFalBalanceToGenerate())) {
-      return publicJson({ error: "Video generation is temporarily paused while the provider balance is topped up." }, { status: 503 });
+    if (isModelArkEngine(scene.video_model)) {
+      if (!(await hasModelArkCredentialsConfigured())) {
+        return publicJson({ error: MODELARK_UNAVAILABLE_USER_ERROR }, { status: 503 });
+      }
+    } else if (!(await hasEnoughFalBalanceToGenerate())) {
+      return publicJson({ error: "Video generation is temporarily paused while we top up - please try again shortly." }, { status: 503 });
     }
     // Each scene picks its own model at storyboard-creation time (see
     // adStudioStoryboard.ts's pickVideoModelForRole) - not a user choice,
@@ -67,7 +73,7 @@ export async function POST(req: NextRequest) {
     const prompt = [scene.camera, scene.action].filter(Boolean).join(". ");
     const falInput = buildAdStudioSceneFalInput(scene.video_model, prompt, scene.image_url);
     try {
-      const requestId = await submitFalJob(adStudioFalEndpoint(scene.video_model), falInput);
+      const requestId = await submitVideoInferenceJob(adStudioFalEndpoint(scene.video_model), falInput);
       await setAdStudioSceneVideoRequestId(sceneId, requestId);
       return publicJson({ requestId });
     } catch (err) {

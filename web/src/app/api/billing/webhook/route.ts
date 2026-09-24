@@ -8,6 +8,7 @@ import {
   attemptPurchaseFalCredits,
   estimateStillTreasury,
   estimateVideoTreasury,
+  noteModelArkFundingAfterStripePurchase,
 } from "@/lib/vendorTreasury";
 import type Stripe from "stripe";
 
@@ -142,6 +143,12 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
                 pack.credits,
                 session.amount_total ?? pack.priceUsdCents,
               ),
+            });
+            // Seedance runs on ModelArk PAYG (prefer postpaid) — ops log only;
+            // never surfaces vendor recharge UI to Lucy users.
+            await noteModelArkFundingAfterStripePurchase({
+              credits: pack.credits,
+              revenueCents: session.amount_total ?? pack.priceUsdCents,
             });
             const email = session.customer_details?.email;
             if (email) await sendVideoCreditReceiptEmail(email, pack, session.amount_total ?? pack.priceUsdCents);

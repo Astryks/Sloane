@@ -75,6 +75,13 @@ import {
   type VideoEngineInfo,
   type VideoCreditPack,
 } from "./videoEngines";
+import {
+  buildModelArkCreateBody,
+  isModelArkEngine,
+  modelArkEndpointToken,
+  type ModelArkEngine,
+} from "./modelArk";
+import { withModelArkBody } from "./videoInference";
 
 export {
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
@@ -98,6 +105,8 @@ export const VIDEO_PAYGO_RESOLUTION = "720p";
 // Server-only: which inference endpoint runs each engine. Never import this
 // from client code - see videoEngines.ts.
 type VendorFields = {
+  // For Seedance this is a ModelArk token ("modelark:<model-id>"); for
+  // every other engine it remains a fal queue endpoint path.
   falEndpoint: string;
   falImageToVideoEndpoint: string;
   falAvatarEndpoint?: string; // only Kling has a proven lip-sync/avatar path in this stack
@@ -105,45 +114,55 @@ type VendorFields = {
   // Only set when an engine's resolution enum doesn't match
   // VIDEO_PAYGO_RESOLUTION (MiniMax H3 Max uses "768P").
   falResolutionValue?: string;
+  /** Which inference vendor runs this engine (server-only; never ship to client). */
+  inferenceProvider: "modelark" | "fal";
 };
 
+// Seedance endpoints are resolved at module load from env (model IDs).
 const VIDEO_PAYGO_VENDOR: Record<VideoEngine, VendorFields> = {
   seedance25: {
-    falEndpoint: "bytedance/seedance-2.5/text-to-video",
-    falImageToVideoEndpoint: "bytedance/seedance-2.5/image-to-video",
-    falDurationValue: "4",
+    falEndpoint: modelArkEndpointToken("seedance25"),
+    falImageToVideoEndpoint: modelArkEndpointToken("seedance25"),
+    falDurationValue: "8",
+    inferenceProvider: "modelark",
   },
   seedance: {
-    falEndpoint: "bytedance/seedance-2.0/fast/text-to-video",
-    falImageToVideoEndpoint: "bytedance/seedance-2.0/fast/image-to-video",
+    falEndpoint: modelArkEndpointToken("seedance"),
+    falImageToVideoEndpoint: modelArkEndpointToken("seedance"),
     falDurationValue: "8",
+    inferenceProvider: "modelark",
   },
   veo: {
     falEndpoint: "fal-ai/veo3.1/fast",
     falImageToVideoEndpoint: "fal-ai/veo3.1/fast/image-to-video",
     falDurationValue: "8s",
+    inferenceProvider: "fal",
   },
   kling: {
     falEndpoint: "fal-ai/kling-video/v2.1/master/text-to-video",
     falImageToVideoEndpoint: "fal-ai/kling-video/v2.1/master/image-to-video",
     falAvatarEndpoint: "fal-ai/kling-video/ai-avatar/v2/standard",
     falDurationValue: "5",
+    inferenceProvider: "fal",
   },
   klingv3: {
     falEndpoint: "fal-ai/kling-video/v3/pro/text-to-video",
     falImageToVideoEndpoint: "fal-ai/kling-video/v3/pro/image-to-video",
     falDurationValue: "10",
+    inferenceProvider: "fal",
   },
   minimax: {
     falEndpoint: "minimax/h3-max/text-to-video",
     falImageToVideoEndpoint: "minimax/h3-max/image-to-video",
     falDurationValue: "8",
     falResolutionValue: "768P",
+    inferenceProvider: "fal",
   },
   grok: {
     falEndpoint: "xai/grok-imagine-video/v1.5/text-to-video",
     falImageToVideoEndpoint: "xai/grok-imagine-video/v1.5/image-to-video",
     falDurationValue: "8",
+    inferenceProvider: "fal",
   },
 };
 
@@ -189,18 +208,16 @@ export const VIDEO_PAYGO_ENGINES = Object.fromEntries(
 // price and $1/video profit floor both hold with no repricing needed - see
 // the module comment above for the full worst-case math this depends on.
 //
-// seedance25 added 2026-09-15, per direct request to offer every fal video
-// model rather than a fixed five. Real fal price checked directly (fal's
-// own model page, not guessed): $0.473/s at 720p w/ audio - almost double
-// Seedance 2.0's $0.2419/s. At the SAME flat $3.99, this is why 2.5's
-// duration is capped at 4s (see VIDEO_PAYGO_ENGINES.seedance25) rather than
-// 2.0's 8s: 4s * $0.473 = $1.892, +15% buffer = $2.1758 -> profit
-// $3.574 - $2.1758 = **$1.40/video**. Seedance 2.0 (8s) remains the real
-// worst case at $2.23/$1.35 profit - capping 2.5 at 4s specifically keeps
-// it from becoming the new worst case, not just "close enough."
+// Seedance COGS recomputed 2026-09-24 for BytePlus ModelArk PAYG (not fal):
+// - Seedance 2.0 Fast 720p ≈ $0.12/s (ModelArk price table; Fast tier) →
+//   8s = $0.96, +15% buffer = **$1.10**
+// - Seedance 2.5 720p ≈ $0.231/s → 8s = $1.848, +15% = **$2.13**
+// Flat $3.99 / Stripe net ≈ $3.574 → Seedance margins ~$2.47 (2.0) / ~$1.44
+// (2.5) — both clear the $1 floor. Kling v3 remains the buffered worst case
+// among non-Seedance fal engines at $2.254.
 export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
-  seedance25: 2.18,
-  seedance: 2.23,
+  seedance25: 2.13, // ModelArk 8s @ ~$0.231/s + 15%
+  seedance: 1.10, // ModelArk Fast 8s @ ~$0.12/s + 15%
   veo: 1.38,
   kling: 1.61,
   klingv3: 2.254, // 10s @ $0.196/s (worst real tier, audio+voice) + 15% buffer - see VIDEO_PAYGO_ENGINES.klingv3
@@ -334,4 +351,76 @@ export function videoCreditPackFromStripePriceId(priceId: string): VideoCreditPa
     if (process.env[pack.stripePriceEnvVar] === priceId) return pack;
   }
   return null;
+}
+
+
+/** True when this paygo engine runs on ModelArk (Seedance 2.0 / 2.5). */
+export function videoEngineUsesModelArk(engine: VideoEngine): boolean {
+  return VIDEO_PAYGO_ENGINES[engine].inferenceProvider === "modelark";
+}
+
+/**
+ * Resolve the stored endpoint token for a generation (ModelArk token or fal path).
+ * Kling Avatar still overrides via the generate route when lip-sync is chosen.
+ */
+export function resolveVideoEndpoint(engine: VideoEngine, hasImage: boolean): string {
+  const def = VIDEO_PAYGO_ENGINES[engine];
+  return hasImage ? def.falImageToVideoEndpoint : def.falEndpoint;
+}
+
+/**
+ * Build the inference input for submitVideoInferenceJob.
+ * Seedance → ModelArk create-task body (wrapped); others → fal-shaped input.
+ */
+export function buildVideoInferenceInput(
+  engine: VideoEngine,
+  prompt: string,
+  imageUrl: string | null,
+  wantsNativeAudio: boolean,
+  realAudioSeconds: number | null = null,
+  manualDurationSeconds: number | null = null,
+  aspectRatio: string | null = null,
+  extraReferenceImageUrls: string[] = [],
+): Record<string, unknown> {
+  if (isModelArkEngine(engine)) {
+    return buildSeedanceModelArkInput(
+      engine,
+      prompt,
+      imageUrl,
+      wantsNativeAudio,
+      realAudioSeconds,
+      manualDurationSeconds,
+      aspectRatio,
+      extraReferenceImageUrls,
+    );
+  }
+  return buildFalInput(engine, prompt, imageUrl, wantsNativeAudio, realAudioSeconds, manualDurationSeconds, aspectRatio);
+}
+
+export function buildSeedanceModelArkInput(
+  engine: ModelArkEngine,
+  prompt: string,
+  imageUrl: string | null,
+  wantsNativeAudio: boolean,
+  realAudioSeconds: number | null = null,
+  manualDurationSeconds: number | null = null,
+  aspectRatio: string | null = null,
+  extraReferenceImageUrls: string[] = [],
+): Record<string, unknown> {
+  const def = VIDEO_PAYGO_ENGINES[engine];
+  const durationValue = matchedDurationValue(engine, realAudioSeconds, manualDurationSeconds);
+  const durationSeconds = Number.parseInt(durationValue, 10) || def.durationSeconds;
+  const ratio = def.aspectRatioOptions?.includes(aspectRatio ?? "") ? aspectRatio! : undefined;
+  const body = buildModelArkCreateBody({
+    model: modelArkEndpointToken(engine).replace(/^modelark:/, ""),
+    prompt,
+    imageUrl,
+    referenceImageUrls: extraReferenceImageUrls,
+    durationSeconds,
+    resolution: VIDEO_PAYGO_RESOLUTION,
+    ratio: ratio ?? null,
+    generateAudio: wantsNativeAudio && def.supportsNativeAudio,
+    watermark: false,
+  });
+  return withModelArkBody(body);
 }

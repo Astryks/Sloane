@@ -1,17 +1,19 @@
 /**
- * Lucy vendor treasury — Stripe revenue → estimated Fal COGS ledger.
+ * Lucy vendor treasury — Stripe revenue → estimated vendor COGS ledger.
  *
- * Intent: when a user buys still or video credits via Stripe, Lucy should
- * automatically buy matching Fal prepaid credits so COGS stay funded and
- * Lucy keeps the margin. No Fal/Higgsfield names in client UI.
+ * Intent: when a user buys still or video credits via Stripe, Lucy records
+ * estimated COGS so ops can keep inference funded while Lucy keeps the
+ * margin. Users only ever see Lucy credits / Stripe — never vendor brands.
  *
- * HARD BLOCKER (do not invent around this):
- * Fal's public Platform API documents only GET /account/billing?expand=credits
- * (see getFalBalance in fal.ts). There is NO documented purchase-credits,
- * top-up, or auto-recharge HTTP API. attemptPurchaseFalCredits therefore
- * MUST NOT call fake payment endpoints or claim success. True auto-buy
- * needs Fal sales / invoice / dashboard auto-recharge until they ship a
- * public buy API. This module + vendor_treasury rows prepare the Lucy side.
+ * Vendors:
+ * - Fal (Veo/Kling/MiniMax/Grok/stills): prepaid. Public API only exposes
+ *   GET /account/billing?expand=credits — NO purchase/top-up API.
+ *   attemptPurchaseFalCredits MUST NOT invent payment endpoints.
+ * - BytePlus ModelArk (Seedance 2.0/2.5): prefer **postpaid PAYG** billed to
+ *   Lucy's BytePlus account (true auto — usage invoices, no per-job prepaid
+ *   top-up). If the account is prepaid-only, Sid enables dashboard
+ *   auto-recharge; there is still no user-facing vendor UI. ACR ($14k/yr)
+ *   is NOT required for basic PAYG inference.
  */
 
 import { VIDEO_PAYGO_ENGINE_COST_USD } from "./videoPaygo";
@@ -99,7 +101,7 @@ export function estimateVideoTreasury(
     revenueCents: safeRevenue,
     falCogsCents,
     marginCents: safeRevenue - falCogsCents,
-    notes: `video COGS ≈ max(VIDEO_PAYGO_ENGINE_COST_USD)=$${VIDEO_WORST_CASE_ENGINE_COST_USD.toFixed(3)} × ${credits} credits; Fal has no public buy API`,
+    notes: `video COGS ≈ max(VIDEO_PAYGO_ENGINE_COST_USD)=$${VIDEO_WORST_CASE_ENGINE_COST_USD.toFixed(3)} × ${credits} credits (Seedance=ModelArk PAYG; others=fal prepaid, no public buy API)`,
   };
 }
 
@@ -158,4 +160,33 @@ export async function attemptPurchaseFalCredits(
       `Requested ~$${usdAmount.toFixed(2)} prepaid top-up; current balance probe=${balanceUsd == null ? "unavailable" : `$${balanceUsd.toFixed(2)}`}. ` +
       `Settle via Fal invoice / dashboard auto-recharge, then mark row settled.`,
   };
+}
+
+
+/** Estimated ModelArk Seedance share of a video-credit pack (informational). */
+export const MODELARK_SEEDANCE_SHARE_NOTE =
+  "Seedance 2.0/2.5 run on BytePlus ModelArk PAYG (prefer postpaid). No public auto-recharge API needed when postpaid; prepaid accounts should enable console auto-recharge. Never expose vendor balance/UI to Lucy users.";
+
+export type AttemptModelArkFundingResult = {
+  ok: true;
+  mode: "postpaid_payg_assumed";
+  message: string;
+};
+
+/**
+ * ModelArk funding hook after Stripe credit purchase.
+ * Prefer postpaid PAYG (usage billed to Lucy's BytePlus account) — nothing
+ * to purchase via API. Logs ops guidance; never surfaces to end users.
+ */
+export async function noteModelArkFundingAfterStripePurchase(args: {
+  credits: number;
+  revenueCents: number;
+}): Promise<AttemptModelArkFundingResult> {
+  const message =
+    `ModelArk Seedance: assume postpaid PAYG on Lucy BytePlus account ` +
+    `(${args.credits} video credits, revenue $${(args.revenueCents / 100).toFixed(2)}). ` +
+    `If account is prepaid-only, enable BytePlus console auto-recharge. ` +
+    `ACR/Advanced Creation Rights NOT required for basic PAYG.`;
+  console.info("[vendorTreasury]", message);
+  return { ok: true, mode: "postpaid_payg_assumed", message };
 }

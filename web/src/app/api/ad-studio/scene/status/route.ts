@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { failAdStudioScene, getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, refundVideoCredit, setAdStudioSceneVideo } from "@/lib/db";
 import { adStudioFalEndpoint, isAdStudioModel } from "@/lib/adStudio";
-import { getFalJobResult, getFalJobStatus, getFalVideoUrl } from "@/lib/fal";
+import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl } from "@/lib/videoInference";
 import { publicJson } from "@/lib/mediaProxy";
 
 // Video generation is submitted async (generate-video/route.ts) rather than
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     }
     const endpoint = adStudioFalEndpoint(scene.video_model);
 
-    const status = await getFalJobStatus(endpoint, scene.video_fal_request_id);
+    const status = await getVideoInferenceStatus(endpoint, scene.video_fal_request_id);
     if (status === "FAILED") {
       // Real cost-exposure fix (security audit, 2026-09-16): the scene's
       // video generation now spends a real video credit (see
@@ -47,8 +47,8 @@ export async function GET(req: NextRequest) {
     }
     if (status !== "COMPLETED") return publicJson({ status });
 
-    const result = await getFalJobResult(endpoint, scene.video_fal_request_id);
-    const videoUrl = getFalVideoUrl(result);
+    const result = await getVideoInferenceResult(endpoint, scene.video_fal_request_id);
+    const videoUrl = getVideoInferenceUrl(result);
     if (!videoUrl) {
       if (await failAdStudioScene(sceneId, "Video provider returned no usable video URL")) {
         await refundVideoCredit(user.id);

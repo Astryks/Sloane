@@ -17,14 +17,19 @@ import {
   getFalJobResult,
   submitLipsyncJob,
   submitMergeAudioVideo,
-  submitFalJob,
   uploadBufferToFal,
   hasRealRequestId,
   LIPSYNC_ENDPOINT,
   FFMPEG_MERGE_ENDPOINT,
 } from "@/lib/fal";
+import {
+  getVideoInferenceResult,
+  getVideoInferenceStatus,
+  getVideoInferenceUrl,
+  submitVideoInferenceJob,
+} from "@/lib/videoInference";
 import { getModalJobStatus } from "@/lib/modal";
-import { VIDEO_PAYGO_ENGINES, buildFalInput, type VideoEngine } from "@/lib/videoPaygo";
+import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, type VideoEngine } from "@/lib/videoPaygo";
 import { probeAudioDurationSeconds, padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 import { publicJson } from "@/lib/mediaProxy";
 
@@ -103,8 +108,19 @@ export async function GET(req: NextRequest) {
       if (!job.fal_endpoint) throw new Error("Job is missing its target endpoint");
       const isKlingAvatar = job.fal_endpoint === VIDEO_PAYGO_ENGINES.kling.falAvatarEndpoint;
       const requestId = isKlingAvatar
-        ? await submitFalJob(job.fal_endpoint, { image_url: job.input_image_url, audio_url: audioUrl })
-        : await submitFalJob(job.fal_endpoint, buildFalInput(job.engine as VideoEngine, job.prompt, job.input_image_url, false, resolvedAudioSeconds, job.duration_seconds, job.aspect_ratio));
+        ? await submitVideoInferenceJob(job.fal_endpoint, { image_url: job.input_image_url, audio_url: audioUrl })
+        : await submitVideoInferenceJob(
+            job.fal_endpoint,
+            buildVideoInferenceInput(
+              job.engine as VideoEngine,
+              job.prompt,
+              job.input_image_url,
+              false,
+              resolvedAudioSeconds,
+              job.duration_seconds,
+              job.aspect_ratio,
+            ),
+          );
       await setVideoPaygoJobRequestId(job.id, requestId);
       return publicJson({ status: "IN_PROGRESS" });
     } catch (err) {
@@ -166,16 +182,16 @@ export async function GET(req: NextRequest) {
 
   let falStatus;
   try {
-    falStatus = await getFalJobStatus(job.fal_endpoint, job.fal_request_id);
+    falStatus = await getVideoInferenceStatus(job.fal_endpoint, job.fal_request_id);
   } catch {
     return publicJson({ status: "IN_PROGRESS" });
   }
 
   if (falStatus === "COMPLETED") {
     try {
-      const result = await getFalJobResult(job.fal_endpoint, job.fal_request_id);
-      const videoUrl = result.video?.url;
-      if (!videoUrl) throw new Error("fal result had no video url");
+      const result = await getVideoInferenceResult(job.fal_endpoint, job.fal_request_id);
+      const videoUrl = getVideoInferenceUrl(result) ?? (result as { video?: { url?: string } }).video?.url;
+      if (!videoUrl) throw new Error("video result had no video url");
 
       if (job.needs_merge && job.input_audio_url) {
         // Keep the raw, silent engine output around (2026-09-12) - it's
