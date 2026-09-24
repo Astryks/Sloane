@@ -9,8 +9,20 @@ import {
   setVideoPaygoJobModalId,
   failVideoPaygoJob,
 } from "@/lib/db";
-import { VIDEO_PAYGO_ENGINES, VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS, buildFalInput, type VideoEngine } from "@/lib/videoPaygo";
-import { submitFalJob, uploadBufferToFal, hasEnoughFalBalanceToGenerate } from "@/lib/fal";
+import {
+  VIDEO_PAYGO_ENGINES,
+  VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
+  buildVideoInferenceInput,
+  resolveVideoEndpoint,
+  videoEngineUsesModelArk,
+  type VideoEngine,
+} from "@/lib/videoPaygo";
+import { uploadBufferToFal, hasEnoughFalBalanceToGenerate } from "@/lib/fal";
+import { submitVideoInferenceJob } from "@/lib/videoInference";
+import {
+  hasModelArkCredentialsConfigured,
+  MODELARK_UNAVAILABLE_USER_ERROR,
+} from "@/lib/modelArk";
 import { submitModalJob } from "@/lib/modal";
 import { probeAudioDurationSeconds, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 import { PRESET_VOICES } from "@/lib/presetVoices";
@@ -182,13 +194,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Real-time fal balance guard (2026-09-12) - checked right before we'd
-    // actually commit to spending a credit, so a thin fal balance declines
-    // gracefully with no charge instead of a customer's credit being spent
-    // on a generation that then fails mid-flight. See fal.ts's comment for
-    // the full reasoning (this is what makes a burst of real demand safe
-    // without needing a much larger prepaid buffer).
-    if (!(await hasEnoughFalBalanceToGenerate())) {
+    // Vendor preflight before spending a Lucy credit. Seedance → ModelArk
+    // (needs ARK API key; postpaid PAYG — no fal prepaid probe). Other
+    // engines → fal prepaid balance guard. User-facing errors stay Lucy-branded.
+    if (videoEngineUsesModelArk(engine)) {
+      if (!(await hasModelArkCredentialsConfigured())) {
+        console.error("[video-paygo] Seedance selected but BYTEPLUS_ARK_API_KEY/ARK_API_KEY missing");
+        return publicJson({ error: MODELARK_UNAVAILABLE_USER_ERROR }, { status: 503 });
+      }
+    } else if (!(await hasEnoughFalBalanceToGenerate())) {
       return publicJson(
         { error: "Video generation is temporarily paused while we top up - please try again shortly." },
         { status: 503 },
@@ -238,9 +252,7 @@ export async function POST(req: NextRequest) {
     const needsMerge = (hasAudio || wantsLucyVoice) && !useKlingAvatar;
     const falEndpoint = useKlingAvatar
       ? VIDEO_PAYGO_ENGINES.kling.falAvatarEndpoint!
-      : hasImage
-        ? VIDEO_PAYGO_ENGINES[engine].falImageToVideoEndpoint
-        : VIDEO_PAYGO_ENGINES[engine].falEndpoint;
+      : resolveVideoEndpoint(engine, hasImage);
 
     // Real fix (security audit, 2026-09-16): this used to sit OUTSIDE the
     // try/catch below - if it threw (a transient DB error), execution fell
@@ -277,10 +289,23 @@ export async function POST(req: NextRequest) {
         await setVideoPaygoJobModalId(jobId, modalJobId);
         return publicJson({ jobId });
       }
+      // Native audio when the engine supports it and we are NOT attaching
+      // separate own/Lucy audio (needsMerge). Previously only Veo got the
+      // flag; Seedance 2.5 / Kling v3 also support it (videoEngines.ts).
+      const wantsNativeAudio =
+        !needsMerge && Boolean(VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio);
       const falInput = useKlingAvatar
         ? { image_url: inputImageUrl, audio_url: inputAudioUrl }
-        : buildFalInput(engine, finalPrompt, inputImageUrl, !needsMerge && engine === "veo", ownAudioSeconds, requestedDurationSeconds, requestedAspectRatio);
-      const requestId = await submitFalJob(falEndpoint, falInput);
+        : buildVideoInferenceInput(
+            engine,
+            finalPrompt,
+            inputImageUrl,
+            wantsNativeAudio,
+            ownAudioSeconds,
+            requestedDurationSeconds,
+            requestedAspectRatio,
+          );
+      const requestId = await submitVideoInferenceJob(falEndpoint, falInput);
       await setVideoPaygoJobRequestId(jobId, requestId);
       return publicJson({ jobId, directedPrompt });
     } catch (err) {

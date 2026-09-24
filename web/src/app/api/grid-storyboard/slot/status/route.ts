@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { failGridStoryboardSlot, getGridStoryboardSlot, getGridStoryboardSlotProjectOwner, initSchema, refundVideoCredit, setGridStoryboardSlotVideo } from "@/lib/db";
 import { adStudioFalEndpoint, isAdStudioModel } from "@/lib/adStudio";
-import { getFalJobResult, getFalJobStatus, getFalVideoUrl } from "@/lib/fal";
+import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl } from "@/lib/videoInference";
 import { publicJson } from "@/lib/mediaProxy";
 
 export async function GET(req: NextRequest) {
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     if (!isAdStudioModel(slot.video_model)) return publicJson({ error: "This scene's video model is no longer supported" }, { status: 500 });
 
     const endpoint = adStudioFalEndpoint(slot.video_model);
-    const status = await getFalJobStatus(endpoint, slot.video_fal_request_id);
+    const status = await getVideoInferenceStatus(endpoint, slot.video_fal_request_id);
     if (status === "FAILED") {
       // Real double-refund bug fixed here (security audit, 2026-09-16):
       // failGridStoryboardSlot is now an atomic claim (like every sibling
@@ -39,8 +39,8 @@ export async function GET(req: NextRequest) {
     }
     if (status !== "COMPLETED") return publicJson({ status });
 
-    const result = await getFalJobResult(endpoint, slot.video_fal_request_id);
-    const videoUrl = getFalVideoUrl(result);
+    const result = await getVideoInferenceResult(endpoint, slot.video_fal_request_id);
+    const videoUrl = getVideoInferenceUrl(result);
     if (!videoUrl) {
       if (await failGridStoryboardSlot(slotId, "Video provider returned no usable video URL")) {
         await refundVideoCredit(user.id);

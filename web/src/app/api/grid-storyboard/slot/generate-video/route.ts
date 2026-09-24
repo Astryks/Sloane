@@ -11,7 +11,9 @@ import {
   spendVideoCredit,
 } from "@/lib/db";
 import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from "@/lib/adStudio";
-import { hasEnoughFalBalanceToGenerate, submitFalJob } from "@/lib/fal";
+import { hasEnoughFalBalanceToGenerate } from "@/lib/fal";
+import { submitVideoInferenceJob } from "@/lib/videoInference";
+import { hasModelArkCredentialsConfigured, isModelArkEngine, MODELARK_UNAVAILABLE_USER_ERROR } from "@/lib/modelArk";
 import { publicJson } from "@/lib/mediaProxy";
 
 // Real, confirmed limit (2026-09-13 live test, see productAdStoryboard.ts's
@@ -52,8 +54,12 @@ export async function POST(req: NextRequest) {
     if (!slot) return publicJson({ error: "Scene not found" }, { status: 404 });
     if (!slot.image_url) return publicJson({ error: "Add an image to this scene before generating video" }, { status: 400 });
 
-    if (!(await hasEnoughFalBalanceToGenerate())) {
-      return publicJson({ error: "Video generation is temporarily paused while the provider balance is topped up." }, { status: 503 });
+    if (isModelArkEngine(videoModel)) {
+      if (!(await hasModelArkCredentialsConfigured())) {
+        return publicJson({ error: MODELARK_UNAVAILABLE_USER_ERROR }, { status: 503 });
+      }
+    } else if (!(await hasEnoughFalBalanceToGenerate())) {
+      return publicJson({ error: "Video generation is temporarily paused while we top up - please try again shortly." }, { status: 503 });
     }
     // Real double-submit fix (follow-up audit, 2026-09-17): claim the slot
     // atomically BEFORE spending anything, so two concurrent POSTs for the
@@ -70,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     try {
       const falInput = buildAdStudioSceneFalInput(videoModel, prompt, slot.image_url);
-      const requestId = await submitFalJob(adStudioFalEndpoint(videoModel), falInput);
+      const requestId = await submitVideoInferenceJob(adStudioFalEndpoint(videoModel), falInput);
       await setGridStoryboardSlotVideoRequest(slotId, prompt, videoModel, requestId);
       return publicJson({ requestId });
     } catch (err) {

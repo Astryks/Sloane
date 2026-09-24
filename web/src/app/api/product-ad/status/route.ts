@@ -11,6 +11,7 @@ import {
   setProductAdSilentVideo,
 } from "@/lib/db";
 import { getFalJobResult, getFalJobStatus, getFalVideoUrl, hasRealRequestId, submitLipsyncJob, uploadBufferToFal, LIPSYNC_ENDPOINT } from "@/lib/fal";
+import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl } from "@/lib/videoInference";
 import { getModalJobStatus } from "@/lib/modal";
 import { padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 import { publicJson } from "@/lib/mediaProxy";
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
     }
     let falStatus;
     try {
-      falStatus = await getFalJobStatus(job.fal_endpoint, job.fal_request_id);
+      falStatus = await getVideoInferenceStatus(job.fal_endpoint, job.fal_request_id);
     } catch {
       return publicJson({ status: "IN_PROGRESS", phase: "Rendering silent video" });
     }
@@ -80,8 +81,8 @@ export async function GET(req: NextRequest) {
     }
     if (falStatus === "COMPLETED") {
       try {
-        const result = await getFalJobResult(job.fal_endpoint, job.fal_request_id);
-        silentVideoUrl = getFalVideoUrl(result);
+        const result = await getVideoInferenceResult(job.fal_endpoint, job.fal_request_id);
+        silentVideoUrl = getVideoInferenceUrl(result);
         if (!silentVideoUrl) throw new Error("The model returned no video");
         await setProductAdSilentVideo(job.id, silentVideoUrl);
       } catch (err) {

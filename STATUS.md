@@ -1,5 +1,14 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-24 - Seedance → BytePlus ModelArk (not fal)
+
+- **Routing**: User-facing **Seedance 2.0** (`seedance`) and **Seedance 2.5** (`seedance25`) — paygo, product-ad, ad-studio, grid-storyboard — submit/poll via ModelArk (`web/src/lib/modelArk.ts` + `videoInference.ts`). Kling / Veo / MiniMax / Grok stay on fal.
+- **Env (Sid must set on Vercel)**: `BYTEPLUS_ARK_API_KEY` or `ARK_API_KEY`; optional `BYTEPLUS_ARK_BASE_URL`, `BYTEPLUS_SEEDANCE_20_MODEL`, `BYTEPLUS_SEEDANCE_25_MODEL`. See `web/.env.example`.
+- **Billing**: Users still buy Lucy Stripe credits only. ModelArk prefer **postpaid PAYG** (no user-facing vendor UI). Treasury logs ModelArk funding note on video-credit purchase; fal still has no public buy API.
+- **COGS** (ModelArk 720p +15% buffer): seedance Fast 8s ≈ **$1.10**; seedance25 8s ≈ **$2.13**. Flat $3.99 kept; Seedance 2.5 duration raised to 8s (was 4s under fal). Margin table in PR.
+- **ACR $14k/yr** is Advanced Creation Rights (faces/QPM) — **not** required for basic PAYG. Not purchased here.
+- **UI**: No Fal / BytePlus / ModelArk brand names in user-facing copy.
+
 ## Latest update, 2026-09-23 - Camera moves + job hubs + filmmaking study library
 
 - **Shipped**: `/camera-moves` hub (Seedance-ready phrases matching Prompt Guide chooser); job hubs `/ugc-ad`, `/ai-music-video`, `/storyboard-to-video`, `/consistent-character`; `/video-styles`; `/model-reviews` (cited public sources only); inspiration `/ad-inspiration`, `/award-winning-ads`; trailers/scenes `/study-trailers-and-scenes` (official YT embeds); IMDb-inspired `/study-great-films`; craft hubs long takes / openings / music videos / TV titles / Oscar cinematography / composition / blocking; parent `/study-film`.

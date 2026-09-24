@@ -1,7 +1,9 @@
-import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
+import { VIDEO_PAYGO_ENGINES, buildSeedanceModelArkInput, type VideoEngine } from "@/lib/videoPaygo";
+import { isModelArkEngine, modelArkEndpointToken } from "@/lib/modelArk";
 export { type AdStudioModel, AD_STUDIO_MODELS, isAdStudioModel, CAMERA_PROMPT_EXAMPLES } from "./adStudioModels";
 
 export function adStudioFalEndpoint(model: VideoEngine): string {
+  if (isModelArkEngine(model)) return modelArkEndpointToken(model);
   return VIDEO_PAYGO_ENGINES[model].falImageToVideoEndpoint;
 }
 
@@ -20,6 +22,9 @@ export function adStudioFalEndpoint(model: VideoEngine): string {
 // here - Seedance included - takes just the one image_url, no dual-image
 // branching needed.
 export function buildAdStudioSceneFalInput(model: VideoEngine, prompt: string, imageUrl: string): Record<string, unknown> {
+  if (isModelArkEngine(model)) {
+    return buildSeedanceModelArkInput(model, prompt, imageUrl, false);
+  }
   const engine = VIDEO_PAYGO_ENGINES[model];
   return {
     prompt,
