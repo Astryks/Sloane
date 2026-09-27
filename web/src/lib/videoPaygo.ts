@@ -83,7 +83,7 @@ import {
   type ModelArkEngine,
 } from "./modelArk";
 import { withModelArkBody } from "./videoInference";
-import { hasVertexCredentialsConfigured, vertexEndpointToken, VERTEX_VEO_FAST_MODEL, VERTEX_VEO_STANDARD_MODEL } from "./vertexVeo";
+import { hasVertexCredentialsConfigured, vertexEndpointToken, VERTEX_VEO_FAST_MODEL, VERTEX_VEO_STANDARD_MODEL, VERTEX_VEO_LITE_MODEL } from "./vertexVeo";
 
 // Veo goes direct to Google (Vertex AI) once GOOGLE_CLOUD_PROJECT + a
 // credential are set; until then it stays on the previous reseller path so
@@ -168,6 +168,21 @@ const VIDEO_PAYGO_VENDOR: Record<VideoEngine, VendorFields> = {
     ? {
         falEndpoint: vertexEndpointToken(VERTEX_VEO_FAST_MODEL),
         falImageToVideoEndpoint: vertexEndpointToken(VERTEX_VEO_FAST_MODEL),
+        falDurationValue: "8s",
+        inferenceProvider: "vertex",
+      }
+    : {
+        falEndpoint: "fal-ai/veo3.1/fast",
+        falImageToVideoEndpoint: "fal-ai/veo3.1/fast/image-to-video",
+        falDurationValue: "8s",
+        inferenceProvider: "fal",
+      },
+  // Lite exists only on Google; without Vertex credentials it falls back to
+  // the Fast reseller endpoint (costs more, still inside the standard tier).
+  veolite: VEO_ON_VERTEX
+    ? {
+        falEndpoint: vertexEndpointToken(VERTEX_VEO_LITE_MODEL),
+        falImageToVideoEndpoint: vertexEndpointToken(VERTEX_VEO_LITE_MODEL),
         falDurationValue: "8s",
         inferenceProvider: "vertex",
       }
@@ -271,6 +286,7 @@ export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
   seedance25: SEEDANCE_ON_MODELARK ? 2.13 : 2.18, // ModelArk 8s @ ~$0.231/s + 15% | reseller 4s @ $0.473/s + 15%
   seedance: SEEDANCE_ON_MODELARK ? 1.1 : 2.23, // ModelArk Fast 8s @ ~$0.12/s + 15% | reseller 8s @ $0.2419/s + 15%
   veo: 1.38,
+  veolite: VEO_ON_VERTEX ? 0.46 : 1.38, // 8s x ~$0.05/s (Lite w/ audio, 720p) + 15%
   veo31: 1.84, // 4s x ~$0.40/s (Veo 3.1 standard w/ audio) + 15% buffer - profit ~$1.73 at $3.99
   kling: 1.61,
   klingv3: 2.254, // 10s @ $0.196/s (worst real tier, audio+voice) + 15% buffer - see VIDEO_PAYGO_ENGINES.klingv3
@@ -307,6 +323,7 @@ function matchedDurationValue(engine: VideoEngine, audioSeconds: number | null, 
   const target = Math.min(def.durationSeconds, Math.max(min, desired));
   switch (engine) {
     case "veo":
+    case "veolite":
     case "veo31":
       return target <= 4 ? "4s" : target <= 6 ? "6s" : "8s";
     case "kling":
@@ -350,6 +367,7 @@ export function buildFalInput(
   const ratio = def.aspectRatioOptions?.includes(aspectRatio ?? "") ? aspectRatio! : undefined;
   switch (engine) {
     case "veo":
+    case "veolite":
     case "veo31":
       return {
         prompt,

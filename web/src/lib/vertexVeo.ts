@@ -36,6 +36,7 @@ export type VertexJobStatus = "IN_PROGRESS" | "COMPLETED" | "FAILED";
 
 export const VERTEX_VEO_FAST_MODEL = process.env.GOOGLE_VEO_FAST_MODEL || "veo-3.1-fast-generate-001";
 export const VERTEX_VEO_STANDARD_MODEL = process.env.GOOGLE_VEO_MODEL || "veo-3.1-generate-001";
+export const VERTEX_VEO_LITE_MODEL = process.env.GOOGLE_VEO_LITE_MODEL || "veo-3.1-lite-generate-001";
 
 const PREFIX = "vertex:";
 
