@@ -8,7 +8,9 @@ import {
   setVideoPaygoJobRequestId,
   setVideoPaygoJobModalId,
   failVideoPaygoJob,
+  addVideoCredits,
 } from "@/lib/db";
+import { isOwner } from "@/lib/owner";
 import {
   VIDEO_PAYGO_ENGINES,
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
@@ -210,6 +212,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Owner test mode: top up exactly the one credit about to be spent, so
+    // every existing spend/refund path below stays unchanged.
+    if (isOwner(user)) await addVideoCredits(user.id, 1);
     const spent = await spendVideoCredit(user.id);
     if (!spent) {
       return publicJson({ error: "No video credits left - buy more to keep generating" }, { status: 402 });

@@ -1235,6 +1235,8 @@ function PayAsYouGoVideoSection({
 }) {
   const [signedIn, setSignedIn] = useState(false);
   const [balance, setBalance] = useState(0);
+  // Owner test mode (OWNER_EMAILS on the server) - generate without Stripe.
+  const [ownerMode, setOwnerMode] = useState(false);
   const [balanceLoaded, setBalanceLoaded] = useState(false);
   const [engine, setEngine] = useState<VideoEngine>("veo");
   // Duration/aspect ratio choices (2026-09-15) - null means "use the
@@ -1300,6 +1302,7 @@ function PayAsYouGoVideoSection({
       const data = await res.json();
       setSignedIn(data.signedIn);
       setBalance(data.balance);
+      setOwnerMode(!!data.isOwner);
       return data.balance as number;
     } catch {
       return balance;
@@ -1441,7 +1444,7 @@ function PayAsYouGoVideoSection({
   }
 
   const missingInput = (!prompt.trim() && !promptSkippable) || (audioMode === "own" && !audio.selectedBlob);
-  const hasCredit = balance >= 1;
+  const hasCredit = balance >= 1 || ownerMode;
 
   const engineEntries = Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][];
   const orderedEngines = [...engineEntries.filter(([, e]) => e.popular), ...engineEntries.filter(([, e]) => !e.popular)];
@@ -1666,7 +1669,9 @@ function PayAsYouGoVideoSection({
             : waitingForCredit && !hasCredit
               ? "Confirming your payment…"
               : hasCredit
-                ? "Generate my video (1 credit)"
+                ? ownerMode && balance < 1
+                  ? "Generate (owner test - no charge)"
+                  : "Generate my video (1 credit)"
                 : buyingPack === "single"
                   ? "Opening secure checkout…"
                   : `Pay ${PAYGO_PRICE_LABEL} & generate →`}
