@@ -29,22 +29,48 @@ async function inline(url: string): Promise<{ inlineData: { mimeType: string; da
   }
 }
 
+// Gemini image models run on Google's shared capacity (no per-project quota
+// to raise), so a 429 just means "busy right now": wait and retry the same
+// model before moving on (2026-09-27). Everything shares one time budget:
+// callers run inside a 60s route, and must still have time to hand off to
+// the fallback (a killed function leaves the frame claimed for 10 minutes).
+const BUSY_RETRY_DELAYS_MS = [2_000, 5_000];
+const TOTAL_BUDGET_MS = 40_000;
+const MIN_CALL_MS = 10_000;
+
+async function callModel(model: string, body: string, deadline: number): Promise<Response | null> {
+  const url = `https://aiplatform.googleapis.com/v1/projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/global/publishers/google/models/${model}:generateContent`;
+  for (let attempt = 0; ; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining < MIN_CALL_MS) return null;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...(await vertexAuthHeaders()), "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(remaining),
+    });
+    const delay = BUSY_RETRY_DELAYS_MS[attempt];
+    if (res.status !== 429 || delay === undefined || deadline - Date.now() - delay < MIN_CALL_MS) return res;
+    await new Promise((r) => setTimeout(r, delay));
+  }
+}
+
 /** Returns a public Blob URL, or null if every model failed (caller falls back). */
 export async function generateImageOnVertex(prompt: string, referenceUrls: string[], aspectRatio: string): Promise<string | null> {
   if (!hasVertexCredentialsConfigured() || !process.env.BLOB_READ_WRITE_TOKEN) return null;
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
   const refs = (await Promise.all(referenceUrls.slice(0, 4).map(inline))).filter((p): p is NonNullable<typeof p> => !!p);
+  const body = JSON.stringify({
+    contents: [{ role: "user", parts: [...refs, { text: prompt }] }],
+    generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio } },
+  });
   for (const model of MODELS) {
     try {
-      const url = `https://aiplatform.googleapis.com/v1/projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/global/publishers/google/models/${model}:generateContent`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { ...(await vertexAuthHeaders()), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [...refs, { text: prompt }] }],
-          generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio } },
-        }),
-        signal: AbortSignal.timeout(50_000),
-      });
+      const res = await callModel(model, body, deadline);
+      if (!res) {
+        console.error(`[googleImage] out of time before ${model} - using fallback`);
+        return null;
+      }
       const text = await res.text();
       if (!res.ok) {
         console.error(`[googleImage] ${model} failed (${res.status}): ${text.slice(0, 400)}`);
