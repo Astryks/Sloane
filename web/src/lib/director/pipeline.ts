@@ -35,8 +35,29 @@ import { getFalJobResult, getFalJobStatus, submitFalJob, IMAGE_EDIT_ENDPOINT, TE
 import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import type { DirectorPlan } from "./plan";
+import { generateImageOnVertex } from "../googleImage";
+
+// Marker stored as the request id when a still was made synchronously on
+// Google (no reseller job to poll).
+const VERTEX_SYNC = "vertex-sync";
 
 const MERGE_ENDPOINT = "fal-ai/ffmpeg-api/merge-videos";
+
+// Our own stitcher (scripts/director_stitch.py on Modal): keeps audio,
+// conforms size/fps and colour-matches every shot to shot 1. The plain
+// merge above is the fallback when it isn't configured or fails to start.
+const MODAL_STITCH = process.env.MODAL_DIRECTOR_STITCH_URL;
+const MODAL_PREFIX = "modal:";
+
+async function modalStitch(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
+  const res = await fetch(`${MODAL_STITCH}${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${process.env.MODAL_SHARED_SECRET}`, "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`stitch service ${res.status}`);
+  return (await res.json()) as Record<string, unknown>;
+}
 
 function firstImageUrl(result: unknown): string | null {
   const r = result as { images?: Array<{ url?: string }>; image?: { url?: string } };
@@ -68,6 +89,9 @@ async function advanceAnchor(film: DirectorFilmRow, plan: DirectorPlan) {
     if (!film.anchor_request_id) {
       const { compileAnchorPrompt } = await import("./compile");
       const prompt = compileAnchorPrompt(plan, { character: !!film.refs.character, product: !!film.refs.product, location: !!film.refs.location });
+      // Google first (Google credits); reseller job as the fallback.
+      const googleUrl = await generateImageOnVertex(prompt, refs, plan.aspectRatio);
+      if (googleUrl) return updateDirectorFilm(film.id, { anchor_request_id: VERTEX_SYNC, anchor_url: googleUrl, status: "frames" });
       const requestId = await submitImage(prompt, refs, plan.aspectRatio);
       await updateDirectorFilm(film.id, { anchor_request_id: requestId });
       return;
@@ -91,6 +115,8 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
     // photo) stay in the list so identity and grade don't drift.
     const refs = [shot.redraw_from_url, film.anchor_url, film.refs.product].filter((u): u is string => !!u);
     if (!shot.keyframe_request_id) {
+      const googleUrl = await generateImageOnVertex(shot.keyframe_prompt, refs, plan.aspectRatio);
+      if (googleUrl) return updateDirectorShot(shot.id, { status: "keyframe", keyframe_request_id: VERTEX_SYNC, keyframe_url: googleUrl });
       const requestId = await submitImage(shot.keyframe_prompt, refs, plan.aspectRatio);
       return updateDirectorShot(shot.id, { status: "keyframe", keyframe_request_id: requestId });
     }
@@ -147,8 +173,27 @@ async function advanceStitch(film: DirectorFilmRow, shots: DirectorShotRow[]) {
     if (done.length === 0) return updateDirectorFilm(film.id, { status: "failed", error: "No shots could be rendered - you have been refunded." });
     if (done.length === 1) return updateDirectorFilm(film.id, { status: "completed", final_video_url: done[0] });
     if (!film.stitch_request_id) {
+      if (MODAL_STITCH && process.env.MODAL_SHARED_SECRET) {
+        try {
+          const { call_id } = await modalStitch("/start", { method: "POST", body: JSON.stringify({ video_urls: done }) });
+          if (typeof call_id === "string") return updateDirectorFilm(film.id, { stitch_request_id: `${MODAL_PREFIX}${call_id}` });
+        } catch (err) {
+          console.error("[director] colour-match stitcher unavailable, using plain merge", err);
+        }
+      }
       const requestId = await submitFalJob(MERGE_ENDPOINT, { video_urls: done });
       return updateDirectorFilm(film.id, { stitch_request_id: requestId });
+    }
+    if (film.stitch_request_id.startsWith(MODAL_PREFIX)) {
+      const r = await modalStitch(`/result?call_id=${encodeURIComponent(film.stitch_request_id.slice(MODAL_PREFIX.length))}`);
+      if (r.status === "done" && typeof r.video_url === "string") return updateDirectorFilm(film.id, { status: "completed", final_video_url: r.video_url });
+      if (r.status === "failed") {
+        console.error("[director] colour-match stitch failed", r.error);
+        // Retry once with the plain merge rather than leave the customer without a film.
+        const requestId = await submitFalJob(MERGE_ENDPOINT, { video_urls: done });
+        return updateDirectorFilm(film.id, { stitch_request_id: requestId });
+      }
+      return releaseDirectorFilm(film.id);
     }
     const status = await getFalJobStatus(MERGE_ENDPOINT, film.stitch_request_id);
     if (status === "COMPLETED") {

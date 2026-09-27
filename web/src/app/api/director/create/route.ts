@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getPaygoSessionUser } from "@/lib/auth";
-import { addVideoCredits, createDirectorFilm, initSchema, spendVideoCredit } from "@/lib/db";
+import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, spendVideoCredit } from "@/lib/db";
 import { publicJson } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
@@ -28,7 +28,11 @@ export async function POST(req: NextRequest) {
     } catch {
       return publicJson({ error: "Plan your film first" }, { status: 400 });
     }
-    const plan = sanitizePlan(rawPlan);
+    let plan = sanitizePlan(rawPlan);
+    // A saved character from the library stands in for an uploaded photo.
+    const savedId = String(form.get("savedCharacterId") ?? "");
+    const saved = savedId ? await getSavedCharacter(user.id, savedId) : null;
+    if (saved && saved.description && !plan.character) plan = { ...plan, character: saved.description };
     const idea = String(form.get("idea") ?? plan.logline).slice(0, 1500);
 
     const files: Record<"character" | "product" | "location", Blob | null> = { character: null, product: null, location: null };
@@ -40,7 +44,7 @@ export async function POST(req: NextRequest) {
         files[k] = f;
       }
     }
-    const refFlags = { character: !!files.character, product: !!files.product, location: !!files.location };
+    const refFlags = { character: !!files.character || !!saved, product: !!files.product, location: !!files.location };
 
     const perShot = directorShotPriceCents(engine);
     const totalCents = perShot * plan.shots.length;
@@ -49,7 +53,7 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: `This film costs ${formatUsd(totalCents)} - add credit to make it`, needCredit: true, totalCents }, { status: 402 });
     }
 
-    const refs: Record<string, string> = {};
+    const refs: Record<string, string> = saved && !files.character ? { character: saved.photo_url } : {};
     try {
       for (const k of ["character", "product", "location"] as const) {
         const f = files[k];

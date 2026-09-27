@@ -50,6 +50,7 @@ type FilmStatus = {
 };
 const DONE_STATES = ["completed", "failed", "cancelled"];
 type RefKey = "character" | "product" | "location";
+type SavedCharacter = { id: string; name: string; description: string; photoUrl: string };
 
 const inputCls = "w-full rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
 
@@ -94,6 +95,42 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   const [film, setFilm] = useState<FilmStatus | null>(null);
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [cast, setCast] = useState<SavedCharacter[]>([]);
+  const [castId, setCastId] = useState<string | null>(null);
+  const [saveName, setSaveName] = useState("");
+  const [saveDesc, setSaveDesc] = useState("");
+
+  useEffect(() => {
+    fetch("/api/director/characters")
+      .then((r) => r.json())
+      .then((d) => setCast(Array.isArray(d.characters) ? d.characters : []))
+      .catch(() => {});
+  }, []);
+
+  async function saveCharacter() {
+    if (!photos.character || !saveName.trim()) return;
+    setBusy("saveChar");
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("name", saveName.trim());
+      form.append("description", saveDesc.trim());
+      form.append("photo", photos.character);
+      const res = await fetch("/api/director/characters", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't save");
+      setCast((c) => [data.character, ...c]);
+      setCastId(data.character.id);
+      setPhotos((p) => ({ ...p, character: null }));
+      setSaveName("");
+      setSaveDesc("");
+      setNotice(`${data.character.name} saved - pick them in any film.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save");
+    } finally {
+      setBusy(null);
+    }
+  }
   const autoCreateRef = useRef(false);
   const [pollKey, setPollKey] = useState(0);
   const restartPolling = () => setPollKey((k) => k + 1);
@@ -182,7 +219,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
           style,
           shotCount,
           aspectRatio: aspect,
-          hasCharacterPhoto: !!photos.character,
+          hasCharacterPhoto: !!photos.character || !!castId,
           hasProductPhoto: !!photos.product,
           hasLocationPhoto: !!photos.location,
         }),
@@ -238,6 +275,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
       form.append("engine", engine);
       form.append("idea", idea);
       form.append("plan", JSON.stringify(plan));
+      if (castId && !photos.character) form.append("savedCharacterId", castId);
       (Object.keys(photos) as RefKey[]).forEach((k) => photos[k] && form.append(k, photos[k] as File));
       const res = await fetch("/api/director/create", { method: "POST", body: form });
       const data = await res.json();
@@ -362,11 +400,43 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
 
         <div>
           <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">2. Optional photos - add them when a real person, product or place must look exactly right</p>
+          {cast.length > 0 && (
+            <div className="mb-2">
+              <p className="mb-1 text-[11px] font-semibold text-muted">Your cast - tap to use in this film</p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {cast.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setCastId(castId === c.id ? null : c.id);
+                      setPhotos((p) => ({ ...p, character: null }));
+                    }}
+                    className={`flex shrink-0 flex-col items-center rounded-xl border p-1.5 ${castId === c.id ? "border-purple bg-purple/10" : "border-border bg-white"}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={c.photoUrl} alt={c.name} className="h-12 w-12 rounded-lg object-cover" />
+                    <span className="mt-0.5 max-w-16 truncate text-[10px] font-bold">{c.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-2">
-            <PhotoSlot label="Character" hint="A clear face photo" file={photos.character} onChange={(f) => setPhotos((p) => ({ ...p, character: f }))} />
+            <PhotoSlot label="Character" hint={castId ? "Using your saved character" : "A clear face photo"} file={photos.character} onChange={(f) => { setPhotos((p) => ({ ...p, character: f })); if (f) setCastId(null); }} />
             <PhotoSlot label="Product" hint="Plain background, label visible" file={photos.product} onChange={(f) => setPhotos((p) => ({ ...p, product: f }))} />
             <PhotoSlot label="Location" hint="The place it happens" file={photos.location} onChange={(f) => setPhotos((p) => ({ ...p, location: f }))} />
           </div>
+          {photos.character && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-white/70 p-2">
+              <span className="text-[11px] font-semibold text-muted">Save this person for next time:</span>
+              <input className={`${inputCls} w-28`} placeholder="Name" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
+              <input className={`${inputCls} min-w-40 flex-1`} placeholder="Optional: age, look, style" value={saveDesc} onChange={(e) => setSaveDesc(e.target.value)} />
+              <button type="button" disabled={!saveName.trim() || busy === "saveChar"} onClick={saveCharacter} className="rounded-xl bg-purple/10 px-3 py-1.5 text-xs font-bold text-purple disabled:opacity-50">
+                {busy === "saveChar" ? "Saving…" : "Save"}
+              </button>
+            </div>
+          )}
         </div>
 
         <details className="rounded-2xl border border-border bg-white/70 p-3">

@@ -40,7 +40,22 @@ export type Subscriber = {
 // initSchema() in its own try/catch and returns a proper JSON error
 // response (never an unhandled crash) - this only makes THAT message
 // useful instead of a raw driver error a customer would never understand.
-export async function initSchema() {
+// initSchema runs ~60 idempotent CREATE/ALTER statements; running them on
+// every request made each API call take 10-20s (2026-09-27). They only need
+// to run once per server instance, so the first call's promise is shared.
+// A failure clears the cache so the next request retries.
+let schemaReady: Promise<void> | null = null;
+export function initSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = runSchemaMigrations().catch((err) => {
+      schemaReady = null;
+      throw err;
+    });
+  }
+  return schemaReady;
+}
+
+async function runSchemaMigrations() {
   if (!process.env.POSTGRES_URL) {
     throw new Error("Server misconfiguration: POSTGRES_URL is not set.");
   }
@@ -609,6 +624,18 @@ export async function initSchema() {
   await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS revisions_used INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS redraw_from_url TEXT`;
+  // Character library (2026-09-27): save a cast member once, reuse in any film.
+  await sql`
+    CREATE TABLE IF NOT EXISTS saved_characters (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      photo_url TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_saved_characters_user ON saved_characters(user_id)`;
   // Free storyboard planning is rate-limited per visitor (session or IP).
   await sql`
     CREATE TABLE IF NOT EXISTS director_plan_log (
@@ -1159,6 +1186,7 @@ export async function mergeGuestIntoUser(guestId: string, userId: string): Promi
   // Separate statement: a data-modifying CTE can't see rows its siblings
   // just updated, so deleting the guest in the same statement would race
   // the ON DELETE CASCADE against the moves above.
+  await sql`UPDATE saved_characters SET user_id = ${userId} WHERE user_id = ${guestId}`;
   await sql`DELETE FROM users WHERE id = ${guestId} AND is_guest = true`;
 }
 
@@ -2499,5 +2527,33 @@ export async function failDirectorShot(shotId: string, error: string): Promise<b
     WHERE id = ${shotId} AND status NOT IN ('failed', 'completed')
     RETURNING id
   `;
+  return rows.length > 0;
+}
+
+
+// --- Character library ---
+
+export type SavedCharacter = { id: string; user_id: string; name: string; description: string; photo_url: string; created_at: string };
+
+export async function listSavedCharacters(userId: string): Promise<SavedCharacter[]> {
+  return (await sql`SELECT * FROM saved_characters WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT 50`) as SavedCharacter[];
+}
+
+export async function createSavedCharacter(userId: string, name: string, description: string, photoUrl: string): Promise<SavedCharacter> {
+  const rows = await sql`
+    INSERT INTO saved_characters (user_id, name, description, photo_url)
+    VALUES (${userId}, ${name}, ${description}, ${photoUrl})
+    RETURNING *
+  `;
+  return rows[0] as SavedCharacter;
+}
+
+export async function getSavedCharacter(userId: string, id: string): Promise<SavedCharacter | null> {
+  const rows = await sql`SELECT * FROM saved_characters WHERE id = ${id} AND user_id = ${userId}`;
+  return (rows[0] as SavedCharacter) ?? null;
+}
+
+export async function deleteSavedCharacter(userId: string, id: string): Promise<boolean> {
+  const rows = await sql`DELETE FROM saved_characters WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
   return rows.length > 0;
 }
