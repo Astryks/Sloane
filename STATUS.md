@@ -7,7 +7,7 @@ All four are live and were tested in production with a real 2-shot Veo Lite film
 - **Storyboard frames on Google (Vertex):** the models are tried in order: `gemini-3-pro-image` (Nano Banana Pro), then `gemini-3.1-flash-image`, then `gemini-3.1-flash-lite-image`. The old reseller image path is kept as the fallback. Override the list with `GOOGLE_IMAGE_MODELS`.
   - The first deploy used the wrong ID (`...-preview`, 404), and Lite hit a 429 quota error, so frames fell back; this is fixed in 496ea2f.
   - Confirmed: frames are now 1376x768 PNGs from Google and no errors are logged.
-  - Watch for 429s on image quota; a quota increase may be needed at volume.
+  - There is no Lite quota to raise: Gemini image models run on Google's shared capacity. Pro's limit is 34M requests/min. When Google returns a 429 ("busy"), the code retries after 2s and again after 5s, within a 40s total budget, then falls back (60f5515). Re-verified live: 2/2 frames came from Google.
 - **Colour-matched stitch:** `scripts/director_stitch.py` is a Modal app (`director-stitch`, async `/start` and `/result`, Bearer `MODAL_SHARED_SECRET`).
   - It keeps audio (adding silence to shots that have none), conforms size and 24fps, and nudges each shot's colour toward shot 1, by at most 10% per channel.
   - Vercel env: `MODAL_DIRECTOR_STITCH_URL`. If Modal fails, the plain merge is used instead.
@@ -18,8 +18,7 @@ All four are live and were tested in production with a real 2-shot Veo Lite film
 
 Next:
 - Seedance direct: waiting on BytePlus activation/accelerator; flip `NEXT_PUBLIC_SEEDANCE_DIRECT=1` when it is live.
-- Request a Vertex image quota increase before launch traffic.
-- Optional: move the stitch output off the reseller storage onto Vercel Blob.
+- Films stay on the current storage (decided 2026-09-27: no move to Blob).
 
 ## Latest update, 2026-09-27 (evening) - "Directed by Lucy" live: intent-aware multi-shot films with storyboard approval
 
