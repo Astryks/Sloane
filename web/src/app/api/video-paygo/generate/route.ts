@@ -17,7 +17,8 @@ import {
   videoEngineUsesModelArk,
   type VideoEngine,
 } from "@/lib/videoPaygo";
-import { uploadBufferToFal, hasEnoughFalBalanceToGenerate } from "@/lib/fal";
+import { hasEnoughFalBalanceToGenerate } from "@/lib/fal";
+import { uploadInputMedia } from "@/lib/mediaUpload";
 import { submitVideoInferenceJob } from "@/lib/videoInference";
 import {
   hasModelArkCredentialsConfigured,
@@ -202,7 +203,7 @@ export async function POST(req: NextRequest) {
         console.error("[video-paygo] Seedance selected but BYTEPLUS_ARK_API_KEY/ARK_API_KEY missing");
         return publicJson({ error: MODELARK_UNAVAILABLE_USER_ERROR }, { status: 503 });
       }
-    } else if (!(await hasEnoughFalBalanceToGenerate())) {
+    } else if (engineDef.inferenceProvider === "fal" && !(await hasEnoughFalBalanceToGenerate())) {
       return publicJson(
         { error: "Video generation is temporarily paused while we top up - please try again shortly." },
         { status: 503 },
@@ -219,10 +220,10 @@ export async function POST(req: NextRequest) {
     try {
       if (hasImage) {
         const buf = Buffer.from(await (referenceImage as Blob).arrayBuffer());
-        inputImageUrl = await uploadBufferToFal(buf, (referenceImage as Blob).type || "image/jpeg", "reference.jpg");
+        inputImageUrl = await uploadInputMedia(buf, (referenceImage as Blob).type || "image/jpeg", "reference.jpg", engineDef.inferenceProvider);
       }
       if (hasAudio && ownAudioBuffer) {
-        inputAudioUrl = await uploadBufferToFal(ownAudioBuffer, (referenceAudio as Blob).type || "audio/mpeg", "audio");
+        inputAudioUrl = await uploadInputMedia(ownAudioBuffer, (referenceAudio as Blob).type || "audio/mpeg", "audio", engineDef.inferenceProvider);
       }
     } catch (err) {
       await refundVideoCredit(user.id);

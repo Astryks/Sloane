@@ -12,9 +12,9 @@
  *     -> { name: "<operation name>" }
  *   POST .../models/{m}:fetchPredictOperation { operationName }
  *     -> { done, error?, response: { videos: [{ bytesBase64Encoded | gcsUri, mimeType }], raiMediaFilteredCount? } }
- * With no storageUri the video comes back inline as base64; we re-host it on
- * our media storage (uploadBufferToFal) so every downstream path (mediaProxy
- * /api/media links, lip-sync, stitching) works unchanged.
+ * With no storageUri the video comes back inline as base64; we store it in
+ * our own Vercel Blob storage (not a reseller's), served to users through
+ * mediaProxy's /api/media links like every other result.
  *
  * Auth, either (checked in this order):
  *   GOOGLE_VERTEX_API_KEY               - a Vertex AI API key (sent as x-goog-api-key)
@@ -23,8 +23,8 @@
  * Plus GOOGLE_CLOUD_PROJECT (project id) and optional GOOGLE_CLOUD_LOCATION (default us-central1).
  */
 
-import { createSign } from "crypto";
-import { uploadBufferToFal } from "./fal";
+import { createSign, randomUUID } from "crypto";
+import { put } from "@vercel/blob";
 
 export type VertexJobStatus = "IN_PROGRESS" | "COMPLETED" | "FAILED";
 
@@ -215,7 +215,12 @@ export async function getVertexVeoResult(model: string, operationName: string): 
     throw new Error(`Video generation produced no video${filtered}`);
   }
   if (!v.bytesBase64Encoded) throw new Error("Video engine returned a storage link instead of the video - storageUri must stay unset");
-  const url = await uploadBufferToFal(Buffer.from(v.bytesBase64Encoded, "base64"), v.mimeType || "video/mp4", "video.mp4");
+  const blob = await put(`videos/veo/${randomUUID()}.mp4`, Buffer.from(v.bytesBase64Encoded, "base64"), {
+    access: "public",
+    contentType: v.mimeType || "video/mp4",
+    addRandomSuffix: false,
+  });
+  const url = blob.url;
   uploadedByOperation.set(operationName, url);
   return { video: { url } };
 }

@@ -22,7 +22,7 @@ import { NextResponse } from "next/server";
 
 // fal CDN, BytePlus ModelArk result storage (TOS buckets on bytepluses /
 // volces domains), and Google Cloud Storage - every vendor we generate on.
-const VENDOR_HOST = /(^|\.)(fal\.(media|ai|run)|bytepluses\.com|byteplus\.com|volces\.com|volccdn\.com|storage\.googleapis\.com)$/i;
+const VENDOR_HOST = /(^|\.)(fal\.(media|ai|run)|bytepluses\.com|byteplus\.com|volces\.com|volccdn\.com|storage\.googleapis\.com|public\.blob\.vercel-storage\.com)$/i;
 const VENDOR_NAME = /\bfal(\.ai|\.media|\.run)?\b|fal's|model\s?ark|byteplus|volcengine|vertex|aiplatform|googleapis/i;
 const PUBLIC_PREFIX = "/api/media/";
 
