@@ -16,15 +16,21 @@
  * our own Vercel Blob storage (not a reseller's), served to users through
  * mediaProxy's /api/media links like every other result.
  *
- * Auth, either (checked in this order):
+ * Auth, one of (checked in this order):
+ *   Keyless Vercel OIDC -> Google Workload Identity Federation (preferred;
+ *     our org blocks service-account key files by default policy, and
+ *     there's no secret to leak/rotate). Needs GCP_PROJECT_NUMBER,
+ *     GCP_SERVICE_ACCOUNT_EMAIL, GCP_WORKLOAD_IDENTITY_POOL_ID,
+ *     GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID (see vercel.com/docs/oidc/gcp).
  *   GOOGLE_VERTEX_API_KEY               - a Vertex AI API key (sent as x-goog-api-key)
- *   GOOGLE_SERVICE_ACCOUNT_JSON         - full service-account key JSON (role: Vertex AI User);
+ *   GOOGLE_SERVICE_ACCOUNT_JSON         - full service-account key JSON (role: Agent Platform User);
  *                                         exchanged for a 1h OAuth token via a signed JWT
  * Plus GOOGLE_CLOUD_PROJECT (project id) and optional GOOGLE_CLOUD_LOCATION (default us-central1).
  */
 
 import { createSign, randomUUID } from "crypto";
 import { put } from "@vercel/blob";
+import { getVercelOidcToken } from "@vercel/oidc";
 
 export type VertexJobStatus = "IN_PROGRESS" | "COMPLETED" | "FAILED";
 
@@ -45,8 +51,20 @@ export function vertexModelFromEndpoint(endpoint: string): string {
   return endpoint.slice(PREFIX.length);
 }
 
+function hasWorkloadIdentityConfigured(): boolean {
+  return !!(
+    process.env.GCP_PROJECT_NUMBER &&
+    process.env.GCP_SERVICE_ACCOUNT_EMAIL &&
+    process.env.GCP_WORKLOAD_IDENTITY_POOL_ID &&
+    process.env.GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID
+  );
+}
+
 export function hasVertexCredentialsConfigured(): boolean {
-  return !!process.env.GOOGLE_CLOUD_PROJECT && !!(process.env.GOOGLE_VERTEX_API_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  return (
+    !!process.env.GOOGLE_CLOUD_PROJECT &&
+    (hasWorkloadIdentityConfigured() || !!process.env.GOOGLE_VERTEX_API_KEY || !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+  );
 }
 
 function location(): string {
@@ -87,7 +105,44 @@ async function serviceAccountToken(): Promise<string> {
   return data.access_token;
 }
 
+// Vercel OIDC token -> Google STS federated token -> impersonate the
+// lucy-labs-veo service account for a 1h access token. Same flow as
+// google-auth-library's ExternalAccountClient, done with two fetches so we
+// don't pull that whole library into every function.
+async function workloadIdentityToken(): Promise<string> {
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.token;
+  const audience = `//iam.googleapis.com/projects/${process.env.GCP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${process.env.GCP_WORKLOAD_IDENTITY_POOL_ID}/providers/${process.env.GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID}`;
+  const subjectToken = await getVercelOidcToken();
+  const sts = await fetch("https://sts.googleapis.com/v1/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+      audience,
+      scope: "https://www.googleapis.com/auth/cloud-platform",
+      requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
+      subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+      subject_token: subjectToken,
+    }),
+  });
+  if (!sts.ok) throw new Error(`Video engine auth failed at federation step (${sts.status}): ${(await sts.text()).slice(0, 200)}`);
+  const federated = ((await sts.json()) as { access_token: string }).access_token;
+  const imp = await fetch(
+    `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${process.env.GCP_SERVICE_ACCOUNT_EMAIL}:generateAccessToken`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${federated}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: ["https://www.googleapis.com/auth/cloud-platform"], lifetime: "3600s" }),
+    },
+  );
+  if (!imp.ok) throw new Error(`Video engine auth failed at impersonation step (${imp.status}): ${(await imp.text()).slice(0, 200)}`);
+  const data = (await imp.json()) as { accessToken: string; expireTime: string };
+  cachedToken = { token: data.accessToken, expiresAt: new Date(data.expireTime).getTime() };
+  return data.accessToken;
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
+  if (hasWorkloadIdentityConfigured()) return { Authorization: `Bearer ${await workloadIdentityToken()}` };
   if (process.env.GOOGLE_VERTEX_API_KEY) return { "x-goog-api-key": process.env.GOOGLE_VERTEX_API_KEY };
   if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return { Authorization: `Bearer ${await serviceAccountToken()}` };
   throw new Error("Server misconfiguration: Vertex AI credentials are not set.");
