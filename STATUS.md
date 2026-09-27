@@ -1,5 +1,20 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-27 - Veo direct on Google (live + verified), two price tiers, Seedance fallback, startup credit applications
+
+- **Veo -> Google Vertex AI directly (LIVE, verified)**: first production Veo 3.1 Fast clip generated end to end on lucylabs.app (8s, 1280x720, native audio, served from `/api/media/...`, stored in Vercel Blob `lucy-generations`, billed to Google credits). Code: `web/src/lib/vertexVeo.ts` (routing token `vertex:<model>`), keyless auth = Vercel OIDC -> Google Workload Identity Federation (org policy blocks SA key files and SA-bound API keys).
+  - GCP project `project-3aa3e7a0-d347-4b12-a73` (number 473780390380, org `support-org`, owner support@astryks.com), billing account `017D56-E283EC-17DA08` (free trial, ~A$417 / 90 days). APIs enabled: Agent Platform (aiplatform), IAM Service Account Credentials. SA `lucy-labs-veo@...` (role Agent Platform User). WIF pool/provider `vercel` (issuer `https://oidc.vercel.com/astryks`, audience `https://vercel.com/astryks`, `google.subject=assertion.sub`); SA grants Workload Identity User ONLY to `owner:astryks:project:sloane:environment:production`.
+  - Vercel prod env: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION=us-central1`, `GCP_PROJECT_NUMBER`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_WORKLOAD_IDENTITY_POOL_ID=vercel`, `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID=vercel`, `OWNER_EMAILS=support@astryks.com`.
+  - Budget alert "Lucy Labs - monthly Google spend": A$150/month, gross usage (credits NOT netted), emails at 50/90/100%, alerts only (no spend cap - a cap would pause Veo for customers).
+  - New engine `veo31` (Veo 3.1 standard, 4s cap; ~$0.40/s w/ audio). Available but not yet wired: **Veo 3.1 Lite** (`veo-3.1-lite-generate-001`, ~$0.05/s w/ audio at 720p per the Studio page) - strong candidate for a cheap standard-tier engine.
+- **Two price tiers + USD-cent wallet**: standard $2.99 (MiniMax, Grok, Veo 3.1 Fast; Seedance 2.0 when direct), premium $3.99 (Kling 2.1, Kling v3, Veo 3.1, Seedance 2.5; Seedance 2.0 while on fallback). `video_credits.balance_cents` (old credits converted at $3.99), jobs store `price_cents`, Checkout `price_data` packs: single standard/premium, $20-for-$18, $40-for-$35. SQL verified on PGlite (found+fixed a guest-merge zeroing bug).
+- **Owner test mode**: `OWNER_EMAILS` accounts generate paygo videos without Stripe (vendor still bills).
+- **Seedance**: back on the reseller path until BytePlus activates the models; flip `NEXT_PUBLIC_SEEDANCE_DIRECT=1` in Vercel + redeploy to go direct (then Seedance 2.0 -> standard tier, 2.5 -> 8s). BytePlus account: $10 prepaid balance ("Pay by credits" - switch to automatic billing before going direct or it stops at $0), card on file, Free Credits Only Mode ON (turn off when going direct). Cheapest pack: Seedance 2.5 "Light Plan" $32 / 5M tokens / 3 months / non-refundable (~16-29 8s 720p clips). Monthly Savings Plans exclude Seedance - skip.
+- **Startup credits applied (2026-09-27)**: Google for Startups Cloud Program (Start tier, AI startup; reply in 3-5 business days, up to $2k to billing account above) and BytePlus AI Startups Accelerator ($2k non-threshold, up to $100k; "we will be in touch").
+- **White-label**: mediaProxy also proxies BytePlus/volces/GCS/Vercel Blob URLs and scrubs ModelArk/BytePlus/Vertex names; Vertex error bodies are logged server-side only.
+- **MiniMax H3 (open weights)**: license excludes US/EU/UK/KR (we host in the US) - not used; Mac inference ~45min+/clip. LTX-2 is the better open option if ever needed.
+- **Director layer**: knowledge base `web/src/lib/director/filmScience.ts` committed (unused yet); planner/compiler/pipeline/UI next.
+
 ## Latest update, 2026-09-24 - ModelArk key live; Seedance activation blocked on ~$30 pack
 
 - **Code**: [#39](https://github.com/Astryks/Sloane/pull/39) on `main` (squash `60ed3dc`); STATUS note `be4c37f`. Production redeploy with new env **READY** (`dpl_5rEznALtKLwhweqspgmR3zh6VGEp` → lucylabs.app).
