@@ -1882,6 +1882,46 @@ function VideoOptionCard({
   );
 }
 
+// Real side-by-side (2026-09-27): the same idea on the same model (Veo 3.1
+// Lite), once typed straight in, once Directed by Lucy. Files live in
+// /public/examples so they never depend on expiring vendor links.
+const COMPARE_IDEA = "A cinematic moment: an old violinist plays alone on a rainy Paris street at night, a young girl stops to listen";
+
+function LucyVsPlainSection({ onTry }: { onTry: () => void }) {
+  return (
+    <section id="lucy-vs-plain" className="shadow-soft-lg rounded-[28px] border border-white/60 bg-surface/90 p-5 backdrop-blur-xl sm:p-7">
+      <h2 className="text-xl font-extrabold tracking-tight">Directed by Lucy vs. a plain prompt</h2>
+      <p className="mt-1 text-sm text-muted">
+        Same idea, same model (Veo 3.1 Lite). One was typed straight in; the other was planned, storyboarded and filmed by Lucy.
+      </p>
+      <p className="mt-2 rounded-xl bg-cream p-2 text-xs italic text-muted">&ldquo;{COMPARE_IDEA}&rdquo;</p>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <figure className="rounded-2xl border border-purple/30 bg-white p-3">
+          <figcaption className="mb-2 text-sm font-extrabold text-purple">🎬 Directed by Lucy</figcaption>
+          <video src="/examples/violinist-directed-by-lucy.mp4" controls playsInline preload="metadata" className="w-full rounded-xl" />
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted">
+            <li>Two planned shots: a slow dolly-in on the violinist, then an over-the-shoulder on the girl</li>
+            <li>One look throughout - amber lamplight, cool fill, 35mm film grain</li>
+            <li>Same scarf, same street, same light in both shots - it cuts like a film</li>
+          </ul>
+        </figure>
+        <figure className="rounded-2xl border border-border bg-white p-3">
+          <figcaption className="mb-2 text-sm font-extrabold text-foreground">Plain prompt</figcaption>
+          <video src="/examples/violinist-plain-prompt.mp4" controls playsInline preload="metadata" className="w-full rounded-xl" />
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted">
+            <li>One wide shot, one camera position</li>
+            <li>Good-looking, but staged - closer to a stock photo than a scene</li>
+            <li>No story beats: nothing to cut between</li>
+          </ul>
+        </figure>
+      </div>
+      <button type="button" onClick={onTry} className="mt-4 w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft">
+        Try Directed by Lucy with your idea →
+      </button>
+    </section>
+  );
+}
+
 function ModeSwitch({ mode, onChange }: { mode: "single" | "director"; onChange: (m: "single" | "director") => void }) {
   const btn = (m: "single" | "director", label: string, sub: string) => (
     <button
@@ -1945,6 +1985,12 @@ export default function Home() {
         ) : (
           <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
         )}
+        <LucyVsPlainSection
+          onTry={() => {
+            setMode("director");
+            document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
+          }}
+        />
         <PromptGuideSection onTryVideo={handleTryVideoFromGuide} />
         <ProductAdSection />
 

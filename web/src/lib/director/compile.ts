@@ -119,3 +119,12 @@ export function compileKeyframePrompt(plan: DirectorPlan, shotIndex: number, ref
     .join(" ")
     .slice(0, 2400);
 }
+
+/** Redraw one storyboard frame from a plain-words change, keeping identity. */
+export function compileRedrawPrompt(plan: DirectorPlan, shotIndex: number, refs: RefFlags, instruction: string, hasCurrentFrame: boolean): string {
+  const base = compileKeyframePrompt(plan, shotIndex, refs);
+  const lead = hasCurrentFrame
+    ? `Edit the FIRST image (this shot's current storyboard frame): ${instruction.trim()}. The SECOND image is the film's master reference - keep the same person, wardrobe, product and colour grade as it.`
+    : `Change requested for this shot: ${instruction.trim()}.`;
+  return `${lead} ${base}`.slice(0, 2400);
+}

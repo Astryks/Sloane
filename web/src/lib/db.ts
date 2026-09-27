@@ -604,6 +604,11 @@ export async function initSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_director_films_user ON director_films(user_id)`;
+  // Storyboard approval (2026-09-27): frames are drawn and reviewed before
+  // any video is filmed; up to 5 redraws per film.
+  await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS revisions_used INTEGER NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS redraw_from_url TEXT`;
   // Free storyboard planning is rate-limited per visitor (session or IP).
   await sql`
     CREATE TABLE IF NOT EXISTS director_plan_log (
@@ -2321,7 +2326,9 @@ export type DirectorFilmRow = {
   plan: unknown;
   engine: string;
   refs: { character?: string; product?: string; location?: string };
-  status: "anchor" | "shots" | "stitching" | "completed" | "failed";
+  status: "anchor" | "frames" | "review" | "shots" | "stitching" | "completed" | "failed" | "cancelled";
+  revisions_used: number;
+  refunded_cents: number;
   total_cents: number;
   anchor_request_id: string | null;
   anchor_url: string | null;
@@ -2341,6 +2348,7 @@ export type DirectorShotRow = {
   status: "pending" | "keyframe" | "video" | "completed" | "failed";
   keyframe_request_id: string | null;
   keyframe_url: string | null;
+  redraw_from_url: string | null;
   video_endpoint: string | null;
   video_request_id: string | null;
   video_url: string | null;
@@ -2446,6 +2454,42 @@ export async function updateDirectorShot(
       claimed_at = NULL
     WHERE id = ${shotId}
   `;
+}
+
+/** Consumes one storyboard redraw if any are left. */
+export async function takeDirectorRevision(filmId: string, max: number): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_films SET revisions_used = revisions_used + 1
+    WHERE id = ${filmId} AND revisions_used < ${max} AND status IN ('review', 'frames')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/** Moves a film between states atomically; returns true only if it was in `from`. */
+export async function transitionDirectorFilm(filmId: string, from: string[], to: string): Promise<boolean> {
+  const rows = await sql`UPDATE director_films SET status = ${to}, claimed_at = NULL WHERE id = ${filmId} AND status = ANY(${from}) RETURNING id`;
+  return rows.length > 0;
+}
+
+export async function setDirectorFilmPlan(filmId: string, plan: unknown) {
+  await sql`UPDATE director_films SET plan = ${JSON.stringify(plan)}::jsonb WHERE id = ${filmId}`;
+}
+
+export async function setDirectorShotPrompts(shotId: string, prompt: string, keyframePrompt: string) {
+  await sql`UPDATE director_shots SET prompt = ${prompt}, keyframe_prompt = ${keyframePrompt} WHERE id = ${shotId}`;
+}
+
+/** Redraw: queue a new frame, edited from the current one (redraw_from_url) when there is one. */
+export async function resetDirectorShotFrame(shotId: string, keyframePrompt: string, fromUrl: string | null) {
+  await sql`
+    UPDATE director_shots SET keyframe_prompt = ${keyframePrompt}, redraw_from_url = ${fromUrl}, keyframe_request_id = NULL, keyframe_url = NULL, error = NULL, status = 'pending', claimed_at = NULL
+    WHERE id = ${shotId}
+  `;
+}
+
+export async function markDirectorFilmRefunded(filmId: string, cents: number) {
+  await sql`UPDATE director_films SET refunded_cents = refunded_cents + ${cents} WHERE id = ${filmId}`;
 }
 
 /** Marks a shot failed exactly once; returns true only for the caller that did it (so only one refund). */

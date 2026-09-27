@@ -36,7 +36,19 @@ const GOAL_LABEL: Record<string, string> = {
 };
 
 type ShotStatus = { idx: number; status: string; keyframeUrl: string | null; videoUrl: string | null; error: string | null };
-type FilmStatus = { status: string; error: string | null; finalVideoUrl: string | null; anchorUrl: string | null; shots: ShotStatus[] };
+type FilmStatus = {
+  status: string;
+  error: string | null;
+  finalVideoUrl: string | null;
+  anchorUrl: string | null;
+  shots: ShotStatus[];
+  plan?: DirectorPlan;
+  revisionsUsed?: number;
+  maxRevisions?: number;
+  totalCents?: number;
+  refundIfCancelledCents?: number;
+};
+const DONE_STATES = ["completed", "failed", "cancelled"];
 type RefKey = "character" | "product" | "location";
 
 const inputCls = "w-full rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
@@ -81,7 +93,10 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   const [filmId, setFilmId] = useState<string | null>(null);
   const [film, setFilm] = useState<FilmStatus | null>(null);
   const [showPrompts, setShowPrompts] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const autoCreateRef = useRef(false);
+  const [pollKey, setPollKey] = useState(0);
+  const restartPolling = () => setPollKey((k) => k + 1);
 
   const perShot = directorShotPriceCents(engine);
   const total = plan ? perShot * plan.shots.length : perShot * shotCount;
@@ -135,8 +150,14 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
         try {
           const res = await fetch(`/api/director/status?filmId=${filmId}`);
           const data = (await res.json()) as FilmStatus;
-          if (!stop && data.shots) setFilm(data);
-          if (data.status === "completed" || data.status === "failed") return;
+          if (!stop && data.shots) {
+            setFilm((prev) => {
+              // Server plan changes after a redraw - pick it up when frames finish.
+              if (data.plan && prev?.status === "frames" && data.status === "review") setPlan(data.plan);
+              return data;
+            });
+          }
+          if (DONE_STATES.includes(data.status)) return;
         } catch {}
         await new Promise((r) => setTimeout(r, 4000));
       }
@@ -144,7 +165,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     return () => {
       stop = true;
     };
-  }, [filmId]);
+  }, [filmId, pollKey]);
 
   async function planIt() {
     setPlanning(true);
@@ -252,9 +273,63 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     }
   }
 
-  const producing = !!filmId && film && film.status !== "completed" && film.status !== "failed";
+  const reviewing = film?.status === "review";
+  const producing = !!filmId && !!film && !DONE_STATES.includes(film.status) && !reviewing;
+  const redrawsLeft = (film?.maxRevisions ?? 5) - (film?.revisionsUsed ?? 0);
+
+  async function filmAction(path: string, body: Record<string, unknown>, label: string): Promise<Record<string, unknown> | null> {
+    setBusy(label);
+    setError(null);
+    try {
+      const res = await fetch(`/api/director/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filmId, ...body }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "That didn't work");
+      return data;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That didn't work");
+      return null;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function redraw(i: number) {
+    const instruction = (reviseText[`frame${i}`] ?? "").trim();
+    if (!instruction) return;
+    const data = await filmAction("redraw", { shotIdx: i, instruction }, `redraw${i}`);
+    if (data) {
+      setReviseText((r) => ({ ...r, [`frame${i}`]: "" }));
+      setFilm((f) => (f ? { ...f, status: "frames", revisionsUsed: (f.revisionsUsed ?? 0) + 1, shots: f.shots.map((s) => (s.idx === i ? { ...s, keyframeUrl: null, status: "keyframe" } : s)) } : f));
+      restartPolling();
+    }
+  }
+
+  async function saveShot(i: number) {
+    if (!plan) return;
+    const data = await filmAction("edit-shot", { shotIdx: i, shot: plan.shots[i] }, `save${i}`);
+    if (data?.plan) {
+      setPlan(data.plan as DirectorPlan);
+      setNotice(`Shot ${i + 1} saved.`);
+    }
+  }
+
+  async function approve() {
+    const data = await filmAction("approve", {}, "approve");
+    if (data) {
+      setFilm((f) => (f ? { ...f, status: "shots" } : f));
+      restartPolling();
+    }
+  }
+
+  async function cancelFilm() {
+    const data = await filmAction("cancel", {}, "cancel");
+    if (data) {
+      setFilm((f) => (f ? { ...f, status: "cancelled" } : f));
+      setNotice(String(data.message ?? "Cancelled."));
+    }
+  }
   const doneShots = film?.shots.filter((s) => s.videoUrl) ?? [];
-  const stepLabel: Record<string, string> = { pending: "Queued", keyframe: "Framing the shot", video: "Filming", completed: "Done", failed: "Refunded" };
+  const stepLabel: Record<string, string> = { pending: "Queued", keyframe: "Drawing the frame", video: "Filming", completed: "Done", failed: "Refunded" };
 
   return (
     <section id="pay-as-you-go" className="shadow-soft-lg scroll-mt-6 rounded-[28px] border border-white/60 bg-purple-wash/90 p-5 backdrop-blur-xl sm:p-7">
@@ -267,7 +342,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
           plans every shot, camera move and light, keeps your character and product consistent, and delivers one finished film.
         </p>
         <p className="mt-1 text-xs text-muted">
-          Any model · pay as you go · <strong className="text-foreground">{formatUsd(perShot)} per shot</strong> on {VIDEO_PAYGO_ENGINES[engine].label} · storyboard is free · failed shots refunded
+          Any model · pay as you go · <strong className="text-foreground">{formatUsd(perShot)} per shot</strong> on {VIDEO_PAYGO_ENGINES[engine].label} · planning is free · you approve every frame before filming · failed shots refunded
         </p>
       </div>
 
@@ -421,6 +496,25 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
                         {revising === i ? "…" : "Apply"}
                       </button>
                     </div>
+                    {reviewing && (
+                      <div className="mt-2 flex flex-col gap-2 rounded-lg bg-purple/5 p-2">
+                        <div className="flex gap-2">
+                          <input
+                            className={inputCls}
+                            placeholder={redrawsLeft > 0 ? 'Redraw this frame: "make her smile", "lower angle", "move to the rooftop"…' : "No redraws left - edit the text above and save"}
+                            disabled={redrawsLeft <= 0}
+                            value={reviseText[`frame${i}`] ?? ""}
+                            onChange={(e) => setReviseText((r) => ({ ...r, [`frame${i}`]: e.target.value }))}
+                          />
+                          <button type="button" disabled={!!busy || redrawsLeft <= 0} onClick={() => redraw(i)} className="shrink-0 rounded-xl bg-purple px-3 text-xs font-bold text-white disabled:opacity-50">
+                            {busy === `redraw${i}` ? "…" : `Redraw (${redrawsLeft} left)`}
+                          </button>
+                        </div>
+                        <button type="button" disabled={!!busy} onClick={() => saveShot(i)} className="self-start text-[11px] font-semibold text-purple underline">
+                          {busy === `save${i}` ? "Saving…" : "Save my text changes to this shot"}
+                        </button>
+                      </div>
+                    )}
                     {st?.videoUrl && <video src={st.videoUrl} controls playsInline className="mt-2 w-full rounded-lg" />}
                     {!st?.videoUrl && st?.keyframeUrl && (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -454,25 +548,45 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
                 <strong>{plan.shots.length} shots</strong> × {formatUsd(perShot)} on {VIDEO_PAYGO_ENGINES[engine].label} ={" "}
                 <strong className="text-lg">{formatUsd(total)}</strong>
               </p>
-              <p className="text-[11px] text-muted">Includes planning, consistency stills and the final stitched film. Any shot that fails is refunded automatically.</p>
+              <p className="text-[11px] text-muted">Includes planning, a drawn storyboard you can change (5 redraws), filming and the final stitched film. Failed shots are refunded automatically.</p>
             </div>
-            <button
+            {!filmId && <button
               type="button"
               onClick={() => makeFilm(false)}
               disabled={creating || !!producing}
               className="w-full rounded-2xl bg-purple py-4 text-base font-bold text-white shadow-soft disabled:opacity-50"
             >
-              {creating ? "Starting…" : producing ? "Lucy is filming…" : `Make this film - ${formatUsd(total)} →`}
-            </button>
-            <p className="-mt-1 text-center text-[11px] text-muted">Pay as you go - no subscription, no account needed. Uses your credit first.</p>
+              {creating ? "Starting…" : `Draw my storyboard - ${formatUsd(total)} →`}
+            </button>}
+            {!filmId && (
+              <p className="-mt-1 text-center text-[11px] text-muted">
+                Pay as you go - no subscription, no account needed. Lucy draws every frame first; nothing is filmed until you approve.
+                Change your mind before filming and everything except the direction fee goes back to your credit.
+              </p>
+            )}
           </div>
         )}
 
         {film && (
           <div className="rounded-2xl bg-white/80 p-4">
+            {reviewing && (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-bold text-foreground">Your storyboard is ready - check every frame above.</p>
+                <p className="text-xs text-muted">
+                  Redraw any frame in plain words ({redrawsLeft} of {film.maxRevisions ?? 5} redraws left) or edit a shot&apos;s text. Nothing is filmed until you approve.
+                </p>
+                <button type="button" disabled={!!busy} onClick={approve} className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft disabled:opacity-50">
+                  {busy === "approve" ? "Starting…" : "Approve & film it 🎬"}
+                </button>
+                <button type="button" disabled={!!busy} onClick={cancelFilm} className="text-[11px] font-semibold text-muted underline">
+                  Cancel and put {formatUsd(film.refundIfCancelledCents ?? 0)} back in my credit
+                </button>
+              </div>
+            )}
+            {film.status === "cancelled" && <p className="text-sm text-foreground">Cancelled - your credit has been refunded.</p>}
             {producing && (
               <p className="text-sm text-foreground">
-                {film.status === "anchor" ? "Setting up your cast, location and light…" : film.status === "stitching" ? "Joining your shots into one film…" : `Filming - ${doneShots.length} of ${film.shots.length} shots done…`}{" "}
+                {film.status === "anchor" ? "Setting up your cast, location and light…" : film.status === "frames" ? "Drawing your storyboard frames…" : film.status === "stitching" ? "Joining your shots into one film…" : `Filming - ${doneShots.length} of ${film.shots.length} shots done…`}{" "}
                 <span className="text-muted">(usually 2-5 minutes)</span>
               </p>
             )}
