@@ -77,6 +77,14 @@ function modelUrl(model: string, method: "predictLongRunning" | "fetchPredictOpe
   return `https://${host}/v1/projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/${loc}/publishers/google/models/${model}:${method}`;
 }
 
+// Vendor error bodies name Google APIs/project numbers - log them server-
+// side only and give callers (whose messages can reach users) a plain one.
+const USER_SAFE_ERROR = "Video generation is temporarily unavailable - please try again shortly.";
+function vendorError(stage: string, status: number, body: string): Error {
+  console.error(`[vertexVeo] ${stage} failed (${status}): ${body.slice(0, 800)}`);
+  return new Error(USER_SAFE_ERROR);
+}
+
 // --- auth ---
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -99,7 +107,7 @@ async function serviceAccountToken(): Promise<string> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${unsigned}.${signature}` }),
   });
-  if (!res.ok) throw new Error(`Video engine auth failed (${res.status})`);
+  if (!res.ok) throw vendorError("service-account token", res.status, await res.text());
   const data = (await res.json()) as { access_token: string; expires_in: number };
   cachedToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
   return data.access_token;
@@ -125,7 +133,7 @@ async function workloadIdentityToken(): Promise<string> {
       subject_token: subjectToken,
     }),
   });
-  if (!sts.ok) throw new Error(`Video engine auth failed at federation step (${sts.status}): ${(await sts.text()).slice(0, 200)}`);
+  if (!sts.ok) throw vendorError("federation", sts.status, await sts.text());
   const federated = ((await sts.json()) as { access_token: string }).access_token;
   const imp = await fetch(
     `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${process.env.GCP_SERVICE_ACCOUNT_EMAIL}:generateAccessToken`,
@@ -135,7 +143,7 @@ async function workloadIdentityToken(): Promise<string> {
       body: JSON.stringify({ scope: ["https://www.googleapis.com/auth/cloud-platform"], lifetime: "3600s" }),
     },
   );
-  if (!imp.ok) throw new Error(`Video engine auth failed at impersonation step (${imp.status}): ${(await imp.text()).slice(0, 200)}`);
+  if (!imp.ok) throw vendorError("impersonation", imp.status, await imp.text());
   const data = (await imp.json()) as { accessToken: string; expireTime: string };
   cachedToken = { token: data.accessToken, expiresAt: new Date(data.expireTime).getTime() };
   return data.accessToken;
@@ -155,7 +163,7 @@ async function vertexPost(url: string, body: unknown): Promise<Record<string, un
     body: JSON.stringify(body),
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`Video engine request failed (${res.status}): ${text.slice(0, 300)}`);
+  if (!res.ok) throw vendorError("request", res.status, text);
   return JSON.parse(text) as Record<string, unknown>;
 }
 
