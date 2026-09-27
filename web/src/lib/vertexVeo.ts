@@ -218,7 +218,11 @@ export async function buildVertexVeoBody(p: VertexVeoParams): Promise<Record<str
     durationSeconds: snapDuration(p.durationSeconds),
     resolution: p.resolution === "1080p" ? "1080p" : "720p",
     generateAudio: p.generateAudio ?? true,
-    personGeneration: "allow_adult",
+    // "allow_all" so scenes with children (e.g. kids' masterclasses, a girl
+    // listening to a street musician) aren't silently filtered; Google's own
+    // child-safety filters still apply. submitVertexVeoJob retries with
+    // "allow_adult" if a model/region rejects allow_all.
+    personGeneration: process.env.VEO_PERSON_GENERATION || "allow_all",
   };
   if (p.aspectRatio === "16:9" || p.aspectRatio === "9:16") parameters.aspectRatio = p.aspectRatio;
   if (p.negativePrompt) parameters.negativePrompt = p.negativePrompt;
@@ -246,7 +250,15 @@ export function vertexParamsFromFalShapedInput(input: Record<string, unknown>): 
 // --- submit / poll ---
 
 export async function submitVertexVeoJob(model: string, body: Record<string, unknown>): Promise<string> {
-  const data = await vertexPost(modelUrl(model, "predictLongRunning"), body);
+  let data: Record<string, unknown>;
+  try {
+    data = await vertexPost(modelUrl(model, "predictLongRunning"), body);
+  } catch (err) {
+    const params = body.parameters as Record<string, unknown> | undefined;
+    if (params?.personGeneration !== "allow_all") throw err;
+    console.warn("[vertexVeo] allow_all rejected, retrying with allow_adult");
+    data = await vertexPost(modelUrl(model, "predictLongRunning"), { ...body, parameters: { ...params, personGeneration: "allow_adult" } });
+  }
   if (typeof data.name !== "string") throw new Error("Video engine returned no job id");
   return data.name;
 }
@@ -264,9 +276,15 @@ async function fetchOperation(model: string, operationName: string): Promise<Ope
 export async function getVertexVeoStatus(model: string, operationName: string): Promise<VertexJobStatus> {
   const op = await fetchOperation(model, operationName);
   if (!op.done) return "IN_PROGRESS";
-  if (op.error) return "FAILED";
+  if (op.error) {
+    console.error("[vertexVeo] operation error", JSON.stringify(op.error).slice(0, 800));
+    return "FAILED";
+  }
   const v = op.response?.videos?.[0];
-  return v && (v.bytesBase64Encoded || v.gcsUri) ? "COMPLETED" : "FAILED"; // no video = safety-filtered
+  if (v && (v.bytesBase64Encoded || v.gcsUri)) return "COMPLETED";
+  // No video = safety-filtered; keep Google's reason in our logs.
+  console.error("[vertexVeo] no video returned", JSON.stringify({ error: op.error, filtered: op.response?.raiMediaFilteredCount, reasons: op.response?.raiMediaFilteredReasons }).slice(0, 800));
+  return "FAILED";
 }
 
 // Keyed by operation name so a status poll that just saw COMPLETED and the
