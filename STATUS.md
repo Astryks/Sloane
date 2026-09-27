@@ -1,5 +1,33 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-27 (end of day) - Spec audit + pending list
+
+Checked against the original spec (`~/Downloads/lucylabs_orchestration_engine.v2-original.md`).
+
+- **Built:**
+  - Intent planner and style classifier.
+  - Style profiles: cameras, lenses, colour science, lighting, catchlights.
+  - 25 emotion-mapped camera moves.
+  - Anti-green-screen embedding.
+  - Structured shot plan.
+  - Async pipeline with status polling.
+  - Character/product/location references (14 photos plus the auto character sheet).
+  - FFmpeg stitch at 24fps with 192k audio and colour match (Modal).
+- **Built differently, on purpose:**
+  - The FastAPI/Docker/in-memory backend became Next.js API routes on Vercel with Postgres, with FFmpeg on Modal. The spec's code was mock only.
+  - Gemini on Vertex replaces OpenAI for the planner (Google credits).
+- **Missing from the spec:**
+  1. Per-shot model routing (Veo wides / Seedance movement / Kling macro). We use one model per film so faces and grade stay consistent; could be an optional mode once Seedance is direct.
+  2. Lucy Voices voiceover/narration and a music bed mixed into Director films. Only native model audio today.
+  3. Fast ad pacing (~1.8s ASL). Veo's minimum is 4s, so shots need trimming at stitch.
+- **Pending (outside the spec):**
+  - Seedance direct: BytePlus activation / accelerator; then flip `NEXT_PUBLIC_SEEDANCE_DIRECT=1`.
+  - Google for Startups credits: awaiting reply.
+  - Google free trial (~$415 left): upgrade the billing account before it runs out, or Veo stops.
+  - Offered, not started: masterclass batch tool (6 hours of video); H3 speed/cost benchmark on Modal.
+  - Google image 429s under concurrent load: consider Provisioned Throughput when traffic grows.
+  - As-built spec doc (`docs/lucylabs_orchestration_engine.md` + Downloads copy) needs today's features: 14 photos, auto character sheet, one-tap, recipes gallery, no-person prompt fix.
+
 ## Latest update, 2026-09-27 (late night, 2) - One-tap "Just make it", Lucy makes every character sheet, recipes gallery, cleaner copy
 
 - **🎬 Just make it:** one sentence and one tap. Lucy plans, charges, casts, draws, films and stitches with no stops (`director_films.auto_approve` skips the review). It survives checkout. "Or check each step first" keeps full control.
