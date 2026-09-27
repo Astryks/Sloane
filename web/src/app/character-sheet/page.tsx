@@ -125,6 +125,39 @@ export default function Page() {
           </p>
         </SeoCard>
 
+        <SeoCard title="👀 A real example, made on Lucy">
+          <p>
+            We gave Lucy <strong className="text-foreground">one photo</strong> and tapped <em>Make my character sheet</em>. About a minute later: the same
+            woman from six sides - same freckles, same bun, same earrings, same top.
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/examples/character-sheet-example.jpg"
+            alt="A six-angle character sheet of one woman: face close-up, three-quarter left, three-quarter right, side profile, full body and back view"
+            width={1080}
+            height={964}
+            loading="lazy"
+            className="w-full rounded-2xl border border-border"
+          />
+          <p>
+            Then we asked for a film in a sunny laneway cafe. Lucy put her <strong className="text-foreground">inside</strong> the scene - new place, new
+            light, new clothes layer - and she&apos;s still clearly the same person:
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/examples/character-sheet-in-scene.jpg"
+            alt="Two storyboard frames of the same woman in a Melbourne laneway cafe: stepping through a doorway, then laughing at the counter"
+            width={720}
+            height={804}
+            loading="lazy"
+            className="w-full rounded-2xl border border-border"
+          />
+          <p className="text-xs">
+            Lesson from this test: our starting photo came from an old video where she held a skincare bottle - and a small bottle popped up on the cafe
+            table. Use photos with <strong className="text-foreground">nothing in the hands</strong> and nothing you don&apos;t want in your film.
+          </p>
+        </SeoCard>
+
         <SeoCard title="✨ Way 1 - the easiest: let Lucy make it (free)">
           <ol className="list-decimal space-y-2 pl-5">
             <li>

@@ -1,5 +1,23 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-27 (late night) - Up to 14 reference photos, one-tap character sheet, easy guides
+
+- **Several photos per slot:** Character (up to 8), Product (3), Location (3), 14 in total. 14 is the per-prompt image limit of `gemini-3-pro-image`, `3.1-flash-image` and `3.1-flash-lite-image` (7MB each).
+  - The browser shrinks each photo to 1600px JPEG and uploads it on its own (`/api/director/upload`, 120/day per visitor). Vercel caps a request at 4.5MB, so they can't all go in one.
+  - Photos now survive the Stripe checkout redirect, because their links are kept in the draft.
+  - The master still gets every photo. Each storyboard frame gets `[redraw source, master, products, character angles, locations]` (`lib/director/refs.ts`).
+- **"Make my character sheet":** from one photo, Lucy draws face, 3/4 left, 3/4 right, profile, full body and back on a plain background (`/api/director/character-sheet`, Google image, 3:4). It's free, with 18 angles per visitor per day, and runs 2 at a time.
+- **Your cast** keeps the whole sheet (`saved_characters.photo_urls`).
+- **Guides:**
+  - "New here? 6 easy steps" in the Director panel.
+  - "Which photos should I add?" tips.
+  - A new `/character-sheet` page: angles diagram, a real example made on Lucy, 3 ways to make a sheet, copy-paste prompts, what goes in each box, location embedding explained, checklist, FAQ. It's in the sitemap and linked from `/consistent-character`.
+- **Verified live:**
+  - Uploaded 1 photo, generated the 6-angle sheet in about a minute (same face in every angle), saved to cast with 7 photos.
+  - Drew a 2-shot storyboard from all 7 photos: both frames came from Google and show the same person in a new scene.
+  - Cancelled, refunded $5.48, and deleted the test character.
+- **Watch:** props in the source photo can leak into scenes; the guide tells users to use photos with nothing in their hands.
+
 ## Latest update, 2026-09-27 (night) - Director: Google storyboard frames, colour-matched stitch, character library, faster API
 
 All four are live and were tested in production with a real 2-shot Veo Lite film:
