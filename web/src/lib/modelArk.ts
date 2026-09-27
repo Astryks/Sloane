@@ -25,8 +25,21 @@ const DEFAULT_SEEDANCE_25 = "dreamina-seedance-2-5-260628";
 
 export type ModelArkEngine = "seedance" | "seedance25";
 
+/**
+ * True when this engine should run on BytePlus ModelArk right now.
+ * Gated by NEXT_PUBLIC_SEEDANCE_DIRECT=1 (2026-09-27; public so the picker's
+ * price/duration match - it names no vendor): until the ModelArk Seedance
+ * models are activated on our account, Seedance falls back to the previous
+ * reseller path so customers never hit a "model not open" error.
+ */
+import { SEEDANCE_DIRECT } from "./videoEngines";
+
 export function isModelArkEngine(engine: string): engine is ModelArkEngine {
-  return engine === "seedance" || engine === "seedance25";
+  return (engine === "seedance" || engine === "seedance25") && isSeedanceDirect();
+}
+
+export function isSeedanceDirect(): boolean {
+  return SEEDANCE_DIRECT;
 }
 
 export function isModelArkEndpoint(endpoint: string | null | undefined): boolean {

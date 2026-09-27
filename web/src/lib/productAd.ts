@@ -4,8 +4,10 @@ import { withModelArkBody } from "@/lib/videoInference";
 export { type ProductAdModel, PRODUCT_AD_MODELS, isProductAdModel } from "./productAdModels";
 
 export function productAdFalEndpoint(model: VideoEngine): string {
-  // Seedance dual-reference path runs on ModelArk (same token for t2v/i2v).
+  // Seedance dual-reference path runs on ModelArk (same token for t2v/i2v)
+  // when direct; otherwise the reseller's reference-to-video endpoint.
   if (isModelArkEngine(model)) return modelArkEndpointToken(model);
+  if ((model as string) === "seedance") return "bytedance/seedance-2.0/fast/reference-to-video";
   return VIDEO_PAYGO_ENGINES[model].falImageToVideoEndpoint;
 }
 
@@ -21,6 +23,15 @@ export function buildProductAdFalInput(
   // bloat (the model reads the actual image from the structured field, not
   // by parsing a URL string out of the prompt) that contributed to blowing
   // past Kling's hard 2500-character prompt limit for no benefit. Removed.
+  if (model === "seedance" && !isModelArkEngine(model)) {
+    return {
+      prompt: `@Image1 is the product reference. @Image2 is the character reference.\n${prompt}`,
+      image_urls: [productImageUrl, characterImageUrl],
+      duration: VIDEO_PAYGO_ENGINES.seedance.falDurationValue,
+      resolution: "720p",
+      generate_audio: false,
+    };
+  }
   if (model === "seedance") {
     // ModelArk Dreamina Seedance: positional Image 1 / Image 2 in the
     // prompt (not fal's @Image1 syntax). Both images as reference_image.

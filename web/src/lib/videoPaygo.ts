@@ -78,6 +78,7 @@ import {
 import {
   buildModelArkCreateBody,
   isModelArkEngine,
+  isSeedanceDirect,
   modelArkEndpointToken,
   type ModelArkEngine,
 } from "./modelArk";
@@ -89,6 +90,9 @@ import { hasVertexCredentialsConfigured, vertexEndpointToken, VERTEX_VEO_FAST_MO
 // nothing breaks during the switch-over. Resolved at module load, same as
 // the ModelArk tokens.
 const VEO_ON_VERTEX = hasVertexCredentialsConfigured();
+// Seedance goes direct to BytePlus only once SEEDANCE_DIRECT=1 (models
+// activated); otherwise the reseller path - see isModelArkEngine.
+const SEEDANCE_ON_MODELARK = isSeedanceDirect();
 
 export {
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
@@ -132,18 +136,34 @@ type VendorFields = {
 
 // Seedance endpoints are resolved at module load from env (model IDs).
 const VIDEO_PAYGO_VENDOR: Record<VideoEngine, VendorFields> = {
-  seedance25: {
-    falEndpoint: modelArkEndpointToken("seedance25"),
-    falImageToVideoEndpoint: modelArkEndpointToken("seedance25"),
-    falDurationValue: "8",
-    inferenceProvider: "modelark",
-  },
-  seedance: {
-    falEndpoint: modelArkEndpointToken("seedance"),
-    falImageToVideoEndpoint: modelArkEndpointToken("seedance"),
-    falDurationValue: "8",
-    inferenceProvider: "modelark",
-  },
+  seedance25: SEEDANCE_ON_MODELARK
+    ? {
+        falEndpoint: modelArkEndpointToken("seedance25"),
+        falImageToVideoEndpoint: modelArkEndpointToken("seedance25"),
+        falDurationValue: "8",
+        inferenceProvider: "modelark",
+      }
+    : {
+        // Reseller fallback: ~$0.473/s, so capped at 4s to keep the $1
+        // floor at $3.99 (8s would lose money) - see videoEngines.ts.
+        falEndpoint: "bytedance/seedance-2.5/text-to-video",
+        falImageToVideoEndpoint: "bytedance/seedance-2.5/image-to-video",
+        falDurationValue: "4",
+        inferenceProvider: "fal",
+      },
+  seedance: SEEDANCE_ON_MODELARK
+    ? {
+        falEndpoint: modelArkEndpointToken("seedance"),
+        falImageToVideoEndpoint: modelArkEndpointToken("seedance"),
+        falDurationValue: "8",
+        inferenceProvider: "modelark",
+      }
+    : {
+        falEndpoint: "bytedance/seedance-2.0/fast/text-to-video",
+        falImageToVideoEndpoint: "bytedance/seedance-2.0/fast/image-to-video",
+        falDurationValue: "8",
+        inferenceProvider: "fal",
+      },
   veo: VEO_ON_VERTEX
     ? {
         falEndpoint: vertexEndpointToken(VERTEX_VEO_FAST_MODEL),
@@ -248,8 +268,8 @@ export const VIDEO_PAYGO_ENGINES = Object.fromEntries(
 // (2.5) — both clear the $1 floor. Kling v3 remains the buffered worst case
 // among non-Seedance fal engines at $2.254.
 export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
-  seedance25: 2.13, // ModelArk 8s @ ~$0.231/s + 15%
-  seedance: 1.10, // ModelArk Fast 8s @ ~$0.12/s + 15%
+  seedance25: SEEDANCE_ON_MODELARK ? 2.13 : 2.18, // ModelArk 8s @ ~$0.231/s + 15% | reseller 4s @ $0.473/s + 15%
+  seedance: SEEDANCE_ON_MODELARK ? 1.1 : 2.23, // ModelArk Fast 8s @ ~$0.12/s + 15% | reseller 8s @ $0.2419/s + 15%
   veo: 1.38,
   veo31: 1.84, // 4s x ~$0.40/s (Veo 3.1 standard w/ audio) + 15% buffer - profit ~$1.73 at $3.99
   kling: 1.61,

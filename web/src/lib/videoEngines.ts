@@ -16,6 +16,11 @@ export const PROMPT_DIRECTOR_LABEL = "GPT-6 Astra";
 //   standard $2.99 - MiniMax $0.74, Seedance 2.0 ~$1.10, Grok $1.30, Veo 3.1 Fast ~$1.38 (worst: $1.22 profit)
 //   premium  $3.99 - Kling 2.1 $1.61, Veo 3.1 4s $1.84, Seedance 2.5 ~$2.13, Kling v3 $2.25 (worst: $1.32 profit)
 export type VideoPriceTier = "standard" | "premium";
+
+// Seedance runs direct (cheaper) once NEXT_PUBLIC_SEEDANCE_DIRECT=1; until
+// then it's on the pricier fallback path, which moves Seedance 2.0 to the
+// premium tier and caps Seedance 2.5 at 4s to keep the $1 profit floor.
+export const SEEDANCE_DIRECT = process.env.NEXT_PUBLIC_SEEDANCE_DIRECT === "1";
 export const VIDEO_TIER_PRICE_CENTS: Record<VideoPriceTier, number> = { standard: 299, premium: 399 };
 /** Premium price - kept for callers that still need one headline number. */
 export const VIDEO_PAYGO_PRICE_USD_CENTS = VIDEO_TIER_PRICE_CENTS.premium;
@@ -49,9 +54,9 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     // 8s ≈ $1.85 raw, ~$2.13 buffered — still clears the $1/video profit
     // floor at flat $3.99 after Stripe (see VIDEO_PAYGO_ENGINE_COST_USD).
     // Previously capped at 4s under fal's ~$0.473/s rate.
-    durationSeconds: 8,
+    durationSeconds: SEEDANCE_DIRECT ? 8 : 4,
     popular: false,
-    pickerNote: "8s clip · sharpest detail · native audio",
+    pickerNote: SEEDANCE_DIRECT ? "8s clip · sharpest detail · native audio" : "4s clip · sharpest detail · native audio",
     supportsNativeAudio: true,
     aspectRatioOptions: ["16:9", "9:16", "1:1"],
     supportsDurationChoice: true,
@@ -59,7 +64,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   seedance: {
     label: "Seedance 2.0",
     versionLabel: "Seedance 2.0 Fast",
-    tier: "standard",
+    tier: SEEDANCE_DIRECT ? "standard" : "premium",
     durationSeconds: 8,
     popular: true,
     pickerNote: "8s clip · strong all-rounder",
