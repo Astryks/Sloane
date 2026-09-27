@@ -94,7 +94,7 @@ export function compileAnchorPrompt(plan: DirectorPlan, refs: RefFlags): string 
     sentence(`Light: ${plan.look.timeOfDay}, ${plan.look.keyLight}; palette ${plan.look.palette}; ${plan.look.grade}`),
     sentence(`Integration: ${EMBEDDING_RULES.slice(0, 3).join("; ")}`),
     sentence(`Detail: ${realismForShot("medium")}`),
-    "Medium-wide framing, natural pose, no text, no watermark.",
+    "Medium-wide framing, natural pose. ONE single photograph filling the whole frame - never a collage, grid, panels or split screen. No text, no watermark.",
   ]
     .filter(Boolean)
     .join(" ")
@@ -113,7 +113,7 @@ export function compileKeyframePrompt(plan: DirectorPlan, shotIndex: number, ref
     sentence(`Moment: ${shot.action}`),
     shot.expression ? sentence(`Expression: ${shot.expression}`) : "",
     sentence(`Detail: ${realismForShot(shot.size)}`),
-    "No text, no watermark.",
+    "ONE single photograph filling the whole frame - never a collage, grid, triptych, panels or split screen. No text, no watermark.",
   ]
     .filter(Boolean)
     .join(" ")
