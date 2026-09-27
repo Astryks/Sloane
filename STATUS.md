@@ -1,5 +1,26 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-27 (night) - Director: Google storyboard frames, colour-matched stitch, character library, faster API
+
+All four are live and were tested in production with a real 2-shot Veo Lite film:
+- **Faster API:** database setup now runs once per server instance instead of on every request. The first call after a deploy takes ~17s; after that calls take 0.3-0.5s (they took 10-20s before).
+- **Storyboard frames on Google (Vertex):** the models are tried in order: `gemini-3-pro-image` (Nano Banana Pro), then `gemini-3.1-flash-image`, then `gemini-3.1-flash-lite-image`. The old reseller image path is kept as the fallback. Override the list with `GOOGLE_IMAGE_MODELS`.
+  - The first deploy used the wrong ID (`...-preview`, 404), and Lite hit a 429 quota error, so frames fell back; this is fixed in 496ea2f.
+  - Confirmed: frames are now 1376x768 PNGs from Google and no errors are logged.
+  - Watch for 429s on image quota; a quota increase may be needed at volume.
+- **Colour-matched stitch:** `scripts/director_stitch.py` is a Modal app (`director-stitch`, async `/start` and `/result`, Bearer `MODAL_SHARED_SECRET`).
+  - It keeps audio (adding silence to shots that have none), conforms size and 24fps, and nudges each shot's colour toward shot 1, by at most 10% per channel.
+  - Vercel env: `MODAL_DIRECTOR_STITCH_URL`. If Modal fails, the plain merge is used instead.
+  - Confirmed: the production film was stitched on Modal (10s, 720x1280, AAC stereo).
+- **Character library:** "Your cast" lets users save a person (photo, name, description) and tap them into any film. It is available to guests too, and merges into their account at sign-in.
+  - Confirmed: saving, reusing (the same face carried into a new film), deleting.
+- **Walk-away refund** re-verified: a $7.98 2-shot film cancelled at review refunded $5.48.
+
+Next:
+- Seedance direct: waiting on BytePlus activation/accelerator; flip `NEXT_PUBLIC_SEEDANCE_DIRECT=1` when it is live.
+- Request a Vertex image quota increase before launch traffic.
+- Optional: move the stitch output off the reseller storage onto Vercel Blob.
+
 ## Latest update, 2026-09-27 (evening) - "Directed by Lucy" live: intent-aware multi-shot films with storyboard approval
 
 - **What it is**: homepage generator now has "One video" / "🎬 Directed by Lucy". One idea (+ optional character/product/location photos) -> Gemini 3.8 Flash on Vertex plans goal (sell/story/explain/promote/entertain), style, one film look, per-shot setting/lighting, shot size/angle/one camera move, dialogue -> customer edits (fields or plain-words revisions, free, 20/day/visitor) -> pays -> master still + per-shot storyboard frames -> **review** (5 redraws/film, text edits, cancel) -> approve -> one model films every shot from its frame -> stitched film with audio. Full spec: `docs/lucylabs_orchestration_engine.md` (also copied over the user's `~/Downloads/lucylabs_orchestration_engine.md`; original kept as `...v2-original.md`).
