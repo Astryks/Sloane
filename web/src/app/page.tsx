@@ -1893,7 +1893,7 @@ function LucyVsPlainSection({ onTry }: { onTry: () => void }) {
     <section id="lucy-vs-plain" className="shadow-soft-lg rounded-[28px] border border-white/60 bg-surface/90 p-5 backdrop-blur-xl sm:p-7">
       <h2 className="text-xl font-extrabold tracking-tight">Directed by Lucy vs. a plain prompt</h2>
       <p className="mt-1 text-sm text-muted">
-        Same idea, same model (Veo 3.1 Lite). One was typed straight in; the other was planned, storyboarded and filmed by Lucy.
+        Same sentence, same model. One was directed by Lucy, one was typed straight in.
       </p>
       <p className="mt-2 rounded-xl bg-cream p-2 text-xs italic text-muted">&ldquo;{COMPARE_IDEA}&rdquo;</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -1901,18 +1901,18 @@ function LucyVsPlainSection({ onTry }: { onTry: () => void }) {
           <figcaption className="mb-2 text-sm font-extrabold text-purple">🎬 Directed by Lucy</figcaption>
           <video src="/examples/violinist-directed-by-lucy.mp4" controls playsInline preload="metadata" className="w-full rounded-xl" />
           <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted">
-            <li>Two planned shots: a slow dolly-in on the violinist, then an over-the-shoulder on the girl</li>
-            <li>One look throughout - amber lamplight, cool fill, 35mm film grain</li>
-            <li>Same scarf, same street, same light in both shots - it cuts like a film</li>
+            <li>Two planned shots, like a real movie</li>
+            <li>Same light and colours all the way</li>
+            <li>Same people in every shot</li>
           </ul>
         </figure>
         <figure className="rounded-2xl border border-border bg-white p-3">
           <figcaption className="mb-2 text-sm font-extrabold text-foreground">Plain prompt</figcaption>
           <video src="/examples/violinist-plain-prompt.mp4" controls playsInline preload="metadata" className="w-full rounded-xl" />
           <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted">
-            <li>One wide shot, one camera position</li>
-            <li>Good-looking, but staged - closer to a stock photo than a scene</li>
-            <li>No story beats: nothing to cut between</li>
+            <li>One shot, camera stays put</li>
+            <li>Looks like a stock video</li>
+            <li>No story</li>
           </ul>
         </figure>
       </div>

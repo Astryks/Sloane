@@ -54,6 +54,11 @@ type FilmStatus = {
   refundIfCancelledCents?: number;
 };
 const DONE_STATES = ["completed", "failed", "cancelled"];
+const IDEA_EXAMPLES = [
+  "An old fisherman rows out at dawn on a misty lake and catches a glowing fish",
+  "A UGC ad: a woman in her bathroom shows her new face cream and says \"my skin feels like silk\"",
+  "A chef flips a pancake in a busy café kitchen and the whole team cheers",
+];
 
 const inputCls = "w-full rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
 
@@ -379,49 +384,48 @@ export function DirectorStudio({
       {modeSwitch}
       <div className="mt-4 text-center">
         <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">🎬 Directed by Lucy</h2>
-        <p className="mx-auto mt-1 max-w-lg text-sm text-muted">
-          Tell Lucy what you want. She works out whether you&apos;re selling something, telling a story or teaching - then
-          plans every shot, camera move and light, keeps your character and product consistent, and delivers one finished film.
-        </p>
+        <p className="mx-auto mt-1 max-w-lg text-base text-foreground">Write one sentence. Get a finished film.</p>
         <p className="mt-1 text-xs text-muted">
-          Any model · pay as you go · <strong className="text-foreground">{formatUsd(perShot)} per shot</strong> on {VIDEO_PAYGO_ENGINES[engine].label} · one tap, or check every step yourself · failed shots refunded
+          {formatUsd(perShot)} per shot · pay as you go · failed shots refunded
         </p>
-        <details className="mx-auto mt-3 max-w-lg rounded-2xl bg-white/70 p-3 text-left text-xs text-muted">
-          <summary className="cursor-pointer text-center font-semibold text-purple">🧸 New here? How to make a film in 6 easy steps</summary>
-          <p className="mt-2 rounded-xl bg-purple/10 p-2 text-foreground">
-            <strong>In a hurry?</strong> Type one sentence and press <strong>🎬 Just make it</strong>. That&apos;s all. Lucy does every step below for you.
-          </p>
-          <p className="mt-2">Want to choose things yourself? Here are the steps:</p>
-          <ol className="mt-2 flex flex-col gap-1.5">
-            <li><strong className="text-foreground">1. ✏️ Say your idea.</strong> One sentence is fine: &quot;My dog surfing at sunset&quot;.</li>
-            <li><strong className="text-foreground">2. 📸 Add photos (only if it must be a real person, thing or place).</strong> For a person, one clear face photo is enough - Lucy makes the character sheet from it (every side). No photo? Lucy invents the person and makes their sheet too.</li>
-            <li><strong className="text-foreground">3. 🪄 Press &quot;Plan my film&quot;.</strong> Free. Lucy writes every shot for you.</li>
-            <li><strong className="text-foreground">4. 👀 Read the plan.</strong> Don&apos;t like something? Type the change in plain words, like &quot;make it night&quot;, and press Apply.</li>
-            <li><strong className="text-foreground">5. 🖼️ Press &quot;Draw my storyboard&quot;.</strong> Lucy draws a picture of every shot. Redraw any picture up to 5 times. Nothing is filmed yet.</li>
-            <li><strong className="text-foreground">6. 🎬 Press &quot;Approve &amp; film it&quot;.</strong> Lucy films every shot, joins them with sound, and gives you one film to download.</li>
-          </ol>
-          <p className="mt-2">Changed your mind before filming? Cancel, and everything except the small direction fee goes back to your credit.</p>
-        </details>
       </div>
 
       <div className="mt-5 flex flex-col gap-4">
         <div>
-          <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">1. Your idea - that&apos;s all you need</p>
+          <p className="mb-1 text-sm font-bold text-foreground">1. What&apos;s your film about?</p>
           <textarea
             aria-label="Describe your film"
             className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
             rows={3}
             maxLength={1500}
-            placeholder='e.g. "A 30-second ad for my matte black coffee tumbler" · "A woman walking through Tokyo after a breakup" · "A UGC review of my skincare serum"'
+            placeholder="A girl flies a red kite on a windy beach at sunset, laughing"
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
           />
+          <div className="mt-2 rounded-2xl bg-white/70 p-3 text-xs text-muted">
+            <p className="font-bold text-foreground">✏️ How to write it</p>
+            <p className="mt-1 flex flex-wrap items-center gap-1">
+              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">Who</span>+
+              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">does what</span>+
+              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">where</span>+
+              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">how it feels</span>
+            </p>
+            <p className="mt-2">Tap one to try it:</p>
+            <div className="mt-1 flex flex-col gap-1">
+              {IDEA_EXAMPLES.map((ex) => (
+                <button key={ex} type="button" onClick={() => setIdea(ex)} className="rounded-xl border border-border bg-white px-2 py-1.5 text-left text-xs text-foreground hover:border-purple">
+                  {ex}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2">Selling something? Say what it is and one thing it does. Want words spoken? Put them in &quot;quotes&quot;.</p>
+          </div>
         </div>
 
         <DirectorPhotos photos={photos} setPhotos={setPhotos} castId={castId} setCastId={setCastId} onNotice={setNotice} onError={setError} />
 
         <details className="rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-purple">3. Optional - style, shots, model, shape (Lucy picks sensible defaults)</summary>
+          <summary className="cursor-pointer text-sm font-bold text-foreground">3. ⚙️ Settings <span className="font-normal text-muted">(optional - Lucy picks)</span></summary>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <label className="text-[11px] font-semibold text-muted">
               Style
@@ -472,9 +476,7 @@ export function DirectorStudio({
             >
               {planning || creating ? "Lucy is on it…" : `🎬 Just make it - ${formatUsd(perShot * (plan?.shots.length ?? shotCount))}`}
             </button>
-            <p className="text-center text-[11px] text-muted">
-              Lucy decides everything - story, cast, character sheet, shots, camera, light, sound - and films it. No more choices. About 5-10 minutes.
-            </p>
+            <p className="text-center text-[11px] text-muted">Lucy does everything. About 5-10 minutes.</p>
           </div>
         )}
 
@@ -484,7 +486,7 @@ export function DirectorStudio({
           disabled={planning || idea.trim().length < 3}
           className="w-full rounded-2xl border-2 border-purple bg-white py-3 text-sm font-bold text-purple shadow-soft disabled:opacity-50"
         >
-          {planning ? "Lucy is planning your film…" : plan ? "Re-plan from scratch (free)" : "Or plan it first and check every step (free)"}
+          {planning ? "Lucy is planning your film…" : plan ? "Re-plan from scratch (free)" : "Or check each step first (free plan)"}
         </button>
 
         {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}

@@ -1,5 +1,24 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-27 (late night, 2) - One-tap "Just make it", Lucy makes every character sheet, recipes gallery, cleaner copy
+
+- **🎬 Just make it:** one sentence and one tap. Lucy plans, charges, casts, draws, films and stitches with no stops (`director_films.auto_approve` skips the review). It survives checkout. "Or check each step first" keeps full control.
+- **Lucy makes the character sheet for every film with a person** (`cast_status`, a step before the master still):
+  - No photo: a face portrait from the plan, then 3/4 left, 3/4 right and full body.
+  - 1-2 photos: just the angles.
+  - 3+ photos: skipped.
+  - Failures never block the film. Finished films offer "Save to Your cast".
+- **Bug fixed: no-person films were getting a person.** Face framing, "as they speak" moves, default micro-expressions and skin/eye realism made Veo add a woman to a pure perfume ad. There are now object-first sizes, moves, realism and placement rules. Verified: the remade perfume ad is product only.
+- **Stronger no-captions rule.** A "TikTok ad" idea had drawn garbled caption text; verified clean on the remake.
+- **"What you can make with one sentence"** gallery on the home page:
+  - UGC, product, cinematic and explainer recipes, each with a real example made by one-tap on Lucy (`public/examples/recipe-*.mp4`), photos to add (with limits), 2 tips, and "Use this recipe" (fills the form).
+  - "Borrow a movie's look": 6 official trailers (studio channels, oEmbed-verified: Dune Part Two, Blade Runner 2049, Mad Max: Fury Road, La La Land, Oppenheimer, Everything Everywhere), 2 shown, with "Try this look".
+- **Cleaner copy (written for a 5-year-old):**
+  - "Write one sentence. Get a finished film."
+  - A "Who + does what + where + how it feels" formula with tap-to-try examples.
+  - Photos and Settings collapsed, shorter tips, shorter comparison text.
+- **Watch:** running 4 films at once hit Google image 429s on all three models (shared capacity for our project). They recovered via retries and the fallback, but it was slower. At volume, consider Provisioned Throughput, or send the fallback to the reseller sooner.
+
 ## Latest update, 2026-09-27 (late night) - Up to 14 reference photos, one-tap character sheet, easy guides
 
 - **Several photos per slot:** Character (up to 8), Product (3), Location (3), 14 in total. 14 is the per-prompt image limit of `gemini-3-pro-image`, `3.1-flash-image` and `3.1-flash-lite-image` (7MB each).

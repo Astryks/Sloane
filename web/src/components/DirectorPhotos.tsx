@@ -35,11 +35,11 @@ type SavedCharacter = { id: string; name: string; description: string; photoUrl:
 const SLOTS: Record<RefKind, { label: string; hint: string; tip: string }> = {
   character: {
     label: "Character",
-    hint: "Face photos - more angles = more consistent",
-    tip: "One clear photo is enough - Lucy makes the other angles herself when she films. Want to see and check them first? Tap “Make my character sheet”.",
+    hint: "One clear face photo is enough",
+    tip: "Lucy makes the other angles when she films. Want to see them first? Tap the button below.",
   },
-  product: { label: "Product", hint: "Front, label close-up, side", tip: "Plain background, label readable, no hands in the way." },
-  location: { label: "Location", hint: "Wide shot + another angle", tip: "The empty place, no people - Lucy puts your character in it." },
+  product: { label: "Product", hint: "Front + label", tip: "Plain background, label readable." },
+  location: { label: "Location", hint: "The place, empty", tip: "No people in it - Lucy adds your character." },
 };
 
 let nextId = 0;
@@ -220,23 +220,19 @@ export function DirectorPhotos({
   const inputCls = "rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
 
   return (
-    <div>
-      <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">
-        2. Optional photos - add them when a real person, product or place must look exactly right
-      </p>
-      <details className="mb-2 rounded-xl bg-white/70 p-2 text-[11px] text-muted">
-        <summary className="cursor-pointer font-semibold text-purple">📸 Which photos should I add? (easy guide)</summary>
-        <ol className="mt-2 list-decimal space-y-1 pl-4">
-          <li><strong className="text-foreground">A person?</strong> One clear face photo is enough - Lucy makes their character sheet (every side) automatically. Already have a sheet? Add up to 8 angles. No photo at all? Lucy invents the person and makes their sheet too.</li>
-          <li><strong className="text-foreground">A product?</strong> Add the front, a close-up of the label, and the side. Plain background.</li>
-          <li><strong className="text-foreground">A real place?</strong> Add a wide photo of it empty, plus another angle. No place? Skip it - Lucy invents one and puts your character inside it, with real shadows and light (never a fake cut-out look).</li>
-          <li><strong className="text-foreground">Don&apos;t:</strong> use sunglasses, blurry or dark photos, group photos, or several different people in the Character box.</li>
-        </ol>
-        <p className="mt-2">
-          Step-by-step with examples:{" "}
-          <Link href="/character-sheet" className="font-semibold text-purple underline">how to make a character sheet</Link>
-        </p>
-      </details>
+    <details className="rounded-2xl border border-border bg-white/70 p-3" open={totalPhotos > 0 || cast.length > 0 || undefined}>
+      <summary className="cursor-pointer text-sm font-bold text-foreground">
+        2. 📸 Photos <span className="font-normal text-muted">(optional)</span>
+      </summary>
+      <ul className="mb-2 mt-2 flex flex-col gap-1 text-xs text-muted">
+        <li>🙂 <strong className="text-foreground">A real person?</strong> One clear face photo. Lucy makes every other angle.</li>
+        <li>🧴 <strong className="text-foreground">Your product?</strong> Front + label. Plain background.</li>
+        <li>🏠 <strong className="text-foreground">A real place?</strong> A photo of it empty.</li>
+        <li>
+          🙈 Nothing to add? Skip this - Lucy makes it all up.{" "}
+          <Link href="/character-sheet" className="font-semibold text-purple underline">Photo tips</Link>
+        </li>
+      </ul>
 
       {cast.length > 0 && (
         <div className="mb-2">
@@ -295,7 +291,7 @@ export function DirectorPhotos({
                 <div className="mt-2 flex flex-col gap-2">
                   {!sheetProgress && photos.character.length < REF_LIMITS.character && photos.character.length < 4 && (
                     <button type="button" onClick={makeSheet} className="self-start rounded-xl bg-purple px-3 py-1.5 text-xs font-bold text-white">
-                      ✨ Make my character sheet - Lucy draws {Math.min(SHEET_ANGLES.length, REF_LIMITS.character - photos.character.length)} more angles (free)
+                      ✨ Show me every angle first (free)
                     </button>
                   )}
                   {sheetProgress && <p className="text-[11px] font-semibold text-purple">{sheetProgress}</p>}
@@ -315,7 +311,7 @@ export function DirectorPhotos({
           );
         })}
       </div>
-      {totalPhotos > 0 && <p className="mt-1 text-[10px] text-muted">{totalPhotos} of 14 photos - Lucy uses all of them when she draws your storyboard.</p>}
-    </div>
+      {totalPhotos > 0 && <p className="mt-1 text-[10px] text-muted">{totalPhotos} of 14 photos used.</p>}
+    </details>
   );
 }
