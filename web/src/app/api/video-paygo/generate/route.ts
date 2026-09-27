@@ -17,6 +17,8 @@ import {
   buildVideoInferenceInput,
   resolveVideoEndpoint,
   videoEngineUsesModelArk,
+  videoPriceCents,
+  formatUsd,
   type VideoEngine,
 } from "@/lib/videoPaygo";
 import { hasEnoughFalBalanceToGenerate } from "@/lib/fal";
@@ -214,10 +216,11 @@ export async function POST(req: NextRequest) {
 
     // Owner test mode: top up exactly the one credit about to be spent, so
     // every existing spend/refund path below stays unchanged.
-    if (isOwner(user)) await addVideoCredits(user.id, 1);
-    const spent = await spendVideoCredit(user.id);
+    const priceCents = videoPriceCents(engine);
+    if (isOwner(user)) await addVideoCredits(user.id, priceCents);
+    const spent = await spendVideoCredit(user.id, priceCents);
     if (!spent) {
-      return publicJson({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
+      return publicJson({ error: `Not enough credit - this model costs ${formatUsd(priceCents)} per video` }, { status: 402 });
     }
 
     let inputImageUrl: string | null = null;
@@ -231,7 +234,7 @@ export async function POST(req: NextRequest) {
         inputAudioUrl = await uploadInputMedia(ownAudioBuffer, (referenceAudio as Blob).type || "audio/mpeg", "audio", engineDef.inferenceProvider);
       }
     } catch (err) {
-      await refundVideoCredit(user.id);
+      await refundVideoCredit(user.id, priceCents);
       const message = err instanceof Error ? err.message : "Upload failed";
       return publicJson({ error: message }, { status: 500 });
     }
@@ -279,9 +282,10 @@ export async function POST(req: NextRequest) {
         lipSyncMode,
         durationSeconds: requestedDurationSeconds,
         aspectRatio: requestedAspectRatio,
+        priceCents,
       });
     } catch (err) {
-      await refundVideoCredit(user.id);
+      await refundVideoCredit(user.id, priceCents);
       const message = err instanceof Error ? err.message : "Could not start this job";
       return publicJson({ error: message }, { status: 500 });
     }
@@ -317,7 +321,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Submission failed";
       await failVideoPaygoJob(jobId, message);
-      await refundVideoCredit(user.id);
+      await refundVideoCredit(user.id, priceCents);
       return publicJson({ error: message }, { status: 500 });
     }
   } catch (err) {

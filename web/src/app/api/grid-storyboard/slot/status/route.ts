@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { failGridStoryboardSlot, getGridStoryboardSlot, getGridStoryboardSlotProjectOwner, initSchema, refundVideoCredit, setGridStoryboardSlotVideo } from "@/lib/db";
 import { adStudioFalEndpoint, isAdStudioModel } from "@/lib/adStudio";
 import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl } from "@/lib/videoInference";
+import { priceCentsForEngine } from "@/lib/videoPrice";
 import { publicJson } from "@/lib/mediaProxy";
 
 export async function GET(req: NextRequest) {
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
       // transition, so two overlapping polls of the same failed slot can't
       // both refund the one credit that was spent.
       if (await failGridStoryboardSlot(slotId, "Video generation failed")) {
-        await refundVideoCredit(user.id);
+        await refundVideoCredit(user.id, priceCentsForEngine(slot.video_model));
       }
       return publicJson({ status: "FAILED" });
     }
@@ -43,7 +44,7 @@ export async function GET(req: NextRequest) {
     const videoUrl = getVideoInferenceUrl(result);
     if (!videoUrl) {
       if (await failGridStoryboardSlot(slotId, "Video provider returned no usable video URL")) {
-        await refundVideoCredit(user.id);
+        await refundVideoCredit(user.id, priceCentsForEngine(slot.video_model));
       }
       return publicJson({ status: "FAILED" });
     }

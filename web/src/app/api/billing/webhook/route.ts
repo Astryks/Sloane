@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { upsertSubscriberForCheckout, setSubscriberStatus, linkSubscriberToUser, initSchema, claimAndGrantVideoCredits, claimAndGrantStillCredits, claimStripeEvent, unclaimStripeEvent, recordVendorTreasuryEntry, markVendorTreasuryStatus } from "@/lib/db";
 import { planFromStripePriceId, PLANS } from "@/lib/plans";
-import { videoCreditPackFromStripePriceId } from "@/lib/videoPaygo";
+import { legacyVideoCentsFromStripePriceId } from "@/lib/videoPaygo";
 import { sendAccessCodeEmail, sendPaymentFailedEmail, sendVideoCreditReceiptEmail } from "@/lib/email";
 import {
   attemptPurchaseFalCredits,
@@ -118,43 +118,37 @@ async function handleStripeEvent(event: Stripe.Event, ctx: EventHandlerContext) 
           break;
         }
 
-        const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
-        const priceId = lineItems.data[0]?.price?.id;
-        const pack = priceId ? videoCreditPackFromStripePriceId(priceId) : null;
-        if (pack && userId) {
-          // Real fix (follow-up audit, 2026-09-17, stronger version): the
-          // ledger insert and the balance update now happen in one atomic
-          // SQL statement (claimAndGrantVideoCredits) - see its own comment
-          // in db.ts for why doing them as two separate steps was unsafe
-          // (a failed balance update after a committed ledger row would
-          // permanently block the grant on every future retry, while still
-          // emailing a receipt for credits that were never added). Only
-          // email a receipt when this call is the one that actually
-          // granted - a skipped/duplicate delivery shouldn't re-send it.
-          const granted = await claimAndGrantVideoCredits(event.id, userId, pack.credits);
+        // Video wallet (2026-09-27): price_data checkouts carry the cents to
+        // grant in metadata; checkouts started before the switch used fixed
+        // Stripe Price ids and convert at the old $3.99 per credit.
+        let videoCents: number | null = null;
+        if (session.metadata?.product === "video_credits") {
+          const c = parseInt(session.metadata.creditsCents ?? "", 10);
+          videoCents = Number.isFinite(c) && c > 0 ? c : null;
+        } else {
+          const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
+          const priceId = lineItems.data[0]?.price?.id;
+          videoCents = priceId ? legacyVideoCentsFromStripePriceId(priceId) : null;
+        }
+        if (videoCents && userId) {
+          const revenueCents = session.amount_total ?? videoCents;
+          // Treasury estimates are per video; size them at the cheaper
+          // tier so the COGS estimate is never understated.
+          const approxVideos = Math.max(1, Math.round(videoCents / 299));
+          const granted = await claimAndGrantVideoCredits(event.id, userId, videoCents);
           if (granted) {
             ctx.creditsCommitted = true;
-            // Vendor treasury: worst-case Fal video COGS × pack size.
-            // Fal has no public purchase API — row lands blocked_no_api.
             await recordAndAttemptFalPurchase({
               stripeEventId: event.id,
               userId,
-              estimate: estimateVideoTreasury(
-                pack.credits,
-                session.amount_total ?? pack.priceUsdCents,
-              ),
+              estimate: estimateVideoTreasury(approxVideos, revenueCents),
             });
-            // Seedance runs on ModelArk PAYG (prefer postpaid) — ops log only;
-            // never surfaces vendor recharge UI to Lucy users.
-            await noteModelArkFundingAfterStripePurchase({
-              credits: pack.credits,
-              revenueCents: session.amount_total ?? pack.priceUsdCents,
-            });
+            await noteModelArkFundingAfterStripePurchase({ credits: approxVideos, revenueCents });
             const email = session.customer_details?.email;
-            if (email) await sendVideoCreditReceiptEmail(email, pack, session.amount_total ?? pack.priceUsdCents);
+            if (email) await sendVideoCreditReceiptEmail(email, videoCents, revenueCents);
           }
         } else {
-          console.error("Video credit checkout completed but couldn't resolve pack/user", { priceId, userId });
+          console.error("Video credit checkout completed but couldn't resolve amount/user", { userId, metadata: session.metadata });
         }
         break;
       }

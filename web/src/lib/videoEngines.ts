@@ -10,11 +10,20 @@ export type VideoEngine = "seedance25" | "seedance" | "veo" | "veo31" | "kling" 
 // Optional prompt-rewrite step - see promptDirector.ts (server-only).
 export const PROMPT_DIRECTOR_LABEL = "GPT-6 Astra";
 
-export const VIDEO_PAYGO_PRICE_USD_CENTS = 399; // $3.99, flat across every engine
+// Two price tiers (2026-09-27, per direct request to reflect lower direct-
+// vendor costs). Each clears the $1/video profit floor after Stripe fees at
+// the engine's worst-case cost (see VIDEO_PAYGO_ENGINE_COST_USD):
+//   standard $2.99 - MiniMax $0.74, Seedance 2.0 ~$1.10, Grok $1.30, Veo 3.1 Fast ~$1.38 (worst: $1.22 profit)
+//   premium  $3.99 - Kling 2.1 $1.61, Veo 3.1 4s $1.84, Seedance 2.5 ~$2.13, Kling v3 $2.25 (worst: $1.32 profit)
+export type VideoPriceTier = "standard" | "premium";
+export const VIDEO_TIER_PRICE_CENTS: Record<VideoPriceTier, number> = { standard: 299, premium: 399 };
+/** Premium price - kept for callers that still need one headline number. */
+export const VIDEO_PAYGO_PRICE_USD_CENTS = VIDEO_TIER_PRICE_CENTS.premium;
 
 export type VideoEngineInfo = {
   label: string;
   versionLabel: string; // shown in the UI so the picker is honest about the exact model version
+  tier: VideoPriceTier;
   durationSeconds: number; // default/max clip length, priced in videoPaygo.ts's cost table
   popular: boolean; // "Popular" group in the picker
   // Capability line next to the engine name (audio disclaimer is appended
@@ -34,6 +43,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   seedance25: {
     label: "Seedance 2.5",
     versionLabel: "Seedance 2.5",
+    tier: "premium",
     // Duration raised to 8s (2026-09-24) after routing Seedance through
     // BytePlus ModelArk PAYG instead of fal. ModelArk 720p ~$0.231/s →
     // 8s ≈ $1.85 raw, ~$2.13 buffered — still clears the $1/video profit
@@ -49,6 +59,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   seedance: {
     label: "Seedance 2.0",
     versionLabel: "Seedance 2.0 Fast",
+    tier: "standard",
     durationSeconds: 8,
     popular: true,
     pickerNote: "8s clip · strong all-rounder",
@@ -59,6 +70,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   veo: {
     label: "Veo",
     versionLabel: "Veo 3.1 Fast",
+    tier: "standard",
     durationSeconds: 8,
     popular: true,
     pickerNote: "8s clip · production-proven native voice",
@@ -74,6 +86,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   veo31: {
     label: "Veo 3.1",
     versionLabel: "Veo 3.1",
+    tier: "premium",
     durationSeconds: 4,
     popular: false,
     pickerNote: "4s clip · top-quality tier, native voice",
@@ -84,6 +97,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   kling: {
     label: "Kling",
     versionLabel: "Kling 2.1 Master",
+    tier: "premium",
     durationSeconds: 5,
     popular: true,
     pickerNote: "5s clip · best proven real lip-sync of the set",
@@ -114,6 +128,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   klingv3: {
     label: "Kling v3",
     versionLabel: "Kling 3.0 Pro",
+    tier: "premium",
     durationSeconds: 10,
     popular: false,
     pickerNote: "Longest clip here (10s) · native audio · no lip-sync yet",
@@ -124,6 +139,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   minimax: {
     label: "MiniMax",
     versionLabel: "MiniMax H3 Max",
+    tier: "standard",
     durationSeconds: 8,
     popular: false,
     pickerNote: "8s clip · 768p",
@@ -134,6 +150,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
   grok: {
     label: "Grok",
     versionLabel: "Grok Imagine Video 1.5",
+    tier: "standard",
     durationSeconds: 8,
     popular: false,
     pickerNote: "8s clip · 720p",
@@ -222,19 +239,44 @@ export const VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS: Record<VideoEngine, number
   minimax: 5,
 };
 
+export function videoPriceCents(engine: VideoEngine): number {
+  return VIDEO_TIER_PRICE_CENTS[VIDEO_PAYGO_ENGINES[engine].tier];
+}
+
+export function formatUsd(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+// The video wallet is a USD-cent balance (2026-09-27; previously 1 credit =
+// 1 video). Everything is sold through Checkout `price_data`, so no Stripe
+// Price ids are needed. "single_*" buys exactly one video at that tier;
+// top-ups add wallet credit with a bonus. Top-up math still clears the $1
+// floor in the worst case: $40 credit for $35 -> a $3.99 premium video
+// effectively nets $3.49 - ~$0.13 Stripe share - $2.25 = $1.11.
 export type VideoCreditPack = {
   id: string;
-  credits: number;
   priceUsdCents: number;
-  stripePriceEnvVar: string;
+  creditsCents: number;
+  label: string;
 };
 
-// Packs give a small volume discount over the flat $3.99 single-video price
-// while still clearing the $1/video profit floor (see the module comment
-// above for the exact worst-case math): pack5 nets ~$1.21/video, pack10
-// ~$1.14/video - real numbers, not round-number guesses.
 export const VIDEO_CREDIT_PACKS: VideoCreditPack[] = [
-  { id: "single", credits: 1, priceUsdCents: 399, stripePriceEnvVar: "STRIPE_PRICE_VIDEO_CREDIT_1" },
-  { id: "pack5", credits: 5, priceUsdCents: 1800, stripePriceEnvVar: "STRIPE_PRICE_VIDEO_CREDIT_5" },
-  { id: "pack10", credits: 10, priceUsdCents: 3500, stripePriceEnvVar: "STRIPE_PRICE_VIDEO_CREDIT_10" },
+  { id: "single_standard", priceUsdCents: 299, creditsCents: 299, label: "1 standard video" },
+  { id: "single_premium", priceUsdCents: 399, creditsCents: 399, label: "1 premium video" },
+  { id: "topup20", priceUsdCents: 1800, creditsCents: 2000, label: "$20 credit for $18" },
+  { id: "topup40", priceUsdCents: 3500, creditsCents: 4000, label: "$40 credit for $35" },
 ];
+
+export function videoPackFromId(id: string): VideoCreditPack | null {
+  return VIDEO_CREDIT_PACKS.find((p) => p.id === id) ?? null;
+}
+
+// Stripe Price ids from before the wallet switch - still honoured if a
+// checkout started under the old system completes afterwards. Each old
+// credit converts at the old $3.99 per-video price.
+export const LEGACY_VIDEO_PRICE_ENV_CREDITS: Record<string, number> = {
+  STRIPE_PRICE_VIDEO_CREDIT_1: 1,
+  STRIPE_PRICE_VIDEO_CREDIT_5: 5,
+  STRIPE_PRICE_VIDEO_CREDIT_10: 10,
+};
+export const LEGACY_CENTS_PER_CREDIT = 399;

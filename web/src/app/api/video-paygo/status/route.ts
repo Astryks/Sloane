@@ -72,11 +72,11 @@ export async function GET(req: NextRequest) {
       modalStatus = await getModalJobStatus(job.modal_job_id.startsWith("modal:") ? job.modal_job_id.slice(6) : job.modal_job_id);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Voice generation status check failed";
-      if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
+      if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id, job.price_cents ?? 399);
       return publicJson({ status: "FAILED", error: message });
     }
     if (modalStatus.status === "FAILED") {
-      if (await failVideoPaygoJob(job.id, modalStatus.error ?? "Voice generation failed")) await refundVideoCredit(user.id);
+      if (await failVideoPaygoJob(job.id, modalStatus.error ?? "Voice generation failed")) await refundVideoCredit(user.id, job.price_cents ?? 399);
       return publicJson({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
     }
     if (modalStatus.status !== "COMPLETED") {
@@ -125,7 +125,7 @@ export async function GET(req: NextRequest) {
       return publicJson({ status: "IN_PROGRESS" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Video submission failed";
-      if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
+      if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id, job.price_cents ?? 399);
       return publicJson({ status: "FAILED", error: message });
     }
   }
@@ -167,13 +167,13 @@ export async function GET(req: NextRequest) {
         const message = err instanceof Error ? err.message : isVoiceover ? "Failed to fetch the combined result" : "Failed to fetch lip-synced result";
         // Atomic claim - only refund if THIS call actually transitioned the
         // job to failed, so two overlapping polls can't both refund it.
-        if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
+        if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id, job.price_cents ?? 399);
         return publicJson({ status: "FAILED", error: message });
       }
     }
     if (mergeStatus === "FAILED") {
       if (await failVideoPaygoJob(job.id, isVoiceover ? "Adding your audio to the video failed" : "Lip-syncing your audio to the video failed")) {
-        await refundVideoCredit(user.id);
+        await refundVideoCredit(user.id, job.price_cents ?? 399);
       }
       return publicJson({ status: "FAILED", error: "Generation failed - your credit has been refunded" });
     }
@@ -217,14 +217,14 @@ export async function GET(req: NextRequest) {
       return publicJson({ status: "COMPLETED", videoUrl, silentVideoUrl: null });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch result";
-      if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id);
+      if (await failVideoPaygoJob(job.id, message)) await refundVideoCredit(user.id, job.price_cents ?? 399);
       return publicJson({ status: "FAILED", error: message });
     }
   }
 
   if (falStatus === "FAILED") {
     if (await failVideoPaygoJob(job.id, "Generation failed at the vendor (often a content-policy block)")) {
-      await refundVideoCredit(user.id);
+      await refundVideoCredit(user.id, job.price_cents ?? 399);
     }
     return publicJson({ status: "FAILED", error: "Generation failed - your credit has been refunded" });
   }

@@ -1,6 +1,5 @@
 import { Resend } from "resend";
 import { PLANS, type PlanId } from "@/lib/plans";
-import type { VideoCreditPack } from "@/lib/videoPaygo";
 
 // No-ops (logs and returns) rather than throwing if RESEND_API_KEY isn't
 // set - a missing email key should never break checkout/billing, which is
@@ -90,13 +89,13 @@ export async function sendAccessCodeEmail(email: string, accessToken: string, pl
 // transaction from the plan subscription above, and previously sent no
 // email at all. Triggered from the "payment" mode branch of
 // checkout.session.completed, right after addVideoCredits.
-export async function sendVideoCreditReceiptEmail(email: string, pack: VideoCreditPack, amountUsdCents: number) {
+export async function sendVideoCreditReceiptEmail(email: string, creditsCents: number, amountUsdCents: number) {
   if (!email) return;
   if (!resend) {
     console.warn("[email] RESEND_API_KEY not set - skipping video-credit receipt email to", email);
     return;
   }
-  const label = pack.credits === 1 ? "1 video credit" : `${pack.credits} video credits`;
+  const label = `${usd(creditsCents)} video credit`;
   try {
     await resend.emails.send({
       from: FROM,
@@ -106,7 +105,7 @@ export async function sendVideoCreditReceiptEmail(email: string, pack: VideoCred
       html: emailShell(
         "Thanks for your purchase!",
         `
-          <p>Your video credits are in your account and ready to use right now.</p>
+          <p>Your video credit is in your account and ready to use right now. Standard models are $2.99 per video, premium models $3.99.</p>
           <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
             <tr>
               <td style="padding: 6px 0; color: #9a8b83;">Purchased</td>

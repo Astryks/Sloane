@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { failAdStudioScene, getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, refundVideoCredit, setAdStudioSceneVideo } from "@/lib/db";
 import { adStudioFalEndpoint, isAdStudioModel } from "@/lib/adStudio";
 import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl } from "@/lib/videoInference";
+import { priceCentsForEngine } from "@/lib/videoPrice";
 import { publicJson } from "@/lib/mediaProxy";
 
 // Video generation is submitted async (generate-video/route.ts) rather than
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
       // same as video-paygo/status does, and only when this specific call
       // wins the atomic claim (see failAdStudioScene's own comment on why).
       if (await failAdStudioScene(sceneId, "Video generation failed")) {
-        await refundVideoCredit(user.id);
+        await refundVideoCredit(user.id, priceCentsForEngine(scene.video_model));
       }
       return publicJson({ status: "FAILED" });
     }
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
     const videoUrl = getVideoInferenceUrl(result);
     if (!videoUrl) {
       if (await failAdStudioScene(sceneId, "Video provider returned no usable video URL")) {
-        await refundVideoCredit(user.id);
+        await refundVideoCredit(user.id, priceCentsForEngine(scene.video_model));
       }
       return publicJson({ status: "FAILED" });
     }

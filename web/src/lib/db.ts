@@ -553,6 +553,14 @@ export async function initSchema() {
   // createGuestUser. getSessionUser deliberately never returns a guest;
   // only the paygo routes use getPaygoSessionUser, which does.
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT false`;
+  // Video wallet in USD cents (2026-09-27, two price tiers - see
+  // videoEngines.ts). Old whole-video credits convert at the old $3.99
+  // price. Runs on every initSchema so any credit an older deployment grants
+  // during the switch-over is still converted; idempotent because the old
+  // column is zeroed in the same statement.
+  await sql`ALTER TABLE video_credits ADD COLUMN IF NOT EXISTS balance_cents INTEGER NOT NULL DEFAULT 0`;
+  await sql`UPDATE video_credits SET balance_cents = balance_cents + balance * 399, balance = 0, updated_at = now() WHERE balance > 0`;
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS price_cents INTEGER`;
   // Vendor treasury ledger (2026-09-23): when Stripe grants still/video
   // credits, record revenue vs estimated Fal COGS so Lucy can later buy
   // matching Fal prepaid credits and keep the margin. Idempotent on
@@ -1066,9 +1074,9 @@ export async function mergeGuestIntoUser(guestId: string, userId: string): Promi
     WITH guest AS (
       SELECT id FROM users WHERE id = ${guestId} AND is_guest = true
     ), moved_credits AS (
-      INSERT INTO video_credits (user_id, balance)
-      SELECT ${userId}, vc.balance FROM video_credits vc JOIN guest g ON g.id = vc.user_id WHERE vc.balance > 0
-      ON CONFLICT (user_id) DO UPDATE SET balance = video_credits.balance + EXCLUDED.balance, updated_at = now()
+      INSERT INTO video_credits (user_id, balance_cents)
+      SELECT ${userId}, vc.balance_cents FROM video_credits vc JOIN guest g ON g.id = vc.user_id WHERE vc.balance_cents > 0
+      ON CONFLICT (user_id) DO UPDATE SET balance_cents = video_credits.balance_cents + EXCLUDED.balance_cents, updated_at = now()
       RETURNING user_id
     ), moved_still_credits AS (
       INSERT INTO still_credits (user_id, balance_cents)
@@ -1082,7 +1090,7 @@ export async function mergeGuestIntoUser(guestId: string, userId: string): Promi
     ), moved_still_grants AS (
       UPDATE still_credit_grants SET user_id = ${userId} WHERE user_id IN (SELECT id FROM guest) RETURNING event_id
     ), zeroed AS (
-      UPDATE video_credits SET balance = 0 WHERE user_id IN (SELECT id FROM guest) RETURNING user_id
+      UPDATE video_credits SET balance_cents = 0, balance = 0 WHERE user_id IN (SELECT id FROM guest) RETURNING user_id
     ), zeroed_stills AS (
       UPDATE still_credits SET balance_cents = 0 WHERE user_id IN (SELECT id FROM guest) RETURNING user_id
     )
@@ -1196,46 +1204,37 @@ export async function consumePendingGeneration(jobId: string): Promise<PendingGe
   return (rows[0] as PendingGeneration) ?? null;
 }
 
-// --- Pay-as-you-go video credits ---
+// --- Pay-as-you-go video wallet (USD cents, 2026-09-27) ---
+// Was one credit = one video; now a cent balance debited at each engine's
+// tier price (videoEngines.ts videoPriceCents). Every amount below is cents.
 
 export async function getVideoCreditBalance(userId: string): Promise<number> {
-  const rows = await sql`SELECT balance FROM video_credits WHERE user_id = ${userId}`;
-  return rows[0] ? Number(rows[0].balance) : 0;
+  const rows = await sql`SELECT balance_cents FROM video_credits WHERE user_id = ${userId}`;
+  return rows[0] ? Number(rows[0].balance_cents) : 0;
 }
 
-export async function addVideoCredits(userId: string, amount: number) {
+export async function addVideoCredits(userId: string, cents: number) {
   await sql`
-    INSERT INTO video_credits (user_id, balance)
-    VALUES (${userId}, ${amount})
-    ON CONFLICT (user_id) DO UPDATE SET balance = video_credits.balance + ${amount}, updated_at = now()
+    INSERT INTO video_credits (user_id, balance_cents)
+    VALUES (${userId}, ${cents})
+    ON CONFLICT (user_id) DO UPDATE SET balance_cents = video_credits.balance_cents + ${cents}, updated_at = now()
   `;
 }
 
-// Real fix (follow-up audit, 2026-09-17): the previous version of this did
-// the ledger insert and the balance update as two separate statements
-// (claimVideoCreditGrant, then addVideoCredits) - if the balance update
-// ever failed AFTER the ledger insert committed, the ledger would
-// permanently remember "already granted" for an event whose credits were
-// never actually added, and no retry could ever fix it (the webhook's own
-// unclaim-and-retry logic would just keep re-hitting the same already-
-// claimed ledger row and skipping the grant forever, while still sending a
-// receipt email claiming success). A single SQL statement is implicitly
-// one atomic transaction in Postgres even with multiple CTEs - either both
-// the ledger row and the balance update land, or neither does, so the two
-// can never diverge. Returns true only when THIS call actually performed
-// the grant (i.e. this event id hadn't been seen before); the webhook
-// route should only send the receipt email when this is true.
-export async function claimAndGrantVideoCredits(eventId: string, userId: string, credits: number): Promise<boolean> {
+// Ledger insert + balance update in ONE statement so they can never
+// diverge (see the 2026-09-17 audit note in git history). Returns true only
+// when this call performed the grant - the webhook emails a receipt only then.
+export async function claimAndGrantVideoCredits(eventId: string, userId: string, cents: number): Promise<boolean> {
   const rows = await sql`
     WITH grant_claim AS (
       INSERT INTO stripe_credit_grants (event_id, user_id, credits)
-      VALUES (${eventId}, ${userId}, ${credits})
+      VALUES (${eventId}, ${userId}, ${cents})
       ON CONFLICT (event_id) DO NOTHING
       RETURNING event_id
     ), balance_update AS (
-      INSERT INTO video_credits (user_id, balance)
-      SELECT ${userId}, ${credits} WHERE EXISTS (SELECT 1 FROM grant_claim)
-      ON CONFLICT (user_id) DO UPDATE SET balance = video_credits.balance + ${credits}, updated_at = now()
+      INSERT INTO video_credits (user_id, balance_cents)
+      SELECT ${userId}, ${cents} WHERE EXISTS (SELECT 1 FROM grant_claim)
+      ON CONFLICT (user_id) DO UPDATE SET balance_cents = video_credits.balance_cents + ${cents}, updated_at = now()
       RETURNING user_id
     )
     SELECT count(*)::int AS granted FROM grant_claim
@@ -1243,24 +1242,20 @@ export async function claimAndGrantVideoCredits(eventId: string, userId: string,
   return Number(rows[0]?.granted ?? 0) > 0;
 }
 
-// Atomic decrement guarded by the balance check in the same statement -
-// two concurrent requests can't both succeed against a balance of 1 credit
-// (the second one's WHERE clause simply matches zero rows). Returns false
-// (not an error) when there's nothing to spend, same "expected outcome, not
-// exceptional" shape as checkQuota() above.
-export async function spendVideoCredit(userId: string): Promise<boolean> {
+// Atomic debit guarded by the balance check in the same statement, so two
+// concurrent requests can't both spend the same money. False = not enough.
+export async function spendVideoCredit(userId: string, cents: number): Promise<boolean> {
   const rows = await sql`
-    UPDATE video_credits SET balance = balance - 1, updated_at = now()
-    WHERE user_id = ${userId} AND balance > 0
-    RETURNING balance
+    UPDATE video_credits SET balance_cents = balance_cents - ${cents}, updated_at = now()
+    WHERE user_id = ${userId} AND balance_cents >= ${cents}
+    RETURNING balance_cents
   `;
   return rows.length > 0;
 }
 
-// Used when a generation fails outright (content-policy block, vendor
-// error) - the user shouldn't lose a credit for a video they never got.
-export async function refundVideoCredit(userId: string) {
-  await addVideoCredits(userId, 1);
+// A failed/blocked generation gives back exactly what it was charged.
+export async function refundVideoCredit(userId: string, cents: number) {
+  await addVideoCredits(userId, cents);
 }
 
 // --- Pay-as-you-go still credits (USD cents) ---
@@ -1392,6 +1387,7 @@ export async function markVendorTreasuryStatus(
 export type VideoPaygoJob = {
   id: string;
   user_id: string;
+  price_cents: number | null; // what this job was charged (null = pre-wallet job, charged the old $3.99)
   engine: string;
   prompt: string;
   fal_request_id: string | null;
@@ -1424,13 +1420,14 @@ export async function createVideoPaygoJob(params: {
   lipSyncMode?: "lipsync" | "voiceover";
   durationSeconds?: number | null;
   aspectRatio?: string | null;
+  priceCents: number;
 }): Promise<string> {
   const rows = await sql`
-    INSERT INTO video_paygo_jobs (user_id, engine, prompt, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id, lip_sync_mode, duration_seconds, aspect_ratio)
+    INSERT INTO video_paygo_jobs (user_id, engine, prompt, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id, lip_sync_mode, duration_seconds, aspect_ratio, price_cents)
     VALUES (
       ${params.userId}, ${params.engine}, ${params.prompt}, ${params.falEndpoint},
       ${params.inputImageUrl ?? null}, ${params.inputAudioUrl ?? null}, ${params.needsMerge ?? false}, ${params.presetVoiceId ?? null},
-      ${params.lipSyncMode ?? "lipsync"}, ${params.durationSeconds ?? null}, ${params.aspectRatio ?? null}
+      ${params.lipSyncMode ?? "lipsync"}, ${params.durationSeconds ?? null}, ${params.aspectRatio ?? null}, ${params.priceCents}
     )
     RETURNING id
   `;

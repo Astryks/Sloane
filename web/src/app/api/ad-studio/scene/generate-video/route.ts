@@ -14,6 +14,7 @@ import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from
 import { hasEnoughFalBalanceToGenerate } from "@/lib/fal";
 import { submitVideoInferenceJob } from "@/lib/videoInference";
 import { hasModelArkCredentialsConfigured, isModelArkEngine, MODELARK_UNAVAILABLE_USER_ERROR } from "@/lib/modelArk";
+import { priceCentsForEngine } from "@/lib/videoPrice";
 import { publicJson } from "@/lib/mediaProxy";
 
 export async function POST(req: NextRequest) {
@@ -64,10 +65,10 @@ export async function POST(req: NextRequest) {
     // against the same shared video-credit balance paygo videos use,
     // refunded if the submission itself fails (same reasoning as
     // video-paygo/generate's own spend/refund).
-    const spent = await spendVideoCredit(user.id);
+    const spent = await spendVideoCredit(user.id, priceCentsForEngine(scene.video_model));
     if (!spent) {
       await failAdStudioScene(sceneId, "No video credits left");
-      return publicJson({ error: "No video credits left - buy more to generate this scene's video." }, { status: 402 });
+      return publicJson({ error: "Not enough video credit - top up to generate this scene's video." }, { status: 402 });
     }
 
     const prompt = [scene.camera, scene.action].filter(Boolean).join(". ");
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
       return publicJson({ requestId });
     } catch (err) {
       if (await failAdStudioScene(sceneId, err instanceof Error ? err.message : "Video submission failed")) {
-        await refundVideoCredit(user.id);
+        await refundVideoCredit(user.id, priceCentsForEngine(scene.video_model));
       }
       throw err;
     }

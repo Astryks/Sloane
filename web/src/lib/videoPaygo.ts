@@ -70,10 +70,10 @@
 import {
   VIDEO_PAYGO_ENGINES as VIDEO_ENGINE_INFO,
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
-  VIDEO_CREDIT_PACKS,
+  LEGACY_VIDEO_PRICE_ENV_CREDITS,
+  LEGACY_CENTS_PER_CREDIT,
   type VideoEngine,
   type VideoEngineInfo,
-  type VideoCreditPack,
 } from "./videoEngines";
 import {
   buildModelArkCreateBody,
@@ -94,6 +94,11 @@ export {
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
   VIDEO_CREDIT_PACKS,
   VIDEO_PAYGO_PRICE_USD_CENTS,
+  VIDEO_TIER_PRICE_CENTS,
+  videoPriceCents,
+  videoPackFromId,
+  formatUsd,
+  type VideoPriceTier,
   type VideoEngine,
   type VideoEngineInfo,
   type VideoCreditPack,
@@ -376,9 +381,10 @@ export function buildFalInput(
 
 
 
-export function videoCreditPackFromStripePriceId(priceId: string): VideoCreditPack | null {
-  for (const pack of VIDEO_CREDIT_PACKS) {
-    if (process.env[pack.stripePriceEnvVar] === priceId) return pack;
+/** Cents to grant for a checkout that used an old fixed Stripe Price id. */
+export function legacyVideoCentsFromStripePriceId(priceId: string): number | null {
+  for (const [envVar, credits] of Object.entries(LEGACY_VIDEO_PRICE_ENV_CREDITS)) {
+    if (process.env[envVar] === priceId) return credits * LEGACY_CENTS_PER_CREDIT;
   }
   return null;
 }

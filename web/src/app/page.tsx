@@ -16,7 +16,9 @@ import {
   VIDEO_PAYGO_ENGINES,
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
   VIDEO_CREDIT_PACKS,
-  VIDEO_PAYGO_PRICE_USD_CENTS,
+  VIDEO_TIER_PRICE_CENTS,
+  videoPriceCents,
+  formatUsd,
   videoEnginePickerNote,
   videoEnginesSoundBlurb,
   type VideoEngine,
@@ -1213,7 +1215,7 @@ function takeDraft(): PaygoDraft | null {
   }
 }
 
-const PAYGO_PRICE_LABEL = `$${(VIDEO_PAYGO_PRICE_USD_CENTS / 100).toFixed(2)}`;
+const PAYGO_FROM_PRICE_LABEL = formatUsd(VIDEO_TIER_PRICE_CENTS.standard);
 
 // The homepage's first screen (2026-09-23 layout change, per direct
 // request): prompt box -> model picker -> price -> pay & generate, with no
@@ -1359,7 +1361,7 @@ function PayAsYouGoVideoSection({
     const startedAt = Date.now();
     (async () => {
       while (!cancelled && Date.now() - startedAt < 60_000) {
-        if ((await refreshBalance()) >= 1) break;
+        if ((await refreshBalance()) >= videoPriceCents(engine)) break;
         await new Promise((r) => setTimeout(r, 2000));
       }
       if (!cancelled) setWaitingForCredit(false);
@@ -1373,7 +1375,7 @@ function PayAsYouGoVideoSection({
   // Runs after the render that restored the draft, so handleGenerate sees
   // the restored prompt/engine rather than the empty initial state.
   useEffect(() => {
-    if (!pendingAutoGenerateRef.current || balance < 1 || loading) return;
+    if (!pendingAutoGenerateRef.current || balance < videoPriceCents(engine) || loading) return;
     pendingAutoGenerateRef.current = false;
     handleGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1444,7 +1446,10 @@ function PayAsYouGoVideoSection({
   }
 
   const missingInput = (!prompt.trim() && !promptSkippable) || (audioMode === "own" && !audio.selectedBlob);
-  const hasCredit = balance >= 1 || ownerMode;
+  // Wallet is USD cents; each engine has a tier price (videoEngines.ts).
+  const priceCents = videoPriceCents(engine);
+  const priceLabel = formatUsd(priceCents);
+  const hasCredit = balance >= priceCents || ownerMode;
 
   const engineEntries = Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][];
   const orderedEngines = [...engineEntries.filter(([, e]) => e.popular), ...engineEntries.filter(([, e]) => !e.popular)];
@@ -1458,7 +1463,7 @@ function PayAsYouGoVideoSection({
       <div className={`text-center ${header ? "mt-5" : ""}`}>
         <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Make a video from one prompt</h2>
         <p className="mt-1 text-sm text-muted">
-          Pick any leading model · <strong className="text-foreground">{PAYGO_PRICE_LABEL} per video</strong> · no signup, no subscription
+          Pick any leading model · <strong className="text-foreground">from {PAYGO_FROM_PRICE_LABEL} per video</strong> · no signup, no subscription
         </p>
       </div>
 
@@ -1495,6 +1500,7 @@ function PayAsYouGoVideoSection({
                 </div>
                 <div className="mt-1 font-bold">{e.label}</div>
                 <div className={`mt-0.5 text-[11px] leading-snug ${engine === id ? "text-white/90" : "text-muted"}`}>{videoEnginePickerNote(e)}</div>
+                <div className={`mt-1 text-[11px] font-bold ${engine === id ? "text-white" : "text-foreground"}`}>{formatUsd(videoPriceCents(id))}</div>
               </button>
             ))}
           </div>
@@ -1516,7 +1522,7 @@ function PayAsYouGoVideoSection({
                     Duration: <span className="text-foreground">{durationSeconds ?? engineDef.durationSeconds}s</span>
                   </label>
                   <span className="text-[11px] text-muted">
-                    {VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}-{engineDef.durationSeconds}s, same {PAYGO_PRICE_LABEL}
+                    {VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine]}-{engineDef.durationSeconds}s, same {priceLabel}
                   </span>
                 </div>
                 <input
@@ -1644,23 +1650,25 @@ function PayAsYouGoVideoSection({
         <div className="rounded-2xl bg-white/80 p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-sm text-foreground">
-              <span className="text-2xl font-extrabold">{PAYGO_PRICE_LABEL}</span>{" "}
+              <span className="text-2xl font-extrabold">{priceLabel}</span>{" "}
               <span className="text-muted">
                 per video · {engineDef.label} · {durationSeconds ?? engineDef.durationSeconds}s clip
               </span>
             </p>
             {balanceLoaded && hasCredit && (
               <p className="text-xs font-semibold text-purple">
-                {balance} credit{balance === 1 ? "" : "s"} ready
+                {formatUsd(balance)} credit
               </p>
             )}
           </div>
-          <p className="mt-0.5 text-[11px] text-muted">Same price on every model - clip length is what differs between them.</p>
+          <p className="mt-0.5 text-[11px] text-muted">
+            {engineDef.tier === "premium" ? "Premium model" : "Standard model"} · standard models {formatUsd(VIDEO_TIER_PRICE_CENTS.standard)}, premium {formatUsd(VIDEO_TIER_PRICE_CENTS.premium)} per video
+          </p>
         </div>
 
         <button
           type="button"
-          onClick={hasCredit ? handleGenerate : () => handleBuy("single", true)}
+          onClick={hasCredit ? handleGenerate : () => handleBuy(engineDef.tier === "premium" ? "single_premium" : "single_standard", true)}
           disabled={loading || missingInput || buyingPack !== null || (waitingForCredit && !hasCredit)}
           className="w-full rounded-2xl bg-purple py-4 text-base font-bold text-white shadow-soft disabled:opacity-50"
         >
@@ -1669,19 +1677,19 @@ function PayAsYouGoVideoSection({
             : waitingForCredit && !hasCredit
               ? "Confirming your payment…"
               : hasCredit
-                ? ownerMode && balance < 1
+                ? ownerMode && balance < priceCents
                   ? "Generate (owner test - no charge)"
-                  : "Generate my video (1 credit)"
-                : buyingPack === "single"
+                  : `Generate my video (${priceLabel})`
+                : buyingPack === "single_standard" || buyingPack === "single_premium"
                   ? "Opening secure checkout…"
-                  : `Pay ${PAYGO_PRICE_LABEL} & generate →`}
+                  : `Pay ${priceLabel} & generate →`}
         </button>
 
         <div className="-mt-1 flex flex-col items-center gap-1 text-center text-[11px] text-muted">
           <p>Secure checkout by Stripe · card, Apple Pay or Google Pay · no account needed</p>
           <p>
             Making a few?{" "}
-            {VIDEO_CREDIT_PACKS.filter((p) => p.credits > 1).map((pack, i) => (
+            {VIDEO_CREDIT_PACKS.filter((p) => p.id.startsWith("topup")).map((pack, i) => (
               <span key={pack.id}>
                 {i > 0 && " · "}
                 <button
@@ -1690,14 +1698,14 @@ function PayAsYouGoVideoSection({
                   disabled={buyingPack !== null}
                   className="font-semibold text-purple underline disabled:opacity-50"
                 >
-                  {buyingPack === pack.id ? "Redirecting…" : `${pack.credits} for $${(pack.priceUsdCents / 100).toFixed(0)}`}
+                  {buyingPack === pack.id ? "Redirecting…" : pack.label}
                 </button>
               </span>
             ))}
           </p>
           {balanceLoaded && hasCredit && !signedIn && (
             <p>
-              Your credits are saved in this browser.{" "}
+              Your credit is saved in this browser.{" "}
               <a href="/account" className="font-semibold text-purple underline">
                 Sign in
               </a>{" "}

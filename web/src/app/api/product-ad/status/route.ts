@@ -14,10 +14,11 @@ import { getFalJobResult, getFalJobStatus, getFalVideoUrl, hasRealRequestId, sub
 import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl } from "@/lib/videoInference";
 import { getModalJobStatus } from "@/lib/modal";
 import { padWavToMinDuration, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
+import { priceCentsForEngine } from "@/lib/videoPrice";
 import { publicJson } from "@/lib/mediaProxy";
 
-async function fail(jobId: string, userId: string, message: string) {
-  if (await failProductAdJob(jobId, message)) await refundVideoCredit(userId);
+async function fail(jobId: string, userId: string, message: string, engine: string) {
+  if (await failProductAdJob(jobId, message)) await refundVideoCredit(userId, priceCentsForEngine(engine));
 }
 
 export async function GET(req: NextRequest) {
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
     try {
       const modalStatus = await getModalJobStatus(job.modal_job_id.startsWith("modal:") ? job.modal_job_id.slice(6) : job.modal_job_id);
       if (modalStatus.status === "FAILED") {
-        await fail(job.id, user.id, modalStatus.error ?? "Voice generation failed");
+        await fail(job.id, user.id, modalStatus.error ?? "Voice generation failed", job.model);
         return publicJson({ status: "FAILED", error: modalStatus.error ?? "Voice generation failed" });
       }
       if (modalStatus.status === "COMPLETED") {
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Voice preparation failed";
-      await fail(job.id, user.id, message);
+      await fail(job.id, user.id, message, job.model);
       return publicJson({ status: "FAILED", error: message });
     }
   }
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
   let silentVideoUrl = job.silent_video_url;
   if (job.fal_request_id && !silentVideoUrl) {
     if (!job.fal_endpoint) {
-      await fail(job.id, user.id, "Product ad job is missing its provider endpoint");
+      await fail(job.id, user.id, "Product ad job is missing its provider endpoint", job.model);
       return publicJson({ status: "FAILED", error: "Product ad job is missing its provider endpoint" });
     }
     let falStatus;
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
       return publicJson({ status: "IN_PROGRESS", phase: "Rendering silent video" });
     }
     if (falStatus === "FAILED") {
-      await fail(job.id, user.id, "The selected model failed to render the silent video");
+      await fail(job.id, user.id, "The selected model failed to render the silent video", job.model);
       return publicJson({ status: "FAILED", error: "The selected model failed to render the silent video" });
     }
     if (falStatus === "COMPLETED") {
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
         await setProductAdSilentVideo(job.id, silentVideoUrl);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not fetch the silent video";
-        await fail(job.id, user.id, message);
+        await fail(job.id, user.id, message, job.model);
         return publicJson({ status: "FAILED", error: message });
       }
     }
@@ -115,7 +116,7 @@ export async function GET(req: NextRequest) {
       return publicJson({ status: "IN_PROGRESS", phase: "Lip-syncing dialogue" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Lip-sync submission failed";
-      await fail(job.id, user.id, message);
+      await fail(job.id, user.id, message, job.model);
       return publicJson({ status: "FAILED", error: message });
     }
   }
@@ -123,7 +124,7 @@ export async function GET(req: NextRequest) {
   try {
     const lipsyncStatus = await getFalJobStatus(LIPSYNC_ENDPOINT, job.lipsync_request_id);
     if (lipsyncStatus === "FAILED") {
-      await fail(job.id, user.id, "Kling could not lip-sync the dialogue to the video");
+      await fail(job.id, user.id, "Kling could not lip-sync the dialogue to the video", job.model);
       return publicJson({ status: "FAILED", error: "Kling could not lip-sync the dialogue to the video" });
     }
     if (lipsyncStatus === "COMPLETED") {

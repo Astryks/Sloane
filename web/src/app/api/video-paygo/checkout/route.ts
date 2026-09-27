@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { getOrCreatePaygoSessionUser } from "@/lib/auth";
 import { initSchema } from "@/lib/db";
-import { VIDEO_CREDIT_PACKS } from "@/lib/videoPaygo";
+import { videoPackFromId } from "@/lib/videoPaygo";
 import { publicJson } from "@/lib/mediaProxy";
 
 // One-time payment (mode: "payment", not "subscription") for a video-credit
@@ -17,13 +17,9 @@ import { publicJson } from "@/lib/mediaProxy";
 // Checkout collects the email for the receipt itself.
 export async function POST(req: NextRequest) {
   const { packId } = (await req.json()) as { packId: string };
-  const pack = VIDEO_CREDIT_PACKS.find((p) => p.id === packId);
+  const pack = videoPackFromId(packId);
   if (!pack) {
     return publicJson({ error: "Unknown credit pack" }, { status: 400 });
-  }
-  const priceId = process.env[pack.stripePriceEnvVar];
-  if (!priceId) {
-    return publicJson({ error: "Credit pack not configured on the server yet" }, { status: 500 });
   }
 
   await initSchema();
@@ -33,7 +29,19 @@ export async function POST(req: NextRequest) {
   try {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      line_items: [{ price: priceId, quantity: 1 }],
+      // Dynamic price_data (2026-09-27 wallet switch) - no Stripe Price ids;
+      // the webhook grants metadata.creditsCents to the video wallet.
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: pack.priceUsdCents,
+            product_data: { name: `Lucy Labs video credit - ${pack.label}` },
+          },
+          quantity: 1,
+        },
+      ],
+      metadata: { product: "video_credits", packId: pack.id, creditsCents: String(pack.creditsCents) },
       // Straight back to the generator, where the saved draft resumes.
       success_url: `${origin}/?video_credits=1#pay-as-you-go`,
       cancel_url: `${origin}/?canceled=1#pay-as-you-go`,

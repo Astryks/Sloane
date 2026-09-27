@@ -14,6 +14,7 @@ import { adStudioFalEndpoint, buildAdStudioSceneFalInput, isAdStudioModel } from
 import { hasEnoughFalBalanceToGenerate } from "@/lib/fal";
 import { submitVideoInferenceJob } from "@/lib/videoInference";
 import { hasModelArkCredentialsConfigured, isModelArkEngine, MODELARK_UNAVAILABLE_USER_ERROR } from "@/lib/modelArk";
+import { priceCentsForEngine } from "@/lib/videoPrice";
 import { publicJson } from "@/lib/mediaProxy";
 
 // Real, confirmed limit (2026-09-13 live test, see productAdStoryboard.ts's
@@ -69,9 +70,9 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: "Video generation is already in progress or already finished for this scene." }, { status: 409 });
     }
 
-    if (!(await spendVideoCredit(user.id))) {
+    if (!(await spendVideoCredit(user.id, priceCentsForEngine(videoModel)))) {
       await failGridStoryboardSlot(slotId, "No video credits left");
-      return publicJson({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
+      return publicJson({ error: "Not enough video credit - top up to keep generating" }, { status: 402 });
     }
 
     try {
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
       return publicJson({ requestId });
     } catch (err) {
       if (await failGridStoryboardSlot(slotId, err instanceof Error ? err.message : "Video submission failed")) {
-        await refundVideoCredit(user.id);
+        await refundVideoCredit(user.id, priceCentsForEngine(videoModel));
       }
       throw err;
     }

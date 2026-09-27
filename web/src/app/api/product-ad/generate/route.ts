@@ -17,6 +17,7 @@ import { hasModelArkCredentialsConfigured, isModelArkEngine, MODELARK_UNAVAILABL
 import { submitModalJob } from "@/lib/modal";
 import { buildProductAdFalInput, isProductAdModel, productAdFalEndpoint } from "@/lib/productAd";
 import { buildProductAdStoryboard } from "@/lib/productAdStoryboard";
+import { priceCentsForEngine } from "@/lib/videoPrice";
 import { publicJson } from "@/lib/mediaProxy";
 import { characterInputImageUrl } from "@/lib/characterImages";
 
@@ -114,7 +115,7 @@ export async function POST(req: NextRequest) {
     } else if (!(await hasEnoughFalBalanceToGenerate())) {
       return publicJson({ error: "Video generation is temporarily paused while we top up - please try again shortly." }, { status: 503 });
     }
-    if (!(await spendVideoCredit(user.id))) return publicJson({ error: "No video credits left - buy more to keep generating" }, { status: 402 });
+    if (!(await spendVideoCredit(user.id, priceCentsForEngine(model)))) return publicJson({ error: "Not enough video credit - top up to keep generating" }, { status: 402 });
 
     let jobId: string | null = null;
     try {
@@ -169,7 +170,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Product ad submission failed";
       if (jobId) await failProductAdJob(jobId, message);
-      await refundVideoCredit(user.id);
+      await refundVideoCredit(user.id, priceCentsForEngine(model));
       return publicJson({ error: message }, { status: 502 });
     }
   } catch (err) {
