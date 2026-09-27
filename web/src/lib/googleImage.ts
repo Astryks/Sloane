@@ -7,13 +7,13 @@
  * ["IMAGE"]; the image comes back inline (base64) and is stored in our Vercel
  * Blob so it's served through /api/media like everything else. Models are
  * tried in order (GOOGLE_IMAGE_MODELS, comma-separated) - Pro first for the
- * best identity/product fidelity, Lite as a cheaper fallback.
+ * best identity/product fidelity, then Flash (Nano Banana 2) and Lite.
  */
 import { randomUUID } from "crypto";
 import { put } from "@vercel/blob";
 import { hasVertexCredentialsConfigured, vertexAuthHeaders } from "./vertexVeo";
 
-const MODELS = (process.env.GOOGLE_IMAGE_MODELS || "gemini-3-pro-image-preview,gemini-3.1-flash-lite-image")
+const MODELS = (process.env.GOOGLE_IMAGE_MODELS || "gemini-3-pro-image,gemini-3.1-flash-image,gemini-3.1-flash-lite-image")
   .split(",")
   .map((m) => m.trim())
   .filter(Boolean);
