@@ -36,7 +36,7 @@ const SLOTS: Record<RefKind, { label: string; hint: string; tip: string }> = {
   character: {
     label: "Character",
     hint: "Face photos - more angles = more consistent",
-    tip: "Best: a face close-up, both 3/4 sides, a side profile, full body and the back. Or add one clear photo and tap “Make my character sheet”.",
+    tip: "One clear photo is enough - Lucy makes the other angles herself when she films. Want to see and check them first? Tap “Make my character sheet”.",
   },
   product: { label: "Product", hint: "Front, label close-up, side", tip: "Plain background, label readable, no hands in the way." },
   location: { label: "Location", hint: "Wide shot + another angle", tip: "The empty place, no people - Lucy puts your character in it." },
@@ -227,7 +227,7 @@ export function DirectorPhotos({
       <details className="mb-2 rounded-xl bg-white/70 p-2 text-[11px] text-muted">
         <summary className="cursor-pointer font-semibold text-purple">📸 Which photos should I add? (easy guide)</summary>
         <ol className="mt-2 list-decimal space-y-1 pl-4">
-          <li><strong className="text-foreground">A person?</strong> Add clear photos of their face. More angles = the same face in every shot. One good photo is enough - tap <em>Make my character sheet</em> and Lucy draws the other angles.</li>
+          <li><strong className="text-foreground">A person?</strong> One clear face photo is enough - Lucy makes their character sheet (every side) automatically. Already have a sheet? Add up to 8 angles. No photo at all? Lucy invents the person and makes their sheet too.</li>
           <li><strong className="text-foreground">A product?</strong> Add the front, a close-up of the label, and the side. Plain background.</li>
           <li><strong className="text-foreground">A real place?</strong> Add a wide photo of it empty, plus another angle. No place? Skip it - Lucy invents one and puts your character inside it, with real shadows and light (never a fake cut-out look).</li>
           <li><strong className="text-foreground">Don&apos;t:</strong> use sunglasses, blurry or dark photos, group photos, or several different people in the Character box.</li>

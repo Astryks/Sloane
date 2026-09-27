@@ -43,6 +43,9 @@ type FilmStatus = {
   finalVideoUrl: string | null;
   anchorUrl: string | null;
   shots: ShotStatus[];
+  casting?: boolean;
+  autoApprove?: boolean;
+  characterPhotos?: string[];
   plan?: DirectorPlan;
   revisionsUsed?: number;
   maxRevisions?: number;
@@ -61,6 +64,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   const [engine, setEngine] = useState<VideoEngine>("veo");
   const [photos, setPhotos] = useState<RefPhotos>(EMPTY_PHOTOS);
   const [plan, setPlan] = useState<DirectorPlan | null>(null);
+  const planState = plan;
   const [planning, setPlanning] = useState(false);
   const [revising, setRevising] = useState<number | "all" | null>(null);
   const [reviseText, setReviseText] = useState<Record<string, string>>({});
@@ -73,6 +77,9 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   const [busy, setBusy] = useState<string | null>(null);
   const [castId, setCastId] = useState<string | null>(null);
   const autoCreateRef = useRef(false);
+  const autoApproveRef = useRef(false);
+  const [saveCastName, setSaveCastName] = useState("");
+  const [castSaved, setCastSaved] = useState(false);
   const [pollKey, setPollKey] = useState(0);
   const restartPolling = () => setPollKey((k) => k + 1);
 
@@ -85,7 +92,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     const p = new URLSearchParams(window.location.search);
     if (p.get("director") !== "1") return;
     window.history.replaceState(null, "", window.location.pathname + window.location.hash);
-    let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; refs?: Parameters<typeof photosFromLinks>[0]; castId?: string | null } | null = null;
+    let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; refs?: Parameters<typeof photosFromLinks>[0]; castId?: string | null; auto?: boolean } | null = null;
     try {
       draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null");
       sessionStorage.removeItem(DRAFT_KEY);
@@ -98,6 +105,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     if (draft.refs) setPhotos(photosFromLinks(draft.refs));
     if (draft.castId) setCastId(draft.castId);
     setNotice("Payment received - starting your film…");
+    autoApproveRef.current = !!draft.auto;
     autoCreateRef.current = true;
   }
 
@@ -106,19 +114,6 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     resumeFromCheckout().catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (!autoCreateRef.current || !plan) return;
-    autoCreateRef.current = false;
-    // Stripe's webhook can land a moment after the redirect - retry briefly.
-    (async () => {
-      for (let i = 0; i < 15; i++) {
-        if (await makeFilm(true)) return;
-        await new Promise((r) => setTimeout(r, 2500));
-      }
-      setNotice("Your payment is still being confirmed - press Make this film in a moment.");
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan]);
 
   // Poll the film while it's being produced.
   useEffect(() => {
@@ -146,7 +141,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     };
   }, [filmId, pollKey]);
 
-  async function planIt() {
+  async function planIt(): Promise<DirectorPlan | null> {
     setPlanning(true);
     setError(null);
     setNotice(null);
@@ -169,10 +164,39 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Couldn't plan that");
       setPlan(data.plan);
+      return data.plan as DirectorPlan;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't plan that");
+      return null;
     } finally {
       setPlanning(false);
+    }
+  }
+
+  /** "Just make it": plan, cast, storyboard, film and stitch with no stops - one tap. */
+  async function makeItNow() {
+    const planned = await planIt();
+    if (planned) await makeFilm(false, { plan: planned, auto: true });
+  }
+
+  async function saveLucysCast() {
+    const links = film?.characterPhotos ?? [];
+    if (!links.length || !saveCastName.trim()) return;
+    setBusy("saveCast");
+    try {
+      const form = new FormData();
+      form.append("name", saveCastName.trim());
+      form.append("description", plan?.character ?? "");
+      form.append("photos", JSON.stringify(links));
+      const res = await fetch("/api/director/characters", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't save");
+      setCastSaved(true);
+      setNotice(`${data.character.name} is in Your cast - use them in your next film.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -208,7 +232,8 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   }
 
   /** Returns true if the film started (or a checkout redirect began). */
-  async function makeFilm(silentOnNoCredit = false): Promise<boolean> {
+  async function makeFilm(silentOnNoCredit = false, opts: { plan?: DirectorPlan; auto?: boolean } = {}): Promise<boolean> {
+    const plan = opts.plan ?? planState;
     if (!plan) return false;
     const refLinks = { character: readyUrls(photos, "character"), product: readyUrls(photos, "product"), location: readyUrls(photos, "location") };
     setCreating(true);
@@ -220,6 +245,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
       form.append("plan", JSON.stringify(plan));
       if (castId) form.append("savedCharacterId", castId);
       form.append("refs", JSON.stringify(refLinks));
+      if (opts.auto) form.append("autoApprove", "1");
       const res = await fetch("/api/director/create", { method: "POST", body: form });
       const data = await res.json();
       if (res.ok) {
@@ -231,12 +257,12 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
       if (data.needCredit) {
         if (silentOnNoCredit) return false;
         try {
-          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ idea, plan, engine, refs: refLinks, castId }));
+          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ idea, plan, engine, refs: refLinks, castId, auto: !!opts.auto }));
         } catch {}
         const co = await fetch("/api/video-paygo/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ packId: "exact", cents: data.totalCents ?? total, returnTo: "director" }),
+          body: JSON.stringify({ packId: "exact", cents: data.totalCents ?? perShot * plan.shots.length, returnTo: "director" }),
         });
         const cd = await co.json();
         if (cd.url) {
@@ -253,6 +279,20 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
       setCreating(false);
     }
   }
+
+  useEffect(() => {
+    if (!autoCreateRef.current || !plan) return;
+    autoCreateRef.current = false;
+    // Stripe's webhook can land a moment after the redirect - retry briefly.
+    (async () => {
+      for (let i = 0; i < 15; i++) {
+        if (await makeFilm(true, { auto: autoApproveRef.current })) return;
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      setNotice("Your payment is still being confirmed - press Make this film in a moment.");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
 
   const reviewing = film?.status === "review";
   const producing = !!filmId && !!film && !DONE_STATES.includes(film.status) && !reviewing;
@@ -323,13 +363,17 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
           plans every shot, camera move and light, keeps your character and product consistent, and delivers one finished film.
         </p>
         <p className="mt-1 text-xs text-muted">
-          Any model · pay as you go · <strong className="text-foreground">{formatUsd(perShot)} per shot</strong> on {VIDEO_PAYGO_ENGINES[engine].label} · planning is free · you approve every frame before filming · failed shots refunded
+          Any model · pay as you go · <strong className="text-foreground">{formatUsd(perShot)} per shot</strong> on {VIDEO_PAYGO_ENGINES[engine].label} · one tap, or check every step yourself · failed shots refunded
         </p>
         <details className="mx-auto mt-3 max-w-lg rounded-2xl bg-white/70 p-3 text-left text-xs text-muted">
           <summary className="cursor-pointer text-center font-semibold text-purple">🧸 New here? How to make a film in 6 easy steps</summary>
+          <p className="mt-2 rounded-xl bg-purple/10 p-2 text-foreground">
+            <strong>In a hurry?</strong> Type one sentence and press <strong>🎬 Just make it</strong>. That&apos;s all. Lucy does every step below for you.
+          </p>
+          <p className="mt-2">Want to choose things yourself? Here are the steps:</p>
           <ol className="mt-2 flex flex-col gap-1.5">
             <li><strong className="text-foreground">1. ✏️ Say your idea.</strong> One sentence is fine: &quot;My dog surfing at sunset&quot;.</li>
-            <li><strong className="text-foreground">2. 📸 Add photos (only if it must be a real person, thing or place).</strong> For a person, one clear face photo, then tap <em>Make my character sheet</em>. Lucy draws them from every side.</li>
+            <li><strong className="text-foreground">2. 📸 Add photos (only if it must be a real person, thing or place).</strong> For a person, one clear face photo is enough - Lucy makes the character sheet from it (every side). No photo? Lucy invents the person and makes their sheet too.</li>
             <li><strong className="text-foreground">3. 🪄 Press &quot;Plan my film&quot;.</strong> Free. Lucy writes every shot for you.</li>
             <li><strong className="text-foreground">4. 👀 Read the plan.</strong> Don&apos;t like something? Type the change in plain words, like &quot;make it night&quot;, and press Apply.</li>
             <li><strong className="text-foreground">5. 🖼️ Press &quot;Draw my storyboard&quot;.</strong> Lucy draws a picture of every shot. Redraw any picture up to 5 times. Nothing is filmed yet.</li>
@@ -397,13 +441,29 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
           </p>
         </details>
 
+        {!filmId && (
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={makeItNow}
+              disabled={planning || creating || idea.trim().length < 3 || isUploading(photos)}
+              className="w-full rounded-2xl bg-purple py-4 text-base font-extrabold text-white shadow-soft disabled:opacity-50"
+            >
+              {planning || creating ? "Lucy is on it…" : `🎬 Just make it - ${formatUsd(perShot * (plan?.shots.length ?? shotCount))}`}
+            </button>
+            <p className="text-center text-[11px] text-muted">
+              Lucy decides everything - story, cast, character sheet, shots, camera, light, sound - and films it. No more choices. About 5-10 minutes.
+            </p>
+          </div>
+        )}
+
         <button
           type="button"
-          onClick={planIt}
+          onClick={() => planIt()}
           disabled={planning || idea.trim().length < 3}
           className="w-full rounded-2xl border-2 border-purple bg-white py-3 text-sm font-bold text-purple shadow-soft disabled:opacity-50"
         >
-          {planning ? "Lucy is planning your film…" : plan ? "Re-plan from scratch (free)" : "Plan my film - free"}
+          {planning ? "Lucy is planning your film…" : plan ? "Re-plan from scratch (free)" : "Or plan it first and check every step (free)"}
         </button>
 
         {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
@@ -572,8 +632,8 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
             {film.status === "cancelled" && <p className="text-sm text-foreground">Cancelled - your credit has been refunded.</p>}
             {producing && (
               <p className="text-sm text-foreground">
-                {film.status === "anchor" ? "Setting up your cast, location and light…" : film.status === "frames" ? "Drawing your storyboard frames…" : film.status === "stitching" ? "Joining your shots into one film…" : `Filming - ${doneShots.length} of ${film.shots.length} shots done…`}{" "}
-                <span className="text-muted">(usually 2-5 minutes)</span>
+                {film.status === "anchor" && film.casting ? "Making your character sheet (every angle of your person)…" : film.status === "anchor" ? "Setting up your cast, location and light…" : film.status === "frames" ? "Drawing your storyboard frames…" : film.status === "stitching" ? "Joining your shots into one film…" : `Filming - ${doneShots.length} of ${film.shots.length} shots done…`}{" "}
+                <span className="text-muted">({film.autoApprove ? "about 5-10 minutes - you can leave this tab open and come back" : "usually 2-5 minutes"})</span>
               </p>
             )}
             {film.status === "completed" && (
@@ -581,6 +641,15 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
                 <p className="text-sm font-bold text-foreground">Your film is ready 🎬</p>
                 {film.finalVideoUrl && <video src={film.finalVideoUrl} controls playsInline className="w-full rounded-xl" />}
                 {film.error && <p className="text-xs text-muted">{film.error}</p>}
+                {!castId && !castSaved && (film.characterPhotos?.length ?? 0) > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white/70 p-2">
+                    <span className="text-[11px] font-semibold text-muted">Love this character? Save them ({film.characterPhotos?.length} photos) for your next film:</span>
+                    <input className={`${inputCls} w-32`} placeholder="Name" value={saveCastName} onChange={(e) => setSaveCastName(e.target.value)} />
+                    <button type="button" disabled={!saveCastName.trim() || busy === "saveCast"} onClick={saveLucysCast} className="rounded-xl bg-purple/10 px-3 py-1.5 text-xs font-bold text-purple disabled:opacity-50">
+                      {busy === "saveCast" ? "Saving…" : "Save to Your cast"}
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2 text-xs">
                   {film.finalVideoUrl && <a href={film.finalVideoUrl} download className="rounded-full bg-purple px-3 py-1.5 font-bold text-white">Download film</a>}
                   {doneShots.length > 0 && (

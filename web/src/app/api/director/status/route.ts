@@ -4,6 +4,7 @@ import { getDirectorFilm, initSchema } from "@/lib/db";
 import { publicJson } from "@/lib/mediaProxy";
 import { advanceFilm } from "@/lib/director/pipeline";
 import { MAX_REDRAWS, walkawayKeepCents } from "@/lib/director/filmAccess";
+import { refList } from "@/lib/director/refs";
 
 export const maxDuration = 60;
 
@@ -23,6 +24,9 @@ export async function GET(req: NextRequest) {
       error: fresh.error,
       finalVideoUrl: fresh.final_video_url,
       anchorUrl: fresh.anchor_url,
+      casting: fresh.status === "anchor" && fresh.cast_status !== "done",
+      autoApprove: fresh.auto_approve,
+      characterPhotos: refList(fresh.refs, "character"),
       plan: fresh.plan,
       revisionsUsed: fresh.revisions_used,
       maxRevisions: MAX_REDRAWS,

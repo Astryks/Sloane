@@ -81,3 +81,24 @@ export function sheetAnglePrompt(angleId: SheetAngleId, description: string): st
     .filter(Boolean)
     .join(" ");
 }
+
+// Lucy makes the character sheet herself for every film with a person in it
+// (2026-09-27): no photo -> a face portrait from the plan's description,
+// then these angles; one or two photos -> just these angles. Three angles
+// cover what films actually show (both three-quarters + full body) for
+// ~3 Google images per film.
+export const AUTO_CAST_ANGLES: SheetAngleId[] = ["left34", "right34", "full"];
+/** Customers who already added this many character photos have their own sheet. */
+export const AUTO_CAST_MAX_EXISTING = 2;
+
+export function characterFromTextPrompt(character: string, wardrobe: string): string {
+  return [
+    "Create ONE photorealistic head-and-shoulders portrait photograph of an original person (not a celebrity) for a film's character reference sheet.",
+    `The person: ${character.trim().slice(0, 400)}.`,
+    wardrobe ? `Wearing: ${wardrobe.trim().slice(0, 200)}.` : "",
+    "Facing the camera straight on, relaxed natural expression. Plain light-grey studio background, soft even front light.",
+    "Real skin texture with pores and fine detail, natural imperfections, sharp focus. ONE single photo - never a collage or grid. No text, no watermark.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}

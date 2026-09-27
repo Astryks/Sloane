@@ -5,7 +5,7 @@ import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy"
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan } from "@/lib/director/plan";
-import { REF_LIMITS, buildRefs, type RefKind } from "@/lib/director/refs";
+import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, buildRefs, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
 import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
@@ -68,8 +68,13 @@ export async function POST(req: NextRequest) {
     }
     const links = parseRefLinks(form.get("refs"));
     if (saved && !links.character.length && !files.character) links.character = savedCharacterPhotos(saved).slice(0, REF_LIMITS.character);
+    // Lucy makes the character sheet herself when there's a person and the
+    // customer hasn't already given several angles.
+    const characterPhotos = links.character.length + (files.character ? 1 : 0);
+    const autoCast = !!plan.character && characterPhotos <= AUTO_CAST_MAX_EXISTING;
+    const autoApprove = String(form.get("autoApprove") ?? "") === "1";
     const refFlags = {
-      character: links.character.length > 0 || !!files.character,
+      character: characterPhotos > 0,
       product: links.product.length > 0 || !!files.product,
       location: links.location.length > 0 || !!files.location,
     };
@@ -101,9 +106,11 @@ export async function POST(req: NextRequest) {
         engine,
         refs: buildRefs(links),
         totalCents,
+        autoApprove,
+        castStatus: autoCast ? "pending" : "done",
         shots: plan.shots.map((_, i) => ({
           prompt: compileShotPrompt(plan, i, refFlags, { nativeAudio }),
-          keyframePrompt: compileKeyframePrompt(plan, i, refFlags),
+          keyframePrompt: compileKeyframePrompt(plan, i, { ...refFlags, character: refFlags.character || autoCast }),
           priceCents: perShot,
         })),
       });

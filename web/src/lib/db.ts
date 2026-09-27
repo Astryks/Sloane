@@ -624,6 +624,10 @@ async function runSchemaMigrations() {
   // any video is filmed; up to 5 redraws per film.
   await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS revisions_used INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
+  // One-tap films skip the storyboard review; cast_status tracks Lucy making the
+  // character sheet herself ('done' for rows made before this existed).
+  await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS auto_approve BOOLEAN NOT NULL DEFAULT false`;
+  await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS cast_status TEXT NOT NULL DEFAULT 'done'`;
   await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS redraw_from_url TEXT`;
   // Character library (2026-09-27): save a cast member once, reuse in any film.
   await sql`
@@ -2359,6 +2363,8 @@ export type DirectorFilmRow = {
   refs: DirectorRefs;
   status: "anchor" | "frames" | "review" | "shots" | "stitching" | "completed" | "failed" | "cancelled";
   revisions_used: number;
+  auto_approve: boolean;
+  cast_status: "pending" | "face" | "done";
   refunded_cents: number;
   total_cents: number;
   anchor_request_id: string | null;
@@ -2401,11 +2407,13 @@ export async function createDirectorFilm(params: {
   engine: string;
   refs: DirectorRefs;
   totalCents: number;
+  autoApprove?: boolean;
+  castStatus?: "pending" | "done";
   shots: Array<{ prompt: string; keyframePrompt: string; priceCents: number }>;
 }): Promise<string> {
   const rows = await sql`
-    INSERT INTO director_films (user_id, idea, plan, engine, refs, total_cents)
-    VALUES (${params.userId}, ${params.idea}, ${JSON.stringify(params.plan)}::jsonb, ${params.engine}, ${JSON.stringify(params.refs)}::jsonb, ${params.totalCents})
+    INSERT INTO director_films (user_id, idea, plan, engine, refs, total_cents, auto_approve, cast_status)
+    VALUES (${params.userId}, ${params.idea}, ${JSON.stringify(params.plan)}::jsonb, ${params.engine}, ${JSON.stringify(params.refs)}::jsonb, ${params.totalCents}, ${params.autoApprove ?? false}, ${params.castStatus ?? "done"})
     RETURNING id
   `;
   const filmId = rows[0].id as string;
@@ -2439,6 +2447,10 @@ export async function claimDirectorFilm(filmId: string): Promise<boolean> {
     RETURNING id
   `;
   return rows.length > 0;
+}
+/** Lucy's own character sheet: store the new photos and move the cast step on (releases the claim). */
+export async function setDirectorFilmCast(filmId: string, refs: DirectorRefs, castStatus: "face" | "done") {
+  await sql`UPDATE director_films SET refs = ${JSON.stringify(refs)}::jsonb, cast_status = ${castStatus}, claimed_at = NULL WHERE id = ${filmId}`;
 }
 export async function releaseDirectorFilm(filmId: string) {
   await sql`UPDATE director_films SET claimed_at = NULL WHERE id = ${filmId}`;

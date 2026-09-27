@@ -26,6 +26,7 @@ import {
   getDirectorShots,
   refundVideoCredit,
   releaseDirectorFilm,
+  setDirectorFilmCast,
   updateDirectorFilm,
   updateDirectorShot,
   type DirectorFilmRow,
@@ -36,7 +37,7 @@ import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl,
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import type { DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
-import { orderedRefs, refList } from "./refs";
+import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt } from "./refs";
 import { refFlags } from "./filmAccess";
 
 // Marker stored as the request id when a still was made synchronously on
@@ -78,6 +79,39 @@ async function pollImage(requestId: string, hadRefs: boolean): Promise<{ done: b
   if (status === "COMPLETED") return { done: true, url: firstImageUrl(await getFalJobResult(endpoint, requestId)) };
   if (status === "FAILED") return { done: true, url: null };
   return { done: false, url: null };
+}
+
+/**
+ * Lucy's own character sheet, before the master still (cast_status):
+ * pending -> (no photo) a face portrait from the plan -> face -> three more
+ * angles from it -> done. With one or two customer photos it goes straight
+ * to the angles. Any failure just moves on - the film never waits on this.
+ * Returns true while the cast step is still running.
+ */
+async function advanceCast(film: DirectorFilmRow, plan: DirectorPlan): Promise<boolean> {
+  if (film.cast_status === "done") return false;
+  if (!(await claimDirectorFilm(film.id))) return true;
+  const lists = { character: refList(film.refs, "character"), product: refList(film.refs, "product"), location: refList(film.refs, "location") };
+  try {
+    if (!lists.character.length) {
+      const face = plan.character ? await generateImageOnVertex(characterFromTextPrompt(plan.character, plan.wardrobe), [], "3:4") : null;
+      if (!face) {
+        await setDirectorFilmCast(film.id, film.refs, "done");
+        return false;
+      }
+      await setDirectorFilmCast(film.id, buildRefs({ ...lists, character: [face] }), "face");
+      return true;
+    }
+    const angles = AUTO_CAST_ANGLES.slice(0, Math.max(0, REF_LIMITS.character - lists.character.length));
+    const about = [plan.character, plan.wardrobe ? `wearing ${plan.wardrobe}` : ""].filter(Boolean).join(", ");
+    const made = await Promise.all(angles.map((a) => generateImageOnVertex(sheetAnglePrompt(a, about), lists.character.slice(0, 4), "3:4")));
+    await setDirectorFilmCast(film.id, buildRefs({ ...lists, character: [...lists.character, ...made.filter((u): u is string => !!u)] }), "done");
+    return true;
+  } catch (err) {
+    console.error("[director] cast step failed - continuing without it", err);
+    await setDirectorFilmCast(film.id, film.refs, "done");
+    return false;
+  }
 }
 
 /** Master still: every character angle, then product, then location photos (max 14). */
@@ -217,6 +251,7 @@ async function advanceStitch(film: DirectorFilmRow, shots: DirectorShotRow[]) {
 export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRow[]> {
   const plan = film.plan as DirectorPlan;
   if (film.status === "anchor") {
+    if (await advanceCast(film, plan)) return getDirectorShots(film.id);
     await advanceAnchor(film, plan);
     return getDirectorShots(film.id);
   }
@@ -225,7 +260,8 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await Promise.all(shots.map((s) => advanceFrame(film, plan, s)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.keyframe_url || s.error === "frame")) {
-      await updateDirectorFilm(film.id, { status: "review" });
+      // One-tap films ("just make it") go straight to filming.
+      await updateDirectorFilm(film.id, { status: film.auto_approve ? "shots" : "review" });
     }
     return shots;
   }
