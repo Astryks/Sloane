@@ -82,6 +82,13 @@ import {
   type ModelArkEngine,
 } from "./modelArk";
 import { withModelArkBody } from "./videoInference";
+import { hasVertexCredentialsConfigured, vertexEndpointToken, VERTEX_VEO_FAST_MODEL, VERTEX_VEO_STANDARD_MODEL } from "./vertexVeo";
+
+// Veo goes direct to Google (Vertex AI) once GOOGLE_CLOUD_PROJECT + a
+// credential are set; until then it stays on the previous reseller path so
+// nothing breaks during the switch-over. Resolved at module load, same as
+// the ModelArk tokens.
+const VEO_ON_VERTEX = hasVertexCredentialsConfigured();
 
 export {
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
@@ -115,7 +122,7 @@ type VendorFields = {
   // VIDEO_PAYGO_RESOLUTION (MiniMax H3 Max uses "768P").
   falResolutionValue?: string;
   /** Which inference vendor runs this engine (server-only; never ship to client). */
-  inferenceProvider: "modelark" | "fal";
+  inferenceProvider: "modelark" | "fal" | "vertex";
 };
 
 // Seedance endpoints are resolved at module load from env (model IDs).
@@ -132,12 +139,32 @@ const VIDEO_PAYGO_VENDOR: Record<VideoEngine, VendorFields> = {
     falDurationValue: "8",
     inferenceProvider: "modelark",
   },
-  veo: {
-    falEndpoint: "fal-ai/veo3.1/fast",
-    falImageToVideoEndpoint: "fal-ai/veo3.1/fast/image-to-video",
-    falDurationValue: "8s",
-    inferenceProvider: "fal",
-  },
+  veo: VEO_ON_VERTEX
+    ? {
+        falEndpoint: vertexEndpointToken(VERTEX_VEO_FAST_MODEL),
+        falImageToVideoEndpoint: vertexEndpointToken(VERTEX_VEO_FAST_MODEL),
+        falDurationValue: "8s",
+        inferenceProvider: "vertex",
+      }
+    : {
+        falEndpoint: "fal-ai/veo3.1/fast",
+        falImageToVideoEndpoint: "fal-ai/veo3.1/fast/image-to-video",
+        falDurationValue: "8s",
+        inferenceProvider: "fal",
+      },
+  veo31: VEO_ON_VERTEX
+    ? {
+        falEndpoint: vertexEndpointToken(VERTEX_VEO_STANDARD_MODEL),
+        falImageToVideoEndpoint: vertexEndpointToken(VERTEX_VEO_STANDARD_MODEL),
+        falDurationValue: "4s",
+        inferenceProvider: "vertex",
+      }
+    : {
+        falEndpoint: "fal-ai/veo3.1",
+        falImageToVideoEndpoint: "fal-ai/veo3.1/image-to-video",
+        falDurationValue: "4s",
+        inferenceProvider: "fal",
+      },
   kling: {
     falEndpoint: "fal-ai/kling-video/v2.1/master/text-to-video",
     falImageToVideoEndpoint: "fal-ai/kling-video/v2.1/master/image-to-video",
@@ -219,6 +246,7 @@ export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
   seedance25: 2.13, // ModelArk 8s @ ~$0.231/s + 15%
   seedance: 1.10, // ModelArk Fast 8s @ ~$0.12/s + 15%
   veo: 1.38,
+  veo31: 1.84, // 4s x ~$0.40/s (Veo 3.1 standard w/ audio) + 15% buffer - profit ~$1.73 at $3.99
   kling: 1.61,
   klingv3: 2.254, // 10s @ $0.196/s (worst real tier, audio+voice) + 15% buffer - see VIDEO_PAYGO_ENGINES.klingv3
   minimax: 0.74,
@@ -254,6 +282,7 @@ function matchedDurationValue(engine: VideoEngine, audioSeconds: number | null, 
   const target = Math.min(def.durationSeconds, Math.max(min, desired));
   switch (engine) {
     case "veo":
+    case "veo31":
       return target <= 4 ? "4s" : target <= 6 ? "6s" : "8s";
     case "kling":
       return target <= 5 ? "5" : "10";
@@ -296,6 +325,7 @@ export function buildFalInput(
   const ratio = def.aspectRatioOptions?.includes(aspectRatio ?? "") ? aspectRatio! : undefined;
   switch (engine) {
     case "veo":
+    case "veo31":
       return {
         prompt,
         image_url: imageUrl ?? undefined,

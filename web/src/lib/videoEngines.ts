@@ -5,7 +5,7 @@
 // endpoint ever reaches a visitor - including the page's JS bundle, where
 // object keys and string literals survive minification.
 
-export type VideoEngine = "seedance25" | "seedance" | "veo" | "kling" | "klingv3" | "minimax" | "grok";
+export type VideoEngine = "seedance25" | "seedance" | "veo" | "veo31" | "kling" | "klingv3" | "minimax" | "grok";
 
 // Optional prompt-rewrite step - see promptDirector.ts (server-only).
 export const PROMPT_DIRECTOR_LABEL = "GPT-6 Astra";
@@ -65,6 +65,20 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     supportsNativeAudio: true, // generate_audio confirmed in production
     aspectRatioOptions: ["16:9", "9:16"],
     supportsDurationChoice: true,
+    supportsNegativePrompt: true,
+  },
+  // Veo 3.1 standard (2026-09-27): Google's higher-quality tier, direct on
+  // Vertex AI. ~$0.40/s with audio vs Fast's ~$0.15/s, so it's capped at 4s
+  // to keep the $1/video profit floor at the flat $3.99 (8s would lose
+  // money) - see VIDEO_PAYGO_ENGINE_COST_USD in videoPaygo.ts.
+  veo31: {
+    label: "Veo 3.1",
+    versionLabel: "Veo 3.1",
+    durationSeconds: 4,
+    popular: false,
+    pickerNote: "4s clip · top-quality tier, native voice",
+    supportsNativeAudio: true,
+    aspectRatioOptions: ["16:9", "9:16"],
     supportsNegativePrompt: true,
   },
   kling: {
@@ -194,6 +208,7 @@ export function videoEnginesSoundBlurb(): string {
 export const VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS: Record<VideoEngine, number> = {
   seedance25: 4,
   veo: 4,
+  veo31: 4,
   kling: 5,
   // Real confirmed enum floor ("3"-"15") - but capped here at the same 10s
   // used as this engine's priced default (VIDEO_PAYGO_ENGINE_COST_USD),

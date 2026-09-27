@@ -5,6 +5,7 @@
  * Call sites keep storing a single "endpoint" string on the job row:
  * - fal: "bytedance/..." / "fal-ai/..."
  * - ModelArk: "modelark:<dreamina-seedance-...>"
+ * - Vertex AI (Google, direct): "vertex:<veo-3.1-...>" - see vertexVeo.ts
  */
 
 import {
@@ -25,13 +26,28 @@ import {
   submitModelArkTask,
   type ModelArkJobStatus,
 } from "./modelArk";
+import {
+  buildVertexVeoBody,
+  getVertexVeoResult,
+  getVertexVeoStatus,
+  isVertexEndpoint,
+  submitVertexVeoJob,
+  vertexModelFromEndpoint,
+  vertexParamsFromFalShapedInput,
+  type VertexJobStatus,
+} from "./vertexVeo";
 
-export type VideoJobStatus = FalJobStatus | ModelArkJobStatus;
+export type VideoJobStatus = FalJobStatus | ModelArkJobStatus | VertexJobStatus;
 
 export async function submitVideoInferenceJob(
   endpoint: string,
   input: Record<string, unknown>,
 ): Promise<string> {
+  if (isVertexEndpoint(endpoint)) {
+    const falShaped = { ...input };
+    delete falShaped.__modelArkBody;
+    return submitVertexVeoJob(vertexModelFromEndpoint(endpoint), await buildVertexVeoBody(vertexParamsFromFalShapedInput(falShaped)));
+  }
   if (isModelArkEndpoint(endpoint)) {
     const model = modelArkModelIdFromEndpoint(endpoint);
     // Prefer a pre-built ModelArk body; otherwise adapt fal-shaped input.
@@ -82,6 +98,9 @@ function adaptFalShapedInputToModelArk(model: string, input: Record<string, unkn
 }
 
 export async function getVideoInferenceStatus(endpoint: string, requestId: string): Promise<VideoJobStatus> {
+  if (isVertexEndpoint(endpoint)) {
+    return getVertexVeoStatus(vertexModelFromEndpoint(endpoint), requestId);
+  }
   if (isModelArkEndpoint(endpoint)) {
     return getModelArkTaskStatus(requestId);
   }
@@ -92,6 +111,9 @@ export async function getVideoInferenceResult(
   endpoint: string,
   requestId: string,
 ): Promise<FalJobResult | Record<string, unknown>> {
+  if (isVertexEndpoint(endpoint)) {
+    return getVertexVeoResult(vertexModelFromEndpoint(endpoint), requestId);
+  }
   if (isModelArkEndpoint(endpoint)) {
     return getModelArkTaskResult(requestId);
   }
