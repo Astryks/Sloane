@@ -1,5 +1,13 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-27 (evening) - "Directed by Lucy" live: intent-aware multi-shot films with storyboard approval
+
+- **What it is**: homepage generator now has "One video" / "🎬 Directed by Lucy". One idea (+ optional character/product/location photos) -> Gemini 3.8 Flash on Vertex plans goal (sell/story/explain/promote/entertain), style, one film look, per-shot setting/lighting, shot size/angle/one camera move, dialogue -> customer edits (fields or plain-words revisions, free, 20/day/visitor) -> pays -> master still + per-shot storyboard frames -> **review** (5 redraws/film, text edits, cancel) -> approve -> one model films every shot from its frame -> stitched film with audio. Full spec: `docs/lucylabs_orchestration_engine.md` (also copied over the user's `~/Downloads/lucylabs_orchestration_engine.md`; original kept as `...v2-original.md`).
+- **Pricing**: per shot = tier price + $1 direction fee ($3.99 standard / $4.99 premium). Worst-case filmed profit $1.67/shot (intl card, all redraws); walk-away keeps $1/shot, min $2.50 (>= $0.44/shot). Exact-amount Stripe checkout for films.
+- **Verified live**: planner outputs for ad/UGC/cinematic ideas; full UGC film run incl. one redraw and approval; homepage "Directed by Lucy vs. a plain prompt" section with the real violinist comparison (files in `web/public/examples/`). Veo 3.1 Lite added (standard tier, ~$0.46 cost).
+- **Fixes from live testing**: Veo `personGeneration` now `allow_all` (children were silently filtered; auto-fallback to adults-only), Veo filter reasons logged; storyboard prompts forbid collages/grids.
+- **Known limits / next**: no colour-match pass at stitch yet; frames via Nano Banana Pro (reseller) - consider Google's image model; status polls are ~15-20s each (initSchema on every request - worth caching); character library + trained identity on the roadmap.
+
 ## Latest update, 2026-09-27 - Veo direct on Google (live + verified), two price tiers, Seedance fallback, startup credit applications
 
 - **Veo -> Google Vertex AI directly (LIVE, verified)**: first production Veo 3.1 Fast clip generated end to end on lucylabs.app (8s, 1280x720, native audio, served from `/api/media/...`, stored in Vercel Blob `lucy-generations`, billed to Google credits). Code: `web/src/lib/vertexVeo.ts` (routing token `vertex:<model>`), keyless auth = Vercel OIDC -> Google Workload Identity Federation (org policy blocks SA key files and SA-bound API keys).
