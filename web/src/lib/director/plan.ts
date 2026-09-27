@@ -198,6 +198,9 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
   const tmpl = TEMPLATES[style];
   const seconds = secondsFor(style, emotion);
   const want = Math.min(MAX_SHOTS, Math.max(MIN_SHOTS, inputs.shotCount ?? (shotsRaw.length || DEFAULT_SHOTS)));
+  // No person in the film (e.g. a pure product ad): never invent a human
+  // micro-expression - the video model would add a person to perform it.
+  const hasPerson = !!clampText(r.character, 400) || !!inputs.hasCharacterPhoto;
   const shots: DirectorShot[] = [];
   for (let i = 0; i < want; i++) {
     const s = (shotsRaw[i] && typeof shotsRaw[i] === "object" ? shotsRaw[i] : {}) as Record<string, unknown>;
@@ -211,7 +214,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       angle: pick(s.angle, ALL_ANGLE_IDS, t.angle),
       move: pick(s.move, ALL_MOVE_IDS, t.move),
       action: clampText(s.action, 400, clampText(r.logline, 400, "the scene unfolds")),
-      expression: clampText(s.expression, 200, EMOTIONS[emotion].expression),
+      expression: hasPerson ? clampText(s.expression, 200, EMOTIONS[emotion].expression) : "",
       dialogue: clampText(s.dialogue, 160),
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
       durationSeconds: Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds,
@@ -276,6 +279,7 @@ Rules:
 - "action": what physically happens, in plain visual language. "expression": a physical micro-expression (a swallow, a glance down), never just the feeling's name.
 - "dialogue": short spoken lines only where they fit (UGC and ads usually speak; cinematic often silent). Max ~15 words per shot. Original lines only.
 - durationSeconds per shot: commercial 2-4, ugc 4-6, cinematic 5-8, music_video 2-4, documentary 5-8.
+- If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression" and every "dialogue" empty, never describe faces, hands or people in "action", and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
 - If a character/product/location photo is provided, refer to it as "the exact person/product/location from the reference photo" and only add details that don't contradict it.
 
 Reply with JSON only:

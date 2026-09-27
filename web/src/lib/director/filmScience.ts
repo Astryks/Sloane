@@ -279,6 +279,37 @@ export function realismForShot(size: ShotSizeId): string {
   }
 }
 
+// ---- Films with no person (product ads, landscapes, objects) ----
+// 2026-09-27: the person-first wording above ("close-up on the face",
+// "tightening on their face as they speak", skin/eyes realism) made video
+// models invent a person in pure product ads. Films with no character use
+// these object-first versions instead.
+
+export const OBJECT_SHOT_SIZES: Record<ShotSizeId, string> = {
+  extreme_wide: "extreme wide establishing shot, the subject small within a vast environment",
+  wide: "wide shot showing the whole scene with the subject in its setting",
+  medium_wide: "medium-wide shot of the subject and its immediate surroundings",
+  medium: "medium shot with the subject filling about half the frame",
+  medium_close_up: "medium close-up with the subject filling most of the frame",
+  close_up: "close-up on the subject, filling the frame",
+  extreme_close_up: "extreme macro close-up on a single detail of the subject - its texture, an edge or the label",
+  insert: "insert shot of one small detail",
+};
+
+export const OBJECT_MOVE_INSTRUCTIONS: Partial<Record<CameraMoveId, string>> = {
+  slow_push_in: "slow, smooth dolly push-in toward the subject on a track, gradually tightening the frame",
+  tracking_follow: "camera tracks smoothly alongside the subject, steady gimbal movement",
+  side_tracking: "camera trucks sideways past the subject, the background sliding past behind it",
+  leading_shot: "camera glides slowly backward, revealing more of the subject and its surroundings",
+  tension_zoom: "slow, creeping zoom in on the subject, tightening the frame",
+  handheld_selfie: "gentle handheld camera with a natural small wobble, framing the subject",
+  over_the_shoulder: "framing past a soft out-of-focus foreground element toward the subject",
+  pov: "first-person point-of-view moving slowly toward the subject",
+};
+
+export const OBJECT_REALISM =
+  "true-to-life materials - accurate reflections and refraction in glass and metal, fine surface texture and grain, crisp clean edges, physically correct caustics, shadows and highlights, no CGI or plastic look; physically plausible motion with weight, natural motion blur; no people, no hands, no faces anywhere in frame";
+
 // ---- Anti-green-screen embedding rules ----
 // Used whenever a character is placed into a location (uploaded photos or
 // not) - the difference between "composited" and "photographed there".

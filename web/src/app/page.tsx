@@ -6,6 +6,7 @@ import { PromptGuideSection } from "@/components/PromptGuide";
 import Link from "next/link";
 import { LogoMark } from "@/components/LogoMark";
 import { DirectorStudio } from "@/components/DirectorStudio";
+import { DirectorRecipes, type DirectorRecipe } from "@/components/DirectorRecipes";
 import { RecordOrUpload } from "@/components/RecordOrUpload";
 import { ShareButtons } from "@/components/ShareButtons";
 import { VoicePicker, PRESET_VOICES } from "@/components/VoicePicker";
@@ -1944,6 +1945,7 @@ function ModeSwitch({ mode, onChange }: { mode: "single" | "director"; onChange:
 
 export default function Home() {
   const [mode, setMode] = useState<"single" | "director">("single");
+  const [recipe, setRecipe] = useState<(DirectorRecipe & { v: number }) | null>(null);
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1981,13 +1983,20 @@ export default function Home() {
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
 
         {mode === "director" ? (
-          <DirectorStudio header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
+          <DirectorStudio header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} recipe={recipe} />
         ) : (
           <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
         )}
         <LucyVsPlainSection
           onTry={() => {
             setMode("director");
+            document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
+          }}
+        />
+        <DirectorRecipes
+          onUse={(r) => {
+            setMode("director");
+            setRecipe((prev) => ({ ...r, v: (prev?.v ?? 0) + 1 }));
             document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
           }}
         />

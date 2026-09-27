@@ -7,7 +7,18 @@
 // shot setting/lighting may change (indoor vs outdoor) but always inside the
 // film's single grade + palette family, so it plays as one film.
 
-import { ANGLES as ANGLE_NOTES, CAMERA_MOVES, EMBEDDING_RULES, PRODUCTION_STYLES, SHOT_SIZES, realismForShot } from "./filmScience";
+import {
+  ANGLES as ANGLE_NOTES,
+  CAMERA_MOVES,
+  EMBEDDING_RULES,
+  OBJECT_MOVE_INSTRUCTIONS,
+  OBJECT_REALISM,
+  OBJECT_SHOT_SIZES,
+  PRODUCTION_STYLES,
+  SHOT_SIZES,
+  realismForShot,
+  type ShotSizeId,
+} from "./filmScience";
 import type { DirectorPlan, DirectorShot } from "./plan";
 
 // Angle notes carry "physical description - why a director uses it"; models
@@ -15,6 +26,18 @@ import type { DirectorPlan, DirectorShot } from "./plan";
 const ANGLES = Object.fromEntries(Object.entries(ANGLE_NOTES).map(([k, v]) => [k, v.split(" - ")[0]])) as typeof ANGLE_NOTES;
 
 export type RefFlags = { character: boolean; product: boolean; location: boolean };
+
+// Films without a person get object-first framing, moves and realism, so the
+// video model never adds a presenter nobody asked for (2026-09-27).
+function hasPerson(plan: DirectorPlan, refs: RefFlags): boolean {
+  return !!plan.character || refs.character;
+}
+function sizeText(plan: DirectorPlan, refs: RefFlags, size: ShotSizeId): string {
+  return hasPerson(plan, refs) ? SHOT_SIZES[size].instruction : OBJECT_SHOT_SIZES[size];
+}
+function realismText(plan: DirectorPlan, refs: RefFlags, size: ShotSizeId): string {
+  return hasPerson(plan, refs) ? realismForShot(size) : OBJECT_REALISM;
+}
 
 function sentence(s: string): string {
   const t = s.trim().replace(/\s+/g, " ");
@@ -53,23 +76,25 @@ function lookLine(plan: DirectorPlan, shot: DirectorShot): string {
 export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: RefFlags, opts: { nativeAudio: boolean }): string {
   const shot = plan.shots[shotIndex];
   const style = PRODUCTION_STYLES[plan.style];
-  const move = CAMERA_MOVES[shot.move];
+  const person = hasPerson(plan, refs);
+  const moveText = (!person && OBJECT_MOVE_INSTRUCTIONS[shot.move]) || CAMERA_MOVES[shot.move].instruction;
   const parts = [
-    sentence(`${SHOT_SIZES[shot.size].instruction}, ${ANGLES[shot.angle]}, ${SHOT_SIZES[shot.size].lensHint}`),
-    sentence(`Camera: ${move.instruction} - one continuous move only`),
+    sentence(`${sizeText(plan, refs, shot.size)}, ${ANGLES[shot.angle]}, ${SHOT_SIZES[shot.size].lensHint}`),
+    sentence(`Camera: ${moveText} - one continuous move only`),
     subjectLine(plan, refs),
     productLine(plan, refs),
     sentence(shot.action),
-    shot.expression ? sentence(`Performance: ${shot.expression}`) : "",
+    person && shot.expression ? sentence(`Performance: ${shot.expression}`) : "",
     opts.nativeAudio && shot.dialogue ? sentence(`They say, clearly and naturally: "${shot.dialogue.replace(/"/g, "'")}"`) : "",
     opts.nativeAudio && shot.sound ? sentence(`Sound: ${shot.sound}`) : "",
     lookLine(plan, shot),
     (refs.character || plan.character) && (refs.location || plan.location || shot.setting)
       ? sentence(`Physically grounded in the scene: ${EMBEDDING_RULES[0]}; ${EMBEDDING_RULES[1]}`)
       : "",
-    sentence(`Photoreal detail: ${realismForShot(shot.size)}`),
+    sentence(`Photoreal detail: ${realismText(plan, refs, shot.size)}`),
     sentence(style.texture),
-    "No subtitles, no captions, no watermark, no on-screen text.",
+    // "TikTok/Reel ad" ideas pulled in fake social captions (garbled text) - be explicit.
+    "Clean footage with no text of any kind added: no subtitles, no TikTok-style captions, no titles, no lower-thirds, no watermark, no logos - only text that is physically printed on the product itself.",
   ];
   return parts.filter(Boolean).join(" ").slice(0, 2400);
 }
@@ -86,15 +111,20 @@ export function compileAnchorPrompt(plan: DirectorPlan, refs: RefFlags): string 
     refs.location ? "Place them in the location from the location reference photos - keep the architecture and details exactly." : "",
   ].filter(Boolean);
   return [
-    "Create ONE hyper-realistic cinematic still photograph, as if shot on set, that establishes this film's character, place and light.",
+    hasPerson(plan, refs)
+      ? "Create ONE hyper-realistic cinematic still photograph, as if shot on set, that establishes this film's character, place and light."
+      : "Create ONE hyper-realistic cinematic still photograph, as if shot on set, that establishes this film's subject, place and light. No people, no hands, no faces.",
     ...refNotes,
     subjectLine(plan, refs),
     productLine(plan, refs),
     plan.location ? sentence(`Location: ${plan.location}`) : "",
     sentence(`Light: ${plan.look.timeOfDay}, ${plan.look.keyLight}; palette ${plan.look.palette}; ${plan.look.grade}`),
-    sentence(`Integration: ${EMBEDDING_RULES.slice(0, 3).join("; ")}`),
-    sentence(`Detail: ${realismForShot("medium")}`),
-    "Medium-wide framing, natural pose. ONE single photograph filling the whole frame - never a collage, grid, panels or split screen. No text, no watermark.",
+    hasPerson(plan, refs)
+      ? sentence(`Integration: ${EMBEDDING_RULES.slice(0, 3).join("; ")}`)
+      : sentence("Integration: the subject physically sits in the scene - a real contact shadow where it touches the surface, its reflection in glossy surfaces, the scene's light and colour on its edges, matching perspective and lens blur"),
+    sentence(`Detail: ${realismText(plan, refs, "medium")}`),
+    hasPerson(plan, refs) ? "Medium-wide framing, natural pose." : "Medium-wide framing.",
+    "ONE single photograph filling the whole frame - never a collage, grid, panels or split screen. No text, no watermark.",
   ]
     .filter(Boolean)
     .join(" ")
@@ -104,16 +134,19 @@ export function compileAnchorPrompt(plan: DirectorPlan, refs: RefFlags): string 
 /** Per-shot keyframe: an edit of the anchor still into this shot's framing. */
 export function compileKeyframePrompt(plan: DirectorPlan, shotIndex: number, refs: RefFlags): string {
   const shot = plan.shots[shotIndex];
+  const person = hasPerson(plan, refs);
   return [
-    "Using the first image as the reference, create a new still frame from the SAME film: same person (identical face, hair and wardrobe), same product, same colour grade and film look.",
+    person
+      ? "Using the first image as the reference, create a new still frame from the SAME film: same person (identical face, hair and wardrobe), same product, same colour grade and film look."
+      : "Using the first image as the reference, create a new still frame from the SAME film: same product and objects, same set, same colour grade and film look. No people, no hands.",
     refs.product ? "Keep the product exactly as in the product reference photos - shape, colours, label and logo unchanged." : "",
     refs.character ? "The other reference photos show the same person from different angles - use them so the face stays identical from this new camera angle." : "",
-    sentence(`New camera setup: ${SHOT_SIZES[shot.size].instruction}, ${ANGLES[shot.angle]}`),
+    sentence(`New camera setup: ${sizeText(plan, refs, shot.size)}, ${ANGLES[shot.angle]}`),
     shot.setting ? sentence(`Setting for this shot: ${shot.setting}`) : "",
     shot.lighting ? sentence(`Light for this shot: ${shot.lighting}, staying within the same grade (${plan.look.grade})`) : "Keep the lighting identical to the reference.",
     sentence(`Moment: ${shot.action}`),
-    shot.expression ? sentence(`Expression: ${shot.expression}`) : "",
-    sentence(`Detail: ${realismForShot(shot.size)}`),
+    person && shot.expression ? sentence(`Expression: ${shot.expression}`) : "",
+    sentence(`Detail: ${realismText(plan, refs, shot.size)}`),
     "ONE single photograph filling the whole frame - never a collage, grid, triptych, panels or split screen. No text, no watermark.",
   ]
     .filter(Boolean)

@@ -25,6 +25,7 @@ import {
   formatUsd,
   type VideoEngine,
 } from "@/lib/videoEngines";
+import type { DirectorRecipe } from "./DirectorRecipes";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type RefPhotos } from "./DirectorPhotos";
 
 const DRAFT_KEY = "lucy_director_draft";
@@ -56,7 +57,15 @@ const DONE_STATES = ["completed", "failed", "cancelled"];
 
 const inputCls = "w-full rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
 
-export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNode; modeSwitch?: React.ReactNode }) {
+export function DirectorStudio({
+  header,
+  modeSwitch,
+  recipe,
+}: {
+  header?: React.ReactNode;
+  modeSwitch?: React.ReactNode;
+  recipe?: (DirectorRecipe & { v: number }) | null;
+}) {
   const [idea, setIdea] = useState("");
   const [style, setStyle] = useState<ProductionStyleId | "auto">("auto");
   const [shotCount, setShotCount] = useState(DEFAULT_SHOTS);
@@ -76,6 +85,18 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [castId, setCastId] = useState<string | null>(null);
+  // "Use this recipe" from the examples gallery fills the form (new version = new tap).
+  useEffect(() => {
+    if (!recipe || filmId) return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setIdea(recipe.idea);
+    setStyle(recipe.style);
+    setAspect(recipe.aspect);
+    setPlan(null);
+    setNotice("Recipe loaded - change the words to your own, then press 🎬 Just make it (or plan it first).");
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipe?.v]);
   const autoCreateRef = useRef(false);
   const autoApproveRef = useRef(false);
   const [saveCastName, setSaveCastName] = useState("");
