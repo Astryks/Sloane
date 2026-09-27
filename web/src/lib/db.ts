@@ -561,6 +561,58 @@ export async function initSchema() {
   await sql`ALTER TABLE video_credits ADD COLUMN IF NOT EXISTS balance_cents INTEGER NOT NULL DEFAULT 0`;
   await sql`UPDATE video_credits SET balance_cents = balance_cents + balance * 399, balance = 0, updated_at = now() WHERE balance > 0`;
   await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS price_cents INTEGER`;
+  // "Directed by Lucy" multi-shot films (2026-09-27) - see lib/director/.
+  // A film is planned (plan jsonb), charged once up front (total_cents), then
+  // advanced by /api/director/status: anchor still -> per-shot keyframes ->
+  // per-shot videos -> stitch. Failed shots refund their own price_cents.
+  await sql`
+    CREATE TABLE IF NOT EXISTS director_films (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      idea TEXT NOT NULL,
+      plan JSONB NOT NULL,
+      engine TEXT NOT NULL,
+      refs JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'anchor',
+      total_cents INTEGER NOT NULL,
+      anchor_request_id TEXT,
+      anchor_url TEXT,
+      stitch_request_id TEXT,
+      final_video_url TEXT,
+      error TEXT,
+      claimed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS director_shots (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      film_id UUID NOT NULL REFERENCES director_films(id) ON DELETE CASCADE,
+      idx INTEGER NOT NULL,
+      prompt TEXT NOT NULL,
+      keyframe_prompt TEXT NOT NULL,
+      price_cents INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      keyframe_request_id TEXT,
+      keyframe_url TEXT,
+      video_endpoint TEXT,
+      video_request_id TEXT,
+      video_url TEXT,
+      error TEXT,
+      claimed_at TIMESTAMPTZ,
+      UNIQUE (film_id, idx)
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_director_films_user ON director_films(user_id)`;
+  // Free storyboard planning is rate-limited per visitor (session or IP).
+  await sql`
+    CREATE TABLE IF NOT EXISTS director_plan_log (
+      id BIGSERIAL PRIMARY KEY,
+      visitor TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_director_plan_log_visitor ON director_plan_log(visitor, created_at)`;
   // Vendor treasury ledger (2026-09-23): when Stripe grants still/video
   // credits, record revenue vs estimated Fal COGS so Lucy can later buy
   // matching Fal prepaid credits and keep the margin. Idempotent on
@@ -2254,6 +2306,153 @@ export async function claimVideoPaygoJobForMergeSubmit(jobId: string): Promise<b
   const rows = await sql`
     UPDATE video_paygo_jobs SET merge_request_id = 'CLAIMING', merge_claimed_at = now()
     WHERE id = ${jobId} AND (merge_request_id IS NULL OR (merge_request_id = 'CLAIMING' AND merge_claimed_at < now() - interval '10 minutes'))
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+
+// --- "Directed by Lucy" films (2026-09-27) ---
+
+export type DirectorFilmRow = {
+  id: string;
+  user_id: string;
+  idea: string;
+  plan: unknown;
+  engine: string;
+  refs: { character?: string; product?: string; location?: string };
+  status: "anchor" | "shots" | "stitching" | "completed" | "failed";
+  total_cents: number;
+  anchor_request_id: string | null;
+  anchor_url: string | null;
+  stitch_request_id: string | null;
+  final_video_url: string | null;
+  error: string | null;
+  created_at: string;
+};
+
+export type DirectorShotRow = {
+  id: string;
+  film_id: string;
+  idx: number;
+  prompt: string;
+  keyframe_prompt: string;
+  price_cents: number;
+  status: "pending" | "keyframe" | "video" | "completed" | "failed";
+  keyframe_request_id: string | null;
+  keyframe_url: string | null;
+  video_endpoint: string | null;
+  video_request_id: string | null;
+  video_url: string | null;
+  error: string | null;
+};
+
+/** Counts this visitor's plans in the last 24h, then logs one more if under the cap. */
+export async function takeDirectorPlanSlot(visitor: string, dailyCap: number): Promise<boolean> {
+  const rows = await sql`SELECT count(*)::int AS n FROM director_plan_log WHERE visitor = ${visitor} AND created_at > now() - interval '24 hours'`;
+  if (Number(rows[0]?.n ?? 0) >= dailyCap) return false;
+  await sql`INSERT INTO director_plan_log (visitor) VALUES (${visitor})`;
+  return true;
+}
+
+export async function createDirectorFilm(params: {
+  userId: string;
+  idea: string;
+  plan: unknown;
+  engine: string;
+  refs: Record<string, string>;
+  totalCents: number;
+  shots: Array<{ prompt: string; keyframePrompt: string; priceCents: number }>;
+}): Promise<string> {
+  const rows = await sql`
+    INSERT INTO director_films (user_id, idea, plan, engine, refs, total_cents)
+    VALUES (${params.userId}, ${params.idea}, ${JSON.stringify(params.plan)}::jsonb, ${params.engine}, ${JSON.stringify(params.refs)}::jsonb, ${params.totalCents})
+    RETURNING id
+  `;
+  const filmId = rows[0].id as string;
+  for (let i = 0; i < params.shots.length; i++) {
+    const sh = params.shots[i];
+    await sql`
+      INSERT INTO director_shots (film_id, idx, prompt, keyframe_prompt, price_cents)
+      VALUES (${filmId}, ${i}, ${sh.prompt}, ${sh.keyframePrompt}, ${sh.priceCents})
+    `;
+  }
+  return filmId;
+}
+
+export async function getDirectorFilm(filmId: string): Promise<DirectorFilmRow | null> {
+  const rows = await sql`SELECT * FROM director_films WHERE id = ${filmId}`;
+  return (rows[0] as DirectorFilmRow) ?? null;
+}
+
+export async function getDirectorShots(filmId: string): Promise<DirectorShotRow[]> {
+  return (await sql`SELECT * FROM director_shots WHERE film_id = ${filmId} ORDER BY idx`) as DirectorShotRow[];
+}
+
+// Atomic "I'll do the next step for this film/shot" claim - same pattern as
+// the paygo claim-before-submit functions: overlapping polls can't both
+// submit (and pay for) the same vendor job. A claim older than 10 minutes is
+// treated as abandoned.
+export async function claimDirectorFilm(filmId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_films SET claimed_at = now()
+    WHERE id = ${filmId} AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+export async function releaseDirectorFilm(filmId: string) {
+  await sql`UPDATE director_films SET claimed_at = NULL WHERE id = ${filmId}`;
+}
+export async function claimDirectorShot(shotId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_shots SET claimed_at = now()
+    WHERE id = ${shotId} AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function updateDirectorFilm(
+  filmId: string,
+  f: Partial<Pick<DirectorFilmRow, "status" | "anchor_request_id" | "anchor_url" | "stitch_request_id" | "final_video_url" | "error">>,
+) {
+  await sql`
+    UPDATE director_films SET
+      status = COALESCE(${f.status ?? null}, status),
+      anchor_request_id = COALESCE(${f.anchor_request_id ?? null}, anchor_request_id),
+      anchor_url = COALESCE(${f.anchor_url ?? null}, anchor_url),
+      stitch_request_id = COALESCE(${f.stitch_request_id ?? null}, stitch_request_id),
+      final_video_url = COALESCE(${f.final_video_url ?? null}, final_video_url),
+      error = COALESCE(${f.error ?? null}, error),
+      claimed_at = NULL
+    WHERE id = ${filmId}
+  `;
+}
+
+export async function updateDirectorShot(
+  shotId: string,
+  f: Partial<Pick<DirectorShotRow, "status" | "keyframe_request_id" | "keyframe_url" | "video_endpoint" | "video_request_id" | "video_url" | "error">>,
+) {
+  await sql`
+    UPDATE director_shots SET
+      status = COALESCE(${f.status ?? null}, status),
+      keyframe_request_id = COALESCE(${f.keyframe_request_id ?? null}, keyframe_request_id),
+      keyframe_url = COALESCE(${f.keyframe_url ?? null}, keyframe_url),
+      video_endpoint = COALESCE(${f.video_endpoint ?? null}, video_endpoint),
+      video_request_id = COALESCE(${f.video_request_id ?? null}, video_request_id),
+      video_url = COALESCE(${f.video_url ?? null}, video_url),
+      error = COALESCE(${f.error ?? null}, error),
+      claimed_at = NULL
+    WHERE id = ${shotId}
+  `;
+}
+
+/** Marks a shot failed exactly once; returns true only for the caller that did it (so only one refund). */
+export async function failDirectorShot(shotId: string, error: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_shots SET status = 'failed', error = ${error.slice(0, 500)}, claimed_at = NULL
+    WHERE id = ${shotId} AND status NOT IN ('failed', 'completed')
     RETURNING id
   `;
   return rows.length > 0;

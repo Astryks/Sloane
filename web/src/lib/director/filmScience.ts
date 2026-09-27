@@ -129,6 +129,7 @@ export type CameraMoveId =
   | "dolly_out_reveal"
   | "pull_back_isolation"
   | "tracking_follow"
+  | "side_tracking"
   | "leading_shot"
   | "subject_swap_pan"
   | "whip_pan"
@@ -160,11 +161,12 @@ export type CameraMove = {
 
 export const CAMERA_MOVES: Record<CameraMoveId, CameraMove> = {
   locked_off: { id: "locked_off", label: "Locked-off", instruction: "static locked-off camera on a tripod, no camera movement - the action plays inside a still frame", useFor: "stillness, dread, deadpan humour, letting a performance land", emotions: ["calm", "melancholy", "dread", "humour"] },
-  slow_push_in: { id: "slow_push_in", label: "Slow dolly in", instruction: "slow, smooth dolly push-in toward the subject on a track, gradually tightening the frame", useFor: "growing realisation, intimacy, emotional weight building", emotions: ["melancholy", "romance", "tension", "awe", "determination"] },
+  slow_push_in: { id: "slow_push_in", label: "Slow dolly in", instruction: "slow, smooth dolly push-in toward the subject on a track, gradually tightening the frame on their face as they speak", useFor: "focus on what the character is saying or realising - the line that matters, intimacy, emotional weight building", emotions: ["melancholy", "romance", "tension", "awe", "determination", "confidence"] },
   fast_push_in: { id: "fast_push_in", label: "Fast push-in", instruction: "quick, confident push-in toward the subject", useFor: "impact, emphasis, a punchline or product reveal", emotions: ["excitement", "triumph"] },
-  dolly_out_reveal: { id: "dolly_out_reveal", label: "Dolly out reveal", instruction: "smooth dolly pull-back away from the subject, steadily revealing the wider environment around them", useFor: "revealing context or scale, an ending, showing how small or alone someone is", emotions: ["awe", "melancholy", "calm"] },
+  dolly_out_reveal: { id: "dolly_out_reveal", label: "Dolly out reveal", instruction: "smooth dolly pull-back away from the subject, steadily revealing the wider environment around them", useFor: "ONLY when the background is worth showing - revealing a striking location, context or scale, an ending, showing how small or alone someone is", emotions: ["awe", "melancholy", "calm"] },
   pull_back_isolation: { id: "pull_back_isolation", label: "Pull back to isolation", instruction: "slow pull-back leaving the subject small and alone in a large frame", useFor: "loneliness, loss, aftermath", emotions: ["melancholy", "grief"] },
   tracking_follow: { id: "tracking_follow", label: "Tracking follow", instruction: "camera tracks alongside / behind the subject at their walking pace, steady gimbal movement", useFor: "journeys, walking-and-thinking, momentum", emotions: ["determination", "melancholy", "calm", "excitement"] },
+  side_tracking: { id: "side_tracking", label: "Side tracking", instruction: "camera trucks sideways alongside the subject, seeing them in profile as they move, keeping pace with them while the background slides past", useFor: "a character walking, running or driving - momentum and journey, showing them against a moving background", emotions: ["determination", "melancholy", "excitement", "calm", "confidence"] },
   leading_shot: { id: "leading_shot", label: "Leading shot", instruction: "camera moves backward in front of the subject as they walk toward it, keeping their face in frame", useFor: "confidence, purpose, a character arriving", emotions: ["determination", "triumph", "confidence"] },
   subject_swap_pan: { id: "subject_swap_pan", label: "Pan from one subject to another", instruction: "single smooth pan that starts on the first subject and travels across the space to land on the second subject, focus following", useFor: "connecting two people or a person and an object, cause and effect, a reaction", emotions: ["tension", "romance", "humour", "curiosity"] },
   whip_pan: { id: "whip_pan", label: "Whip pan", instruction: "very fast whip pan with strong directional motion blur", useFor: "energy, surprise, fast transitions between moments", emotions: ["excitement", "humour", "surprise"] },
@@ -320,8 +322,21 @@ export function detectStyle(prompt: string): ProductionStyleId {
   return STYLE_KEYWORDS.find((k) => k.re.test(prompt))?.style ?? "cinematic";
 }
 
-export function detectEmotion(prompt: string): EmotionId {
-  return EMOTION_KEYWORDS.find((k) => k.re.test(prompt))?.emotion ?? "curiosity";
+const DEFAULT_EMOTION_BY_STYLE: Record<ProductionStyleId, EmotionId> = {
+  cinematic: "curiosity",
+  commercial: "excitement",
+  ugc: "confidence",
+  music_video: "excitement",
+  documentary: "calm",
+};
+
+export function detectEmotion(prompt: string, style?: ProductionStyleId): EmotionId {
+  return EMOTION_KEYWORDS.find((k) => k.re.test(prompt))?.emotion ?? (style ? DEFAULT_EMOTION_BY_STYLE[style] : "curiosity");
+}
+
+/** UGC must sound like a phone recording, whatever the mood. */
+export function soundFor(style: ProductionStyleId, emotion: EmotionId): string {
+  return style === "ugc" ? "natural room tone from the phone mic, no music" : EMOTIONS[emotion].sound;
 }
 
 export const ALL_MOVE_IDS = Object.keys(CAMERA_MOVES) as CameraMoveId[];

@@ -264,6 +264,16 @@ export function videoPriceCents(engine: VideoEngine): number {
   return VIDEO_TIER_PRICE_CENTS[VIDEO_PAYGO_ENGINES[engine].tier];
 }
 
+// "Directed by Lucy" (2026-09-27): per-shot price = the model's normal tier
+// price + a $1.00 direction fee. The fee covers what a single video doesn't
+// need: storyboard planning, the anchor still + one keyframe still per shot
+// (~$0.15 each) that keep characters/products/lighting consistent, and the
+// final stitch - while keeping the $1/shot profit floor.
+export const DIRECTOR_FEE_CENTS = 100;
+export function directorShotPriceCents(engine: VideoEngine): number {
+  return videoPriceCents(engine) + DIRECTOR_FEE_CENTS;
+}
+
 export function formatUsd(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }

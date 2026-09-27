@@ -1,0 +1,519 @@
+"use client";
+
+// "Directed by Lucy" (2026-09-27): type an idea -> Lucy works out what you're
+// trying to do (sell, tell a story, explain...), plans a shot-by-shot
+// storyboard (free, editable), then produces and stitches the film on any
+// model, pay as you go. See lib/director/* and /api/director/*.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ANGLES,
+  CAMERA_MOVES,
+  PRODUCTION_STYLES,
+  SHOT_SIZES,
+  ALL_ANGLE_IDS,
+  ALL_MOVE_IDS,
+  ALL_SIZE_IDS,
+  ALL_STYLE_IDS,
+  type ProductionStyleId,
+} from "@/lib/director/filmScience";
+import { MAX_SHOTS, MIN_SHOTS, DEFAULT_SHOTS, type DirectorPlan, type DirectorShot } from "@/lib/director/plan";
+import {
+  VIDEO_PAYGO_ENGINES,
+  DIRECTOR_FEE_CENTS,
+  directorShotPriceCents,
+  formatUsd,
+  type VideoEngine,
+} from "@/lib/videoEngines";
+
+const DRAFT_KEY = "lucy_director_draft";
+const GOAL_LABEL: Record<string, string> = {
+  sell: "Selling something",
+  story: "Telling a story",
+  explain: "Explaining / teaching",
+  promote: "Promoting",
+  entertain: "Entertaining",
+};
+
+type ShotStatus = { idx: number; status: string; keyframeUrl: string | null; videoUrl: string | null; error: string | null };
+type FilmStatus = { status: string; error: string | null; finalVideoUrl: string | null; anchorUrl: string | null; shots: ShotStatus[] };
+type RefKey = "character" | "product" | "location";
+
+const inputCls = "w-full rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
+
+function PhotoSlot({ label, hint, file, onChange }: { label: string; hint: string; file: File | null; onChange: (f: File | null) => void }) {
+  const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  return (
+    <label className="flex cursor-pointer flex-col items-center gap-1 rounded-2xl border border-dashed border-purple/30 bg-white/70 p-2 text-center">
+      {preview ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={preview} alt={label} className="h-16 w-16 rounded-lg object-cover" />
+      ) : (
+        <span className="flex h-16 w-16 items-center justify-center rounded-lg bg-purple/5 text-xl">+</span>
+      )}
+      <span className="text-[11px] font-bold text-foreground">{label}</span>
+      <span className="text-[10px] leading-tight text-muted">{file ? "Tap to change" : hint}</span>
+      <input type="file" accept="image/*" className="hidden" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
+      {file && (
+        <button type="button" className="text-[10px] text-purple underline" onClick={(e) => { e.preventDefault(); onChange(null); }}>
+          Remove
+        </button>
+      )}
+    </label>
+  );
+}
+
+export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNode; modeSwitch?: React.ReactNode }) {
+  const [idea, setIdea] = useState("");
+  const [style, setStyle] = useState<ProductionStyleId | "auto">("auto");
+  const [shotCount, setShotCount] = useState(DEFAULT_SHOTS);
+  const [aspect, setAspect] = useState<"auto" | "16:9" | "9:16">("auto");
+  const [engine, setEngine] = useState<VideoEngine>("veo");
+  const [photos, setPhotos] = useState<Record<RefKey, File | null>>({ character: null, product: null, location: null });
+  const [plan, setPlan] = useState<DirectorPlan | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [revising, setRevising] = useState<number | "all" | null>(null);
+  const [reviseText, setReviseText] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [filmId, setFilmId] = useState<string | null>(null);
+  const [film, setFilm] = useState<FilmStatus | null>(null);
+  const [showPrompts, setShowPrompts] = useState(false);
+  const autoCreateRef = useRef(false);
+
+  const perShot = directorShotPriceCents(engine);
+  const total = plan ? perShot * plan.shots.length : perShot * shotCount;
+  const engineEntries = Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][];
+
+  // Back from Stripe: restore the storyboard and produce the film once the credit lands.
+  async function resumeFromCheckout() {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("director") !== "1") return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+    let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; hadPhotos: boolean } | null = null;
+    try {
+      draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null");
+      sessionStorage.removeItem(DRAFT_KEY);
+    } catch {}
+    if (!draft) return;
+    setIdea(draft.idea);
+    setPlan(draft.plan);
+    if (VIDEO_PAYGO_ENGINES[draft.engine]) setEngine(draft.engine);
+    if (p.get("canceled") === "1") return setNotice("Checkout canceled - nothing was charged. Your storyboard is still here.");
+    if (draft.hadPhotos) return setNotice("Payment received. Photos can't carry over through checkout - re-add them above, then press Make this film.");
+    setNotice("Payment received - starting your film…");
+    autoCreateRef.current = true;
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    resumeFromCheckout().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!autoCreateRef.current || !plan) return;
+    autoCreateRef.current = false;
+    // Stripe's webhook can land a moment after the redirect - retry briefly.
+    (async () => {
+      for (let i = 0; i < 15; i++) {
+        if (await makeFilm(true)) return;
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      setNotice("Your payment is still being confirmed - press Make this film in a moment.");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
+
+  // Poll the film while it's being produced.
+  useEffect(() => {
+    if (!filmId) return;
+    let stop = false;
+    (async () => {
+      while (!stop) {
+        try {
+          const res = await fetch(`/api/director/status?filmId=${filmId}`);
+          const data = (await res.json()) as FilmStatus;
+          if (!stop && data.shots) setFilm(data);
+          if (data.status === "completed" || data.status === "failed") return;
+        } catch {}
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [filmId]);
+
+  async function planIt() {
+    setPlanning(true);
+    setError(null);
+    setNotice(null);
+    setFilm(null);
+    setFilmId(null);
+    try {
+      const res = await fetch("/api/director/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idea,
+          style,
+          shotCount,
+          aspectRatio: aspect,
+          hasCharacterPhoto: !!photos.character,
+          hasProductPhoto: !!photos.product,
+          hasLocationPhoto: !!photos.location,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't plan that");
+      setPlan(data.plan);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't plan that");
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  async function revise(shotIndex: number | null) {
+    if (!plan) return;
+    const key = shotIndex == null ? "all" : String(shotIndex);
+    const instruction = (reviseText[key] ?? "").trim();
+    if (!instruction) return;
+    setRevising(shotIndex ?? "all");
+    setError(null);
+    try {
+      const res = await fetch("/api/director/revise", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan, instruction, shotIndex }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't apply that");
+      setPlan(data.plan);
+      setReviseText((r) => ({ ...r, [key]: "" }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't apply that");
+    } finally {
+      setRevising(null);
+    }
+  }
+
+  function editShot(i: number, patch: Partial<DirectorShot>) {
+    setPlan((p) => (p ? { ...p, shots: p.shots.map((s, j) => (j === i ? { ...s, ...patch } : s)) } : p));
+  }
+  function editPlan(patch: Partial<DirectorPlan>) {
+    setPlan((p) => (p ? { ...p, ...patch } : p));
+  }
+
+  /** Returns true if the film started (or a checkout redirect began). */
+  async function makeFilm(silentOnNoCredit = false): Promise<boolean> {
+    if (!plan) return false;
+    setCreating(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("engine", engine);
+      form.append("idea", idea);
+      form.append("plan", JSON.stringify(plan));
+      (Object.keys(photos) as RefKey[]).forEach((k) => photos[k] && form.append(k, photos[k] as File));
+      const res = await fetch("/api/director/create", { method: "POST", body: form });
+      const data = await res.json();
+      if (res.ok) {
+        setNotice(null);
+        setFilmId(data.filmId);
+        setFilm({ status: "anchor", error: null, finalVideoUrl: null, anchorUrl: null, shots: plan.shots.map((_, idx) => ({ idx, status: "pending", keyframeUrl: null, videoUrl: null, error: null })) });
+        return true;
+      }
+      if (data.needCredit) {
+        if (silentOnNoCredit) return false;
+        try {
+          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ idea, plan, engine, hadPhotos: Object.values(photos).some(Boolean) }));
+        } catch {}
+        const co = await fetch("/api/video-paygo/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ packId: "exact", cents: data.totalCents ?? total, returnTo: "director" }),
+        });
+        const cd = await co.json();
+        if (cd.url) {
+          window.location.href = cd.url;
+          return true;
+        }
+        throw new Error(cd.error ?? "Checkout failed");
+      }
+      throw new Error(data.error ?? "Couldn't start your film");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't start your film");
+      return false;
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  const producing = !!filmId && film && film.status !== "completed" && film.status !== "failed";
+  const doneShots = film?.shots.filter((s) => s.videoUrl) ?? [];
+  const stepLabel: Record<string, string> = { pending: "Queued", keyframe: "Framing the shot", video: "Filming", completed: "Done", failed: "Refunded" };
+
+  return (
+    <section id="pay-as-you-go" className="shadow-soft-lg scroll-mt-6 rounded-[28px] border border-white/60 bg-purple-wash/90 p-5 backdrop-blur-xl sm:p-7">
+      {header}
+      {modeSwitch}
+      <div className="mt-4 text-center">
+        <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">🎬 Directed by Lucy</h2>
+        <p className="mx-auto mt-1 max-w-lg text-sm text-muted">
+          Tell Lucy what you want. She works out whether you&apos;re selling something, telling a story or teaching - then
+          plans every shot, camera move and light, keeps your character and product consistent, and delivers one finished film.
+        </p>
+        <p className="mt-1 text-xs text-muted">
+          Any model · pay as you go · <strong className="text-foreground">{formatUsd(perShot)} per shot</strong> on {VIDEO_PAYGO_ENGINES[engine].label} · storyboard is free · failed shots refunded
+        </p>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-4">
+        <div>
+          <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">1. Your idea - that&apos;s all you need</p>
+          <textarea
+            aria-label="Describe your film"
+            className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+            rows={3}
+            maxLength={1500}
+            placeholder='e.g. "A 30-second ad for my matte black coffee tumbler" · "A woman walking through Tokyo after a breakup" · "A UGC review of my skincare serum"'
+            value={idea}
+            onChange={(e) => setIdea(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">2. Optional photos - add them when a real person, product or place must look exactly right</p>
+          <div className="grid grid-cols-3 gap-2">
+            <PhotoSlot label="Character" hint="A clear face photo" file={photos.character} onChange={(f) => setPhotos((p) => ({ ...p, character: f }))} />
+            <PhotoSlot label="Product" hint="Plain background, label visible" file={photos.product} onChange={(f) => setPhotos((p) => ({ ...p, product: f }))} />
+            <PhotoSlot label="Location" hint="The place it happens" file={photos.location} onChange={(f) => setPhotos((p) => ({ ...p, location: f }))} />
+          </div>
+        </div>
+
+        <details className="rounded-2xl border border-border bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-purple">3. Optional - style, shots, model, shape (Lucy picks sensible defaults)</summary>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <label className="text-[11px] font-semibold text-muted">
+              Style
+              <select className={inputCls} value={style} onChange={(e) => setStyle(e.target.value as ProductionStyleId | "auto")}>
+                <option value="auto">Auto - Lucy decides</option>
+                {ALL_STYLE_IDS.map((id) => (
+                  <option key={id} value={id}>{PRODUCTION_STYLES[id].label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-[11px] font-semibold text-muted">
+              Shots
+              <select className={inputCls} value={shotCount} onChange={(e) => setShotCount(Number(e.target.value))}>
+                {Array.from({ length: MAX_SHOTS - MIN_SHOTS + 1 }, (_, i) => MIN_SHOTS + i).map((n) => (
+                  <option key={n} value={n}>{n} shots</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-[11px] font-semibold text-muted">
+              Model
+              <select className={inputCls} value={engine} onChange={(e) => setEngine(e.target.value as VideoEngine)}>
+                {engineEntries.map(([id, e]) => (
+                  <option key={id} value={id}>{e.label} - {formatUsd(directorShotPriceCents(id))}/shot</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-[11px] font-semibold text-muted">
+              Shape
+              <select className={inputCls} value={aspect} onChange={(e) => setAspect(e.target.value as "auto" | "16:9" | "9:16")}>
+                <option value="auto">Auto</option>
+                <option value="16:9">16:9 landscape</option>
+                <option value="9:16">9:16 vertical</option>
+              </select>
+            </label>
+          </div>
+          <p className="mt-2 text-[11px] text-muted">
+            One model films every shot so the light and look match. {formatUsd(DIRECTOR_FEE_CENTS)} of each shot&apos;s price is Lucy&apos;s direction (planning, the consistency stills and the final stitch).
+          </p>
+        </details>
+
+        <button
+          type="button"
+          onClick={planIt}
+          disabled={planning || idea.trim().length < 3}
+          className="w-full rounded-2xl border-2 border-purple bg-white py-3 text-sm font-bold text-purple shadow-soft disabled:opacity-50"
+        >
+          {planning ? "Lucy is planning your film…" : plan ? "Re-plan from scratch (free)" : "Plan my film - free"}
+        </button>
+
+        {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
+        {notice && <p className="rounded-2xl bg-white/80 p-3 text-sm text-foreground">{notice}</p>}
+
+        {plan && (
+          <div className="flex flex-col gap-3 rounded-2xl bg-white/80 p-4">
+            <div>
+              <input className="w-full bg-transparent text-lg font-extrabold text-foreground focus:outline-none" value={plan.title} onChange={(e) => editPlan({ title: e.target.value })} aria-label="Film title" />
+              <p className="text-xs text-muted">{plan.logline}</p>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-bold uppercase">
+                <span className="rounded-full bg-purple/10 px-2 py-0.5 text-purple">{GOAL_LABEL[plan.goal] ?? plan.goal}</span>
+                <span className="rounded-full bg-purple/10 px-2 py-0.5 text-purple">{PRODUCTION_STYLES[plan.style].label}</span>
+                <span className="rounded-full bg-purple/10 px-2 py-0.5 text-purple">{plan.emotion}</span>
+                <span className="rounded-full bg-purple/10 px-2 py-0.5 text-purple">{plan.aspectRatio}</span>
+              </div>
+            </div>
+
+            <details className="rounded-xl border border-border p-2">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">The look &amp; cast (locked for every shot so it feels like one film)</summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {(["timeOfDay", "keyLight", "palette", "grade"] as const).map((k) => (
+                  <label key={k} className="text-[11px] font-semibold text-muted">
+                    {k === "timeOfDay" ? "Time of day" : k === "keyLight" ? "Key light" : k === "palette" ? "Palette" : "Film look / grade"}
+                    <input className={inputCls} value={plan.look[k]} onChange={(e) => editPlan({ look: { ...plan.look, [k]: e.target.value } })} />
+                  </label>
+                ))}
+                {(["character", "wardrobe", "location", "product"] as const).map((k) => (
+                  <label key={k} className="text-[11px] font-semibold capitalize text-muted">
+                    {k}
+                    <input className={inputCls} value={plan[k]} placeholder={k === "product" ? "none" : ""} onChange={(e) => editPlan({ [k]: e.target.value } as Partial<DirectorPlan>)} />
+                  </label>
+                ))}
+              </div>
+            </details>
+
+            <ol className="flex flex-col gap-3">
+              {plan.shots.map((s, i) => {
+                const st = film?.shots[i];
+                return (
+                  <li key={i} className="rounded-xl border border-border bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-extrabold text-foreground">
+                        Shot {i + 1} · <span className="font-semibold text-purple">{s.beat}</span>
+                      </p>
+                      {st && <span className="text-[10px] font-bold uppercase text-muted">{stepLabel[st.status] ?? st.status}</span>}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <select className={inputCls} value={s.size} onChange={(e) => editShot(i, { size: e.target.value as DirectorShot["size"] })} aria-label="Shot size">
+                        {ALL_SIZE_IDS.map((id) => <option key={id} value={id}>{SHOT_SIZES[id].label}</option>)}
+                      </select>
+                      <select className={inputCls} value={s.angle} onChange={(e) => editShot(i, { angle: e.target.value as DirectorShot["angle"] })} aria-label="Angle">
+                        {ALL_ANGLE_IDS.map((id) => <option key={id} value={id}>{id.replace(/_/g, " ")}</option>)}
+                      </select>
+                      <select className={inputCls} value={s.move} onChange={(e) => editShot(i, { move: e.target.value as DirectorShot["move"] })} aria-label="Camera move" title={CAMERA_MOVES[s.move].useFor}>
+                        {ALL_MOVE_IDS.map((id) => <option key={id} value={id}>{CAMERA_MOVES[id].label}</option>)}
+                      </select>
+                      <select className={inputCls} value={s.durationSeconds} onChange={(e) => editShot(i, { durationSeconds: Number(e.target.value) })} aria-label="Length">
+                        {[3, 4, 5, 6, 7, 8, 10].map((n) => <option key={n} value={n}>{n}s</option>)}
+                      </select>
+                    </div>
+                    <p className="mt-1 text-[10px] text-muted">{ANGLES[s.angle]} · {CAMERA_MOVES[s.move].useFor}</p>
+                    <textarea className={`${inputCls} mt-2`} rows={2} value={s.action} onChange={(e) => editShot(i, { action: e.target.value })} aria-label="What happens" />
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <input className={inputCls} value={s.dialogue} placeholder="Spoken line (optional)" onChange={(e) => editShot(i, { dialogue: e.target.value })} />
+                      <input className={inputCls} value={s.setting} placeholder="Setting (blank = main location)" onChange={(e) => editShot(i, { setting: e.target.value })} />
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        className={inputCls}
+                        placeholder='Change this shot: "closer and more tense", "she laughs here"…'
+                        value={reviseText[String(i)] ?? ""}
+                        onChange={(e) => setReviseText((r) => ({ ...r, [String(i)]: e.target.value }))}
+                      />
+                      <button type="button" disabled={revising !== null} onClick={() => revise(i)} className="shrink-0 rounded-xl bg-purple/10 px-3 text-xs font-bold text-purple disabled:opacity-50">
+                        {revising === i ? "…" : "Apply"}
+                      </button>
+                    </div>
+                    {st?.videoUrl && <video src={st.videoUrl} controls playsInline className="mt-2 w-full rounded-lg" />}
+                    {!st?.videoUrl && st?.keyframeUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={st.keyframeUrl} alt={`Shot ${i + 1} frame`} className="mt-2 w-full rounded-lg" />
+                    )}
+                    {st?.error && <p className="mt-1 text-[11px] text-coral-dark">{st.error}</p>}
+                  </li>
+                );
+              })}
+            </ol>
+
+            <div className="flex gap-2">
+              <input
+                className={inputCls}
+                placeholder='Change the whole film: "make it a UGC ad", "set it at night", "more energetic"…'
+                value={reviseText.all ?? ""}
+                onChange={(e) => setReviseText((r) => ({ ...r, all: e.target.value }))}
+              />
+              <button type="button" disabled={revising !== null} onClick={() => revise(null)} className="shrink-0 rounded-xl bg-purple/10 px-3 text-xs font-bold text-purple disabled:opacity-50">
+                {revising === "all" ? "…" : "Apply"}
+              </button>
+            </div>
+
+            <button type="button" onClick={() => setShowPrompts((v) => !v)} className="self-start text-[11px] font-semibold text-purple underline">
+              {showPrompts ? "Hide" : "Show"} what Lucy sends to the model
+            </button>
+            {showPrompts && <PromptPreview plan={plan} engine={engine} photos={photos} />}
+
+            <div className="rounded-xl bg-purple/5 p-3 text-sm">
+              <p>
+                <strong>{plan.shots.length} shots</strong> × {formatUsd(perShot)} on {VIDEO_PAYGO_ENGINES[engine].label} ={" "}
+                <strong className="text-lg">{formatUsd(total)}</strong>
+              </p>
+              <p className="text-[11px] text-muted">Includes planning, consistency stills and the final stitched film. Any shot that fails is refunded automatically.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => makeFilm(false)}
+              disabled={creating || !!producing}
+              className="w-full rounded-2xl bg-purple py-4 text-base font-bold text-white shadow-soft disabled:opacity-50"
+            >
+              {creating ? "Starting…" : producing ? "Lucy is filming…" : `Make this film - ${formatUsd(total)} →`}
+            </button>
+            <p className="-mt-1 text-center text-[11px] text-muted">Pay as you go - no subscription, no account needed. Uses your credit first.</p>
+          </div>
+        )}
+
+        {film && (
+          <div className="rounded-2xl bg-white/80 p-4">
+            {producing && (
+              <p className="text-sm text-foreground">
+                {film.status === "anchor" ? "Setting up your cast, location and light…" : film.status === "stitching" ? "Joining your shots into one film…" : `Filming - ${doneShots.length} of ${film.shots.length} shots done…`}{" "}
+                <span className="text-muted">(usually 2-5 minutes)</span>
+              </p>
+            )}
+            {film.status === "completed" && (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-bold text-foreground">Your film is ready 🎬</p>
+                {film.finalVideoUrl && <video src={film.finalVideoUrl} controls playsInline className="w-full rounded-xl" />}
+                {film.error && <p className="text-xs text-muted">{film.error}</p>}
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {film.finalVideoUrl && <a href={film.finalVideoUrl} download className="rounded-full bg-purple px-3 py-1.5 font-bold text-white">Download film</a>}
+                  {doneShots.length > 0 && (
+                    <a href={`/stitch?videos=${doneShots.map((s) => encodeURIComponent(s.videoUrl as string)).join(",")}`} className="rounded-full border border-purple px-3 py-1.5 font-bold text-purple">
+                      Edit / add music in the free editor
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+            {film.status === "failed" && <p className="text-sm text-coral-dark">{film.error ?? "Your film couldn't be made - you've been refunded."}</p>}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PromptPreview({ plan, engine, photos }: { plan: DirectorPlan; engine: VideoEngine; photos: Record<RefKey, File | null> }) {
+  const [prompts, setPrompts] = useState<string[]>([]);
+  useEffect(() => {
+    import("@/lib/director/compile").then(({ compileShotPrompt }) => {
+      const refs = { character: !!photos.character, product: !!photos.product, location: !!photos.location };
+      setPrompts(plan.shots.map((_, i) => compileShotPrompt(plan, i, refs, { nativeAudio: VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio })));
+    });
+  }, [plan, engine, photos]);
+  return (
+    <ol className="flex flex-col gap-2 rounded-xl bg-cream p-3 text-[11px] leading-relaxed text-muted">
+      {prompts.map((p, i) => (
+        <li key={i}>
+          <strong className="text-foreground">Shot {i + 1}:</strong> {p}
+        </li>
+      ))}
+    </ol>
+  );
+}

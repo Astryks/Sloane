@@ -150,6 +150,11 @@ async function workloadIdentityToken(): Promise<string> {
   return data.accessToken;
 }
 
+/** Shared Google auth for other Vertex calls (e.g. the director planner). */
+export async function vertexAuthHeaders(): Promise<Record<string, string>> {
+  return authHeaders();
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   if (hasWorkloadIdentityConfigured()) return { Authorization: `Bearer ${await workloadIdentityToken()}` };
   if (process.env.GOOGLE_VERTEX_API_KEY) return { "x-goog-api-key": process.env.GOOGLE_VERTEX_API_KEY };

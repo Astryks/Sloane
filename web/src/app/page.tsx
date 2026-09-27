@@ -5,6 +5,7 @@ import { Footer } from "@/components/Footer";
 import { PromptGuideSection } from "@/components/PromptGuide";
 import Link from "next/link";
 import { LogoMark } from "@/components/LogoMark";
+import { DirectorStudio } from "@/components/DirectorStudio";
 import { RecordOrUpload } from "@/components/RecordOrUpload";
 import { ShareButtons } from "@/components/ShareButtons";
 import { VoicePicker, PRESET_VOICES } from "@/components/VoicePicker";
@@ -1228,12 +1229,14 @@ function PayAsYouGoVideoSection({
   seedEngine,
   seedVersion,
   header,
+  modeSwitch,
 }: {
   seedPrompt: string | null;
   seedImageBlob: Blob | null;
   seedEngine: VideoEngine | null;
   seedVersion: number;
   header?: React.ReactNode;
+  modeSwitch?: React.ReactNode;
 }) {
   const [signedIn, setSignedIn] = useState(false);
   const [balance, setBalance] = useState(0);
@@ -1318,6 +1321,8 @@ function PayAsYouGoVideoSection({
   // before auto-starting the video that was just paid for.
   async function resumeFromCheckout() {
     const params = new URLSearchParams(window.location.search);
+    // Director-film checkouts are resumed by DirectorStudio, not this form.
+    if (params.get("director") === "1") return refreshBalance().then(() => undefined);
     const paid = params.get("video_credits") === "1";
     const canceled = params.get("canceled") === "1";
     if (paid || canceled) window.history.replaceState(null, "", window.location.pathname + window.location.hash);
@@ -1460,6 +1465,7 @@ function PayAsYouGoVideoSection({
       className="shadow-soft-lg scroll-mt-6 rounded-[28px] border border-white/60 bg-purple-wash/90 p-5 backdrop-blur-xl sm:p-7"
     >
       {header}
+      {modeSwitch}
       <div className={`text-center ${header ? "mt-5" : ""}`}>
         <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Make a video from one prompt</h2>
         <p className="mt-1 text-sm text-muted">
@@ -1876,7 +1882,33 @@ function VideoOptionCard({
   );
 }
 
+function ModeSwitch({ mode, onChange }: { mode: "single" | "director"; onChange: (m: "single" | "director") => void }) {
+  const btn = (m: "single" | "director", label: string, sub: string) => (
+    <button
+      type="button"
+      aria-pressed={mode === m}
+      onClick={() => onChange(m)}
+      className={`flex-1 rounded-2xl border px-3 py-2 text-left transition ${mode === m ? "border-purple bg-purple text-white shadow-soft" : "border-border bg-white/80 text-foreground"}`}
+    >
+      <span className="block text-sm font-extrabold">{label}</span>
+      <span className={`block text-[11px] ${mode === m ? "text-white/85" : "text-muted"}`}>{sub}</span>
+    </button>
+  );
+  return (
+    <div className="mt-4 flex gap-2">
+      {btn("single", "One video", "Your prompt, any model")}
+      {btn("director", "🎬 Directed by Lucy", "A full multi-shot film from one idea")}
+    </div>
+  );
+}
+
 export default function Home() {
+  const [mode, setMode] = useState<"single" | "director">("single");
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (p.get("director") === "1" || window.location.hash === "#director") setMode("director");
+  }, []);
   useEffect(() => {
     // Fire-and-forget: wakes up Modal well before the visitor finishes
     // typing and hits Generate for real - see api/warm-inference/route.ts.
@@ -1908,7 +1940,11 @@ export default function Home() {
     <div className="min-h-screen px-4 py-10 sm:px-6 sm:py-16">
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
 
-        <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} />
+        {mode === "director" ? (
+          <DirectorStudio header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
+        ) : (
+          <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
+        )}
         <PromptGuideSection onTryVideo={handleTryVideoFromGuide} />
         <ProductAdSection />
 

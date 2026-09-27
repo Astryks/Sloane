@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { getOrCreatePaygoSessionUser } from "@/lib/auth";
 import { initSchema } from "@/lib/db";
-import { videoPackFromId } from "@/lib/videoPaygo";
+import { videoPackFromId, formatUsd } from "@/lib/videoPaygo";
 import { publicJson } from "@/lib/mediaProxy";
 
 // One-time payment (mode: "payment", not "subscription") for a video-credit
@@ -16,8 +16,13 @@ import { publicJson } from "@/lib/mediaProxy";
 // client_reference_id always has an id for the webhook to credit. Stripe
 // Checkout collects the email for the receipt itself.
 export async function POST(req: NextRequest) {
-  const { packId } = (await req.json()) as { packId: string };
-  const pack = videoPackFromId(packId);
+  const { packId, cents, returnTo } = (await req.json()) as { packId: string; cents?: number; returnTo?: string };
+  // "exact": buy exactly what one Directed-by-Lucy film costs (shots x
+  // per-shot price), bounded so this can't be used for arbitrary charges.
+  const exactCents = packId === "exact" && Number.isInteger(cents) && (cents as number) >= 399 && (cents as number) <= 3000 ? (cents as number) : null;
+  const pack = exactCents
+    ? { id: "exact", priceUsdCents: exactCents, creditsCents: exactCents, label: `Directed by Lucy film (${formatUsd(exactCents)})` }
+    : videoPackFromId(packId);
   if (!pack) {
     return publicJson({ error: "Unknown credit pack" }, { status: 400 });
   }
@@ -43,8 +48,8 @@ export async function POST(req: NextRequest) {
       ],
       metadata: { product: "video_credits", packId: pack.id, creditsCents: String(pack.creditsCents) },
       // Straight back to the generator, where the saved draft resumes.
-      success_url: `${origin}/?video_credits=1#pay-as-you-go`,
-      cancel_url: `${origin}/?canceled=1#pay-as-you-go`,
+      success_url: `${origin}/?video_credits=1${returnTo === "director" ? "&director=1" : ""}#pay-as-you-go`,
+      cancel_url: `${origin}/?canceled=1${returnTo === "director" ? "&director=1" : ""}#pay-as-you-go`,
       client_reference_id: user.id,
       managed_payments: { enabled: false },
     });
