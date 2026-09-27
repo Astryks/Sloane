@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { getPaygoSessionUser } from "@/lib/auth";
-import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, spendVideoCredit } from "@/lib/db";
-import { publicJson } from "@/lib/mediaProxy";
+import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, savedCharacterPhotos, spendVideoCredit } from "@/lib/db";
+import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan } from "@/lib/director/plan";
+import { REF_LIMITS, buildRefs, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
 import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
@@ -14,6 +15,27 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 // Charges the whole film up front (shots x per-shot price), stores the plan
 // and compiled prompts, and hands off to /api/director/status to produce it.
+//
+// Reference photos arrive as `refs` = {character: [...], product: [...],
+// location: [...]} of links from /api/director/upload (several per slot, up
+// to 14 in total). The older one-file-per-slot form fields still work.
+function parseRefLinks(raw: FormDataEntryValue | null): Record<RefKind, string[]> {
+  const out: Record<RefKind, string[]> = { character: [], product: [], location: [] };
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(String(raw ?? "null"));
+  } catch {}
+  if (!parsed || typeof parsed !== "object") return out;
+  for (const k of ["character", "product", "location"] as const) {
+    const list = (parsed as Record<string, unknown>)[k];
+    if (!Array.isArray(list)) continue;
+    out[k] = list
+      .map((v) => resolveMediaUrl(String(v)))
+      .filter(isVendorMediaUrl)
+      .slice(0, REF_LIMITS[k]);
+  }
+  return out;
+}
 export async function POST(req: NextRequest) {
   try {
     await initSchema();
@@ -44,7 +66,13 @@ export async function POST(req: NextRequest) {
         files[k] = f;
       }
     }
-    const refFlags = { character: !!files.character || !!saved, product: !!files.product, location: !!files.location };
+    const links = parseRefLinks(form.get("refs"));
+    if (saved && !links.character.length && !files.character) links.character = savedCharacterPhotos(saved).slice(0, REF_LIMITS.character);
+    const refFlags = {
+      character: links.character.length > 0 || !!files.character,
+      product: links.product.length > 0 || !!files.product,
+      location: links.location.length > 0 || !!files.location,
+    };
 
     const perShot = directorShotPriceCents(engine);
     const totalCents = perShot * plan.shots.length;
@@ -53,11 +81,10 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: `This film costs ${formatUsd(totalCents)} - add credit to make it`, needCredit: true, totalCents }, { status: 402 });
     }
 
-    const refs: Record<string, string> = saved && !files.character ? { character: saved.photo_url } : {};
     try {
       for (const k of ["character", "product", "location"] as const) {
         const f = files[k];
-        if (f) refs[k] = await uploadInputMedia(Buffer.from(await f.arrayBuffer()), f.type, `${k}.jpg`, "vertex");
+        if (f) links[k] = [await uploadInputMedia(Buffer.from(await f.arrayBuffer()), f.type, `${k}.jpg`, "vertex"), ...links[k]].slice(0, REF_LIMITS[k]);
       }
     } catch (err) {
       await addVideoCredits(user.id, totalCents);
@@ -72,7 +99,7 @@ export async function POST(req: NextRequest) {
         idea,
         plan,
         engine,
-        refs,
+        refs: buildRefs(links),
         totalCents,
         shots: plan.shots.map((_, i) => ({
           prompt: compileShotPrompt(plan, i, refFlags, { nativeAudio }),

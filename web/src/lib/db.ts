@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { randomBytes } from "crypto";
 import { PLANS, type PlanId } from "./plans";
+import type { DirectorRefs } from "./director/refs";
 
 // POSTGRES_URL is what Vercel's Postgres (Neon-backed) integration injects
 // automatically once the database is linked to this project. Keep the
@@ -636,6 +637,8 @@ async function runSchemaMigrations() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_saved_characters_user ON saved_characters(user_id)`;
+  // Several photos per saved character (a character sheet); photo_url stays the first/cover photo.
+  await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS photo_urls JSONB NOT NULL DEFAULT '[]'::jsonb`;
   // Free storyboard planning is rate-limited per visitor (session or IP).
   await sql`
     CREATE TABLE IF NOT EXISTS director_plan_log (
@@ -2353,7 +2356,7 @@ export type DirectorFilmRow = {
   idea: string;
   plan: unknown;
   engine: string;
-  refs: { character?: string; product?: string; location?: string };
+  refs: DirectorRefs;
   status: "anchor" | "frames" | "review" | "shots" | "stitching" | "completed" | "failed" | "cancelled";
   revisions_used: number;
   refunded_cents: number;
@@ -2396,7 +2399,7 @@ export async function createDirectorFilm(params: {
   idea: string;
   plan: unknown;
   engine: string;
-  refs: Record<string, string>;
+  refs: DirectorRefs;
   totalCents: number;
   shots: Array<{ prompt: string; keyframePrompt: string; priceCents: number }>;
 }): Promise<string> {
@@ -2533,16 +2536,21 @@ export async function failDirectorShot(shotId: string, error: string): Promise<b
 
 // --- Character library ---
 
-export type SavedCharacter = { id: string; user_id: string; name: string; description: string; photo_url: string; created_at: string };
+export type SavedCharacter = { id: string; user_id: string; name: string; description: string; photo_url: string; photo_urls: string[] | null; created_at: string };
+
+/** All of a saved character's photos (older rows only have the single cover photo). */
+export function savedCharacterPhotos(c: SavedCharacter): string[] {
+  return Array.isArray(c.photo_urls) && c.photo_urls.length ? c.photo_urls : [c.photo_url];
+}
 
 export async function listSavedCharacters(userId: string): Promise<SavedCharacter[]> {
   return (await sql`SELECT * FROM saved_characters WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT 50`) as SavedCharacter[];
 }
 
-export async function createSavedCharacter(userId: string, name: string, description: string, photoUrl: string): Promise<SavedCharacter> {
+export async function createSavedCharacter(userId: string, name: string, description: string, photoUrls: string[]): Promise<SavedCharacter> {
   const rows = await sql`
-    INSERT INTO saved_characters (user_id, name, description, photo_url)
-    VALUES (${userId}, ${name}, ${description}, ${photoUrl})
+    INSERT INTO saved_characters (user_id, name, description, photo_url, photo_urls)
+    VALUES (${userId}, ${name}, ${description}, ${photoUrls[0]}, ${JSON.stringify(photoUrls)}::jsonb)
     RETURNING *
   `;
   return rows[0] as SavedCharacter;

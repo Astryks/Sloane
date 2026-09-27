@@ -36,6 +36,8 @@ import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl,
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import type { DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
+import { orderedRefs, refList } from "./refs";
+import { refFlags } from "./filmAccess";
 
 // Marker stored as the request id when a still was made synchronously on
 // Google (no reseller job to poll).
@@ -78,8 +80,9 @@ async function pollImage(requestId: string, hadRefs: boolean): Promise<{ done: b
   return { done: false, url: null };
 }
 
+/** Master still: every character angle, then product, then location photos (max 14). */
 function uploadedRefs(film: DirectorFilmRow): string[] {
-  return [film.refs.character, film.refs.product, film.refs.location].filter((u): u is string => !!u);
+  return orderedRefs(refList(film.refs, "character"), refList(film.refs, "product"), refList(film.refs, "location"));
 }
 
 async function advanceAnchor(film: DirectorFilmRow, plan: DirectorPlan) {
@@ -88,7 +91,7 @@ async function advanceAnchor(film: DirectorFilmRow, plan: DirectorPlan) {
     const refs = uploadedRefs(film);
     if (!film.anchor_request_id) {
       const { compileAnchorPrompt } = await import("./compile");
-      const prompt = compileAnchorPrompt(plan, { character: !!film.refs.character, product: !!film.refs.product, location: !!film.refs.location });
+      const prompt = compileAnchorPrompt(plan, refFlags(film));
       // Google first (Google credits); reseller job as the fallback.
       const googleUrl = await generateImageOnVertex(prompt, refs, plan.aspectRatio);
       if (googleUrl) return updateDirectorFilm(film.id, { anchor_request_id: VERTEX_SYNC, anchor_url: googleUrl, status: "frames" });
@@ -111,9 +114,10 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   if (shot.keyframe_url || shot.error === "frame" || !film.anchor_url) return;
   if (!(await claimDirectorShot(shot.id))) return;
   try {
-    // Redraws edit the shot's previous frame first; the anchor (and product
-    // photo) stay in the list so identity and grade don't drift.
-    const refs = [shot.redraw_from_url, film.anchor_url, film.refs.product].filter((u): u is string => !!u);
+    // Redraws edit the shot's previous frame first; the anchor, product
+    // photos and every character angle stay in the list so identity, label
+    // and grade don't drift when the camera moves to a new angle.
+    const refs = orderedRefs([shot.redraw_from_url, film.anchor_url], refList(film.refs, "product"), refList(film.refs, "character"), refList(film.refs, "location"));
     if (!shot.keyframe_request_id) {
       const googleUrl = await generateImageOnVertex(shot.keyframe_prompt, refs, plan.aspectRatio);
       if (googleUrl) return updateDirectorShot(shot.id, { status: "keyframe", keyframe_request_id: VERTEX_SYNC, keyframe_url: googleUrl });

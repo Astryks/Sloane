@@ -23,6 +23,7 @@ export default function Page() {
         <SiteHeader title="Consistent character across shots" subtitle="Faces, angles, @Image refs — SEO hub pointing at Lucy’s Prompt Guide honesty." />
         <SeoCard title="Consistency playbook">
           <ul className="list-disc space-y-2 pl-5">
+            <li>New to this? Follow the step-by-step <Link href="/character-sheet" className="font-semibold text-purple hover:underline">character sheet guide</Link> - 6 angles, what to upload, copy-paste prompts, or one tap on Lucy.</li>
             <li>Shoot / generate <strong className="text-foreground">character stills first</strong> (GPT Image on Lucy). Split full-body + chest-up if needed.</li>
             <li>If drift: add 3/4 + profile. Avoid dumping 8+ near-duplicates.</li>
             <li>Bind once: “@Image1 is the character (face, body, wardrobe — identity only, not lighting/background).”</li>

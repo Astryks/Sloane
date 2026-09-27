@@ -5,7 +5,7 @@
 // storyboard (free, editable), then produces and stitches the film on any
 // model, pay as you go. See lib/director/* and /api/director/*.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ANGLES,
   CAMERA_MOVES,
@@ -25,6 +25,7 @@ import {
   formatUsd,
   type VideoEngine,
 } from "@/lib/videoEngines";
+import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type RefPhotos } from "./DirectorPhotos";
 
 const DRAFT_KEY = "lucy_director_draft";
 const GOAL_LABEL: Record<string, string> = {
@@ -49,33 +50,8 @@ type FilmStatus = {
   refundIfCancelledCents?: number;
 };
 const DONE_STATES = ["completed", "failed", "cancelled"];
-type RefKey = "character" | "product" | "location";
-type SavedCharacter = { id: string; name: string; description: string; photoUrl: string };
 
 const inputCls = "w-full rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
-
-function PhotoSlot({ label, hint, file, onChange }: { label: string; hint: string; file: File | null; onChange: (f: File | null) => void }) {
-  const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
-  return (
-    <label className="flex cursor-pointer flex-col items-center gap-1 rounded-2xl border border-dashed border-purple/30 bg-white/70 p-2 text-center">
-      {preview ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={preview} alt={label} className="h-16 w-16 rounded-lg object-cover" />
-      ) : (
-        <span className="flex h-16 w-16 items-center justify-center rounded-lg bg-purple/5 text-xl">+</span>
-      )}
-      <span className="text-[11px] font-bold text-foreground">{label}</span>
-      <span className="text-[10px] leading-tight text-muted">{file ? "Tap to change" : hint}</span>
-      <input type="file" accept="image/*" className="hidden" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
-      {file && (
-        <button type="button" className="text-[10px] text-purple underline" onClick={(e) => { e.preventDefault(); onChange(null); }}>
-          Remove
-        </button>
-      )}
-    </label>
-  );
-}
 
 export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNode; modeSwitch?: React.ReactNode }) {
   const [idea, setIdea] = useState("");
@@ -83,7 +59,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   const [shotCount, setShotCount] = useState(DEFAULT_SHOTS);
   const [aspect, setAspect] = useState<"auto" | "16:9" | "9:16">("auto");
   const [engine, setEngine] = useState<VideoEngine>("veo");
-  const [photos, setPhotos] = useState<Record<RefKey, File | null>>({ character: null, product: null, location: null });
+  const [photos, setPhotos] = useState<RefPhotos>(EMPTY_PHOTOS);
   const [plan, setPlan] = useState<DirectorPlan | null>(null);
   const [planning, setPlanning] = useState(false);
   const [revising, setRevising] = useState<number | "all" | null>(null);
@@ -95,42 +71,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   const [film, setFilm] = useState<FilmStatus | null>(null);
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [cast, setCast] = useState<SavedCharacter[]>([]);
   const [castId, setCastId] = useState<string | null>(null);
-  const [saveName, setSaveName] = useState("");
-  const [saveDesc, setSaveDesc] = useState("");
-
-  useEffect(() => {
-    fetch("/api/director/characters")
-      .then((r) => r.json())
-      .then((d) => setCast(Array.isArray(d.characters) ? d.characters : []))
-      .catch(() => {});
-  }, []);
-
-  async function saveCharacter() {
-    if (!photos.character || !saveName.trim()) return;
-    setBusy("saveChar");
-    setError(null);
-    try {
-      const form = new FormData();
-      form.append("name", saveName.trim());
-      form.append("description", saveDesc.trim());
-      form.append("photo", photos.character);
-      const res = await fetch("/api/director/characters", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Couldn't save");
-      setCast((c) => [data.character, ...c]);
-      setCastId(data.character.id);
-      setPhotos((p) => ({ ...p, character: null }));
-      setSaveName("");
-      setSaveDesc("");
-      setNotice(`${data.character.name} saved - pick them in any film.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save");
-    } finally {
-      setBusy(null);
-    }
-  }
   const autoCreateRef = useRef(false);
   const [pollKey, setPollKey] = useState(0);
   const restartPolling = () => setPollKey((k) => k + 1);
@@ -144,7 +85,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     const p = new URLSearchParams(window.location.search);
     if (p.get("director") !== "1") return;
     window.history.replaceState(null, "", window.location.pathname + window.location.hash);
-    let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; hadPhotos: boolean } | null = null;
+    let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; refs?: Parameters<typeof photosFromLinks>[0]; castId?: string | null } | null = null;
     try {
       draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null");
       sessionStorage.removeItem(DRAFT_KEY);
@@ -154,7 +95,8 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
     setPlan(draft.plan);
     if (VIDEO_PAYGO_ENGINES[draft.engine]) setEngine(draft.engine);
     if (p.get("canceled") === "1") return setNotice("Checkout canceled - nothing was charged. Your storyboard is still here.");
-    if (draft.hadPhotos) return setNotice("Payment received. Photos can't carry over through checkout - re-add them above, then press Make this film.");
+    if (draft.refs) setPhotos(photosFromLinks(draft.refs));
+    if (draft.castId) setCastId(draft.castId);
     setNotice("Payment received - starting your film…");
     autoCreateRef.current = true;
   }
@@ -219,9 +161,9 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
           style,
           shotCount,
           aspectRatio: aspect,
-          hasCharacterPhoto: !!photos.character || !!castId,
-          hasProductPhoto: !!photos.product,
-          hasLocationPhoto: !!photos.location,
+          hasCharacterPhoto: readyUrls(photos, "character").length > 0,
+          hasProductPhoto: readyUrls(photos, "product").length > 0,
+          hasLocationPhoto: readyUrls(photos, "location").length > 0,
         }),
       });
       const data = await res.json();
@@ -268,6 +210,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   /** Returns true if the film started (or a checkout redirect began). */
   async function makeFilm(silentOnNoCredit = false): Promise<boolean> {
     if (!plan) return false;
+    const refLinks = { character: readyUrls(photos, "character"), product: readyUrls(photos, "product"), location: readyUrls(photos, "location") };
     setCreating(true);
     setError(null);
     try {
@@ -275,8 +218,8 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
       form.append("engine", engine);
       form.append("idea", idea);
       form.append("plan", JSON.stringify(plan));
-      if (castId && !photos.character) form.append("savedCharacterId", castId);
-      (Object.keys(photos) as RefKey[]).forEach((k) => photos[k] && form.append(k, photos[k] as File));
+      if (castId) form.append("savedCharacterId", castId);
+      form.append("refs", JSON.stringify(refLinks));
       const res = await fetch("/api/director/create", { method: "POST", body: form });
       const data = await res.json();
       if (res.ok) {
@@ -288,7 +231,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
       if (data.needCredit) {
         if (silentOnNoCredit) return false;
         try {
-          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ idea, plan, engine, hadPhotos: Object.values(photos).some(Boolean) }));
+          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ idea, plan, engine, refs: refLinks, castId }));
         } catch {}
         const co = await fetch("/api/video-paygo/checkout", {
           method: "POST",
@@ -382,6 +325,18 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
         <p className="mt-1 text-xs text-muted">
           Any model · pay as you go · <strong className="text-foreground">{formatUsd(perShot)} per shot</strong> on {VIDEO_PAYGO_ENGINES[engine].label} · planning is free · you approve every frame before filming · failed shots refunded
         </p>
+        <details className="mx-auto mt-3 max-w-lg rounded-2xl bg-white/70 p-3 text-left text-xs text-muted">
+          <summary className="cursor-pointer text-center font-semibold text-purple">🧸 New here? How to make a film in 6 easy steps</summary>
+          <ol className="mt-2 flex flex-col gap-1.5">
+            <li><strong className="text-foreground">1. ✏️ Say your idea.</strong> One sentence is fine: &quot;My dog surfing at sunset&quot;.</li>
+            <li><strong className="text-foreground">2. 📸 Add photos (only if it must be a real person, thing or place).</strong> For a person, one clear face photo, then tap <em>Make my character sheet</em>. Lucy draws them from every side.</li>
+            <li><strong className="text-foreground">3. 🪄 Press &quot;Plan my film&quot;.</strong> Free. Lucy writes every shot for you.</li>
+            <li><strong className="text-foreground">4. 👀 Read the plan.</strong> Don&apos;t like something? Type the change in plain words, like &quot;make it night&quot;, and press Apply.</li>
+            <li><strong className="text-foreground">5. 🖼️ Press &quot;Draw my storyboard&quot;.</strong> Lucy draws a picture of every shot. Redraw any picture up to 5 times. Nothing is filmed yet.</li>
+            <li><strong className="text-foreground">6. 🎬 Press &quot;Approve &amp; film it&quot;.</strong> Lucy films every shot, joins them with sound, and gives you one film to download.</li>
+          </ol>
+          <p className="mt-2">Changed your mind before filming? Cancel, and everything except the small direction fee goes back to your credit.</p>
+        </details>
       </div>
 
       <div className="mt-5 flex flex-col gap-4">
@@ -398,46 +353,7 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
           />
         </div>
 
-        <div>
-          <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">2. Optional photos - add them when a real person, product or place must look exactly right</p>
-          {cast.length > 0 && (
-            <div className="mb-2">
-              <p className="mb-1 text-[11px] font-semibold text-muted">Your cast - tap to use in this film</p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {cast.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => {
-                      setCastId(castId === c.id ? null : c.id);
-                      setPhotos((p) => ({ ...p, character: null }));
-                    }}
-                    className={`flex shrink-0 flex-col items-center rounded-xl border p-1.5 ${castId === c.id ? "border-purple bg-purple/10" : "border-border bg-white"}`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={c.photoUrl} alt={c.name} className="h-12 w-12 rounded-lg object-cover" />
-                    <span className="mt-0.5 max-w-16 truncate text-[10px] font-bold">{c.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="grid grid-cols-3 gap-2">
-            <PhotoSlot label="Character" hint={castId ? "Using your saved character" : "A clear face photo"} file={photos.character} onChange={(f) => { setPhotos((p) => ({ ...p, character: f })); if (f) setCastId(null); }} />
-            <PhotoSlot label="Product" hint="Plain background, label visible" file={photos.product} onChange={(f) => setPhotos((p) => ({ ...p, product: f }))} />
-            <PhotoSlot label="Location" hint="The place it happens" file={photos.location} onChange={(f) => setPhotos((p) => ({ ...p, location: f }))} />
-          </div>
-          {photos.character && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-white/70 p-2">
-              <span className="text-[11px] font-semibold text-muted">Save this person for next time:</span>
-              <input className={`${inputCls} w-28`} placeholder="Name" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
-              <input className={`${inputCls} min-w-40 flex-1`} placeholder="Optional: age, look, style" value={saveDesc} onChange={(e) => setSaveDesc(e.target.value)} />
-              <button type="button" disabled={!saveName.trim() || busy === "saveChar"} onClick={saveCharacter} className="rounded-xl bg-purple/10 px-3 py-1.5 text-xs font-bold text-purple disabled:opacity-50">
-                {busy === "saveChar" ? "Saving…" : "Save"}
-              </button>
-            </div>
-          )}
-        </div>
+        <DirectorPhotos photos={photos} setPhotos={setPhotos} castId={castId} setCastId={setCastId} onNotice={setNotice} onError={setError} />
 
         <details className="rounded-2xl border border-border bg-white/70 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-purple">3. Optional - style, shots, model, shape (Lucy picks sensible defaults)</summary>
@@ -623,10 +539,10 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
             {!filmId && <button
               type="button"
               onClick={() => makeFilm(false)}
-              disabled={creating || !!producing}
+              disabled={creating || !!producing || isUploading(photos)}
               className="w-full rounded-2xl bg-purple py-4 text-base font-bold text-white shadow-soft disabled:opacity-50"
             >
-              {creating ? "Starting…" : `Draw my storyboard - ${formatUsd(total)} →`}
+              {creating ? "Starting…" : isUploading(photos) ? "Adding your photos…" : `Draw my storyboard - ${formatUsd(total)} →`}
             </button>}
             {!filmId && (
               <p className="-mt-1 text-center text-[11px] text-muted">
@@ -683,11 +599,11 @@ export function DirectorStudio({ header, modeSwitch }: { header?: React.ReactNod
   );
 }
 
-function PromptPreview({ plan, engine, photos }: { plan: DirectorPlan; engine: VideoEngine; photos: Record<RefKey, File | null> }) {
+function PromptPreview({ plan, engine, photos }: { plan: DirectorPlan; engine: VideoEngine; photos: RefPhotos }) {
   const [prompts, setPrompts] = useState<string[]>([]);
   useEffect(() => {
     import("@/lib/director/compile").then(({ compileShotPrompt }) => {
-      const refs = { character: !!photos.character, product: !!photos.product, location: !!photos.location };
+      const refs = { character: photos.character.length > 0, product: photos.product.length > 0, location: photos.location.length > 0 };
       setPrompts(plan.shots.map((_, i) => compileShotPrompt(plan, i, refs, { nativeAudio: VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio })));
     });
   }, [plan, engine, photos]);

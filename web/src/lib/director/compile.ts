@@ -81,9 +81,9 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
  */
 export function compileAnchorPrompt(plan: DirectorPlan, refs: RefFlags): string {
   const refNotes = [
-    refs.character ? "Use the person from the character reference photo - keep their face and identity exactly." : "",
-    refs.product ? "Include the product from the product reference photo, reproduced exactly (shape, colours, label, logo)." : "",
-    refs.location ? "Place them in the location from the location reference photo - keep the architecture and details exactly." : "",
+    refs.character ? "Use the person from the character reference photos (they may show the same person from several angles) - keep their face and identity exactly." : "",
+    refs.product ? "Include the product from the product reference photos, reproduced exactly (shape, colours, label, logo)." : "",
+    refs.location ? "Place them in the location from the location reference photos - keep the architecture and details exactly." : "",
   ].filter(Boolean);
   return [
     "Create ONE hyper-realistic cinematic still photograph, as if shot on set, that establishes this film's character, place and light.",
@@ -106,7 +106,8 @@ export function compileKeyframePrompt(plan: DirectorPlan, shotIndex: number, ref
   const shot = plan.shots[shotIndex];
   return [
     "Using the first image as the reference, create a new still frame from the SAME film: same person (identical face, hair and wardrobe), same product, same colour grade and film look.",
-    refs.product ? "Keep the product exactly as in the product reference - shape, colours, label and logo unchanged." : "",
+    refs.product ? "Keep the product exactly as in the product reference photos - shape, colours, label and logo unchanged." : "",
+    refs.character ? "The other reference photos show the same person from different angles - use them so the face stays identical from this new camera angle." : "",
     sentence(`New camera setup: ${SHOT_SIZES[shot.size].instruction}, ${ANGLES[shot.angle]}`),
     shot.setting ? sentence(`Setting for this shot: ${shot.setting}`) : "",
     shot.lighting ? sentence(`Light for this shot: ${shot.lighting}, staying within the same grade (${plan.look.grade})`) : "Keep the lighting identical to the reference.",

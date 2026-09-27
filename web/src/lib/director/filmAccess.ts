@@ -2,6 +2,7 @@
 import { getPaygoSessionUser } from "../auth";
 import { getDirectorFilm, getDirectorShots, type DirectorFilmRow } from "../db";
 import { sanitizePlan, type DirectorPlan } from "./plan";
+import { refList } from "./refs";
 
 export const MAX_REDRAWS = 5;
 export const WALKAWAY_FEE_PER_SHOT_CENTS = 100;
@@ -20,5 +21,5 @@ export async function loadOwnedFilm(filmId: string): Promise<{ film: DirectorFil
 }
 
 export function refFlags(film: DirectorFilmRow) {
-  return { character: !!film.refs.character, product: !!film.refs.product, location: !!film.refs.location };
+  return { character: refList(film.refs, "character").length > 0, product: refList(film.refs, "product").length > 0, location: refList(film.refs, "location").length > 0 };
 }

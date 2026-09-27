@@ -29,6 +29,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/ai-music-video", changeFrequency: "monthly", priority: 0.7 },
     { path: "/storyboard-to-video", changeFrequency: "monthly", priority: 0.8 },
     { path: "/consistent-character", changeFrequency: "monthly", priority: 0.75 },
+
+    { path: "/character-sheet", changeFrequency: "monthly", priority: 0.75 },
     { path: "/model-reviews", changeFrequency: "monthly", priority: 0.75 },
     { path: "/study-film", changeFrequency: "monthly", priority: 0.8 },
     { path: "/study-great-films", changeFrequency: "monthly", priority: 0.7 },
