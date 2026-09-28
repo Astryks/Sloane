@@ -643,6 +643,8 @@ async function runSchemaMigrations() {
   await sql`CREATE INDEX IF NOT EXISTS idx_saved_characters_user ON saved_characters(user_id)`;
   // Several photos per saved character (a character sheet); photo_url stays the first/cover photo.
   await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS photo_urls JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  // The same library holds saved sets (locations) - kind 'location' (2026-09-29).
+  await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'character'`;
   // Free storyboard planning is rate-limited per visitor (session or IP).
   await sql`
     CREATE TABLE IF NOT EXISTS director_plan_log (
@@ -2548,21 +2550,27 @@ export async function failDirectorShot(shotId: string, error: string): Promise<b
 
 // --- Character library ---
 
-export type SavedCharacter = { id: string; user_id: string; name: string; description: string; photo_url: string; photo_urls: string[] | null; created_at: string };
+export type SavedCharacter = { id: string; user_id: string; name: string; description: string; photo_url: string; photo_urls: string[] | null; kind: "character" | "location"; created_at: string };
 
 /** All of a saved character's photos (older rows only have the single cover photo). */
 export function savedCharacterPhotos(c: SavedCharacter): string[] {
   return Array.isArray(c.photo_urls) && c.photo_urls.length ? c.photo_urls : [c.photo_url];
 }
 
-export async function listSavedCharacters(userId: string): Promise<SavedCharacter[]> {
-  return (await sql`SELECT * FROM saved_characters WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT 50`) as SavedCharacter[];
+export async function listSavedCharacters(userId: string, kind: "character" | "location" = "character"): Promise<SavedCharacter[]> {
+  return (await sql`SELECT * FROM saved_characters WHERE user_id = ${userId} AND kind = ${kind} ORDER BY created_at DESC LIMIT 50`) as SavedCharacter[];
 }
 
-export async function createSavedCharacter(userId: string, name: string, description: string, photoUrls: string[]): Promise<SavedCharacter> {
+export async function createSavedCharacter(
+  userId: string,
+  name: string,
+  description: string,
+  photoUrls: string[],
+  kind: "character" | "location" = "character",
+): Promise<SavedCharacter> {
   const rows = await sql`
-    INSERT INTO saved_characters (user_id, name, description, photo_url, photo_urls)
-    VALUES (${userId}, ${name}, ${description}, ${photoUrls[0]}, ${JSON.stringify(photoUrls)}::jsonb)
+    INSERT INTO saved_characters (user_id, name, description, photo_url, photo_urls, kind)
+    VALUES (${userId}, ${name}, ${description}, ${photoUrls[0]}, ${JSON.stringify(photoUrls)}::jsonb, ${kind})
     RETURNING *
   `;
   return rows[0] as SavedCharacter;

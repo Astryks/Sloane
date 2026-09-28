@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { REF_LIMITS, SHEET_ANGLES, type RefKind, type SheetAngleId } from "@/lib/director/refs";
+import { LOCATION_ANGLES, MAX_CAST, REF_LIMITS, SHEET_ANGLES, type RefKind, type SheetAngleId } from "@/lib/director/refs";
 
 export type RefPhoto = { id: string; url: string | null; preview: string; status: "uploading" | "ready" | "error"; label?: string };
 export type RefPhotos = Record<RefKind, RefPhoto[]>;
@@ -31,6 +31,11 @@ export function photosFromLinks(links: Partial<Record<RefKind, string[]>>): RefP
 }
 
 type SavedCharacter = { id: string; name: string; description: string; photoUrl: string; photoUrls?: string[] };
+export type CastPick = { id: string; name: string; description: string };
+export const FREE_IMAGE_TOOLS = [
+  { name: "ChatGPT", href: "https://chatgpt.com" },
+  { name: "Gemini", href: "https://gemini.google.com" },
+];
 
 const SLOTS: Record<RefKind, { label: string; hint: string; tip: string }> = {
   character: {
@@ -39,7 +44,7 @@ const SLOTS: Record<RefKind, { label: string; hint: string; tip: string }> = {
     tip: "Lucy makes the other angles when she films. Want to see them first? Tap the button below.",
   },
   product: { label: "Product", hint: "Front + label", tip: "Plain background, label readable." },
-  location: { label: "Location", hint: "The place, empty", tip: "No people in it - Lucy adds your character." },
+  location: { label: "Location", hint: "A photo of the place, empty - or describe it below and Lucy draws it", tip: "No people in it - Lucy adds your characters." },
 };
 
 let nextId = 0;
@@ -88,19 +93,24 @@ function Thumb({ photo, onRemove }: { photo: RefPhoto; onRemove: () => void }) {
 export function DirectorPhotos({
   photos,
   setPhotos,
-  castId,
-  setCastId,
+  selectedCast,
+  setSelectedCast,
   onNotice,
   onError,
 }: {
   photos: RefPhotos;
   setPhotos: React.Dispatch<React.SetStateAction<RefPhotos>>;
-  castId: string | null;
-  setCastId: (id: string | null) => void;
+  selectedCast: CastPick[];
+  setSelectedCast: React.Dispatch<React.SetStateAction<CastPick[]>>;
   onNotice: (msg: string | null) => void;
   onError: (msg: string | null) => void;
 }) {
   const [cast, setCast] = useState<SavedCharacter[]>([]);
+  const [sets, setSets] = useState<SavedCharacter[]>([]);
+  const [setId, setSetId] = useState<string | null>(null);
+  const [placeText, setPlaceText] = useState("");
+  const [placeProgress, setPlaceProgress] = useState<string | null>(null);
+  const [setName, setSetName] = useState("");
   const [saveName, setSaveName] = useState("");
   const [saveDesc, setSaveDesc] = useState("");
   const [saving, setSaving] = useState(false);
@@ -110,6 +120,10 @@ export function DirectorPhotos({
     fetch("/api/director/characters")
       .then((r) => r.json())
       .then((d) => setCast(Array.isArray(d.characters) ? d.characters : []))
+      .catch(() => {});
+    fetch("/api/director/characters?kind=location")
+      .then((r) => r.json())
+      .then((d) => setSets(Array.isArray(d.characters) ? d.characters : []))
       .catch(() => {});
   }, []);
 
@@ -136,18 +150,89 @@ export function DirectorPhotos({
 
   function remove(kind: RefKind, id: string) {
     setPhotos((all) => ({ ...all, [kind]: all[kind].filter((p) => p.id !== id) }));
-    if (kind === "character" && photos.character.length <= 1) setCastId(null);
+    if (kind === "location") setSetId(null);
   }
 
+  /** Up to 3 people from Your cast in one film - Lucy keeps each face separate. */
   function pickCast(c: SavedCharacter) {
-    if (castId === c.id) {
-      setCastId(null);
-      setPhotos((all) => ({ ...all, character: [] }));
+    setSelectedCast((sel) => {
+      if (sel.some((x) => x.id === c.id)) return sel.filter((x) => x.id !== c.id);
+      if (sel.length >= MAX_CAST) {
+        onNotice(`Up to ${MAX_CAST} people from Your cast per film.`);
+        return sel;
+      }
+      return [...sel, { id: c.id, name: c.name, description: c.description }];
+    });
+  }
+
+  function pickSet(c: SavedCharacter) {
+    if (setId === c.id) {
+      setSetId(null);
+      setPhotos((all) => ({ ...all, location: [] }));
       return;
     }
-    setCastId(c.id);
-    const links = c.photoUrls?.length ? c.photoUrls : [c.photoUrl];
-    setPhotos((all) => ({ ...all, character: links.map((url) => ({ id: newId(), url, preview: url, status: "ready" as const })) }));
+    setSetId(c.id);
+    const links = (c.photoUrls?.length ? c.photoUrls : [c.photoUrl]).slice(0, REF_LIMITS.location);
+    setPhotos((all) => ({ ...all, location: links.map((url) => ({ id: newId(), url, preview: url, status: "ready" as const })) }));
+  }
+
+  /** "Draw this place": a wide view from the words, then two more angles of the same room. */
+  async function drawPlace() {
+    const description = placeText.trim();
+    if (description.length < 8) return onNotice("Describe the place in a sentence first.");
+    onError(null);
+    setSetId(null);
+    setPhotos((all) => ({ ...all, location: [] }));
+    const call = async (angle: string, refs: string[]) => {
+      const res = await fetch("/api/director/location-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description, angle, photos: refs }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't draw that view");
+      return data.url as string;
+    };
+    try {
+      setPlaceProgress("Drawing the place… 1 of 3");
+      const first = await call(LOCATION_ANGLES[0].id, []);
+      setPhotos((all) => ({ ...all, location: [{ id: newId(), url: first, preview: first, status: "ready", label: LOCATION_ANGLES[0].label }] }));
+      setPlaceProgress("Drawing 2 more angles of the same place…");
+      const more = await Promise.all(LOCATION_ANGLES.slice(1).map((a) => call(a.id, [first]).then((url): { url: string; label: string } => ({ url, label: a.label })).catch(() => null)));
+      setPhotos((all) => ({
+        ...all,
+        location: [...all.location, ...more.filter((m): m is { url: string; label: string } => !!m).map((m) => ({ id: newId(), url: m.url, preview: m.url, status: "ready" as const, label: m.label }))],
+      }));
+      onNotice("Your set is ready! Check the pictures - remove any you don't like - then save it to Your sets.");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Couldn't draw that place");
+    } finally {
+      setPlaceProgress(null);
+    }
+  }
+
+  async function saveSet() {
+    const links = readyUrls(photos, "location");
+    if (!links.length || !setName.trim()) return;
+    setSaving(true);
+    try {
+      const form = new FormData();
+      form.append("name", setName.trim());
+      form.append("description", placeText.trim());
+      form.append("photos", JSON.stringify(links));
+      form.append("kind", "location");
+      const res = await fetch("/api/director/characters", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't save");
+      setSets((c) => [data.character, ...c]);
+      setSetId(data.character.id);
+      setSetName("");
+      onNotice(`${data.character.name} saved to Your sets - tap it for any scene filmed there.`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Couldn't save");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function makeSheet() {
@@ -205,9 +290,10 @@ export function DirectorPhotos({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Couldn't save");
       setCast((c) => [data.character, ...c]);
-      setCastId(data.character.id);
       setSaveName("");
-      onNotice(`${data.character.name} saved with ${links.length} photo${links.length === 1 ? "" : "s"} - tap them in Your cast for any film.`);
+      setPhotos((all) => ({ ...all, character: [] }));
+      setSelectedCast((sel) => (sel.length < MAX_CAST ? [...sel, { id: data.character.id, name: data.character.name, description: data.character.description }] : sel));
+      onNotice(`${data.character.name} saved with ${links.length} photo${links.length === 1 ? "" : "s"} and added to this film. Add the next person, or carry on.`);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Couldn't save");
     } finally {
@@ -220,30 +306,37 @@ export function DirectorPhotos({
   const inputCls = "rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
 
   return (
-    <details className="rounded-2xl border border-border bg-white/70 p-3" open={totalPhotos > 0 || cast.length > 0 || undefined}>
+    <details className="rounded-2xl border border-border bg-white/70 p-3" open={totalPhotos > 0 || cast.length > 0 || sets.length > 0 || undefined}>
       <summary className="cursor-pointer text-sm font-bold text-foreground">
-        2. 📸 Photos <span className="font-normal text-muted">(optional)</span>
+        2. 📸 Cast, product &amp; place <span className="font-normal text-muted">(optional)</span>
       </summary>
       <ul className="mb-2 mt-2 flex flex-col gap-1 text-xs text-muted">
-        <li>🙂 <strong className="text-foreground">A real person?</strong> One clear face photo. Lucy makes every other angle.</li>
+        <li>🙂 <strong className="text-foreground">A person?</strong> One photo of just them - face clear, nothing in their hands. Crop out other people.</li>
         <li>🧴 <strong className="text-foreground">Your product?</strong> Front + label. Plain background.</li>
-        <li>🏠 <strong className="text-foreground">A real place?</strong> A photo of it empty.</li>
+        <li>🏠 <strong className="text-foreground">A place?</strong> A photo of it empty, or type what it looks like and tap <em>Draw this place</em>.</li>
+        <li>🚫 Never use photos of real actors or stills from a film.</li>
         <li>
-          🙈 Nothing to add? Skip this - Lucy makes it all up.{" "}
-          <Link href="/character-sheet" className="font-semibold text-purple underline">Photo tips</Link>
+          🎨 No photo of your character? Make one free in{" "}
+          {FREE_IMAGE_TOOLS.map((t, i) => (
+            <span key={t.name}>
+              {i > 0 && " or "}
+              <a href={t.href} target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">{t.name}</a>
+            </span>
+          ))}{" "}
+          - <Link href="/make-a-movie#characters" className="font-semibold text-purple underline">copy our prompt</Link>.
         </li>
       </ul>
 
       {cast.length > 0 && (
         <div className="mb-2">
-          <p className="mb-1 text-[11px] font-semibold text-muted">Your cast - tap to use in this film</p>
+          <p className="mb-1 text-[11px] font-semibold text-muted">Your cast - tap up to {MAX_CAST} people for this film</p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {cast.map((c) => (
               <button
                 key={c.id}
                 type="button"
                 onClick={() => pickCast(c)}
-                className={`flex shrink-0 flex-col items-center rounded-xl border p-1.5 ${castId === c.id ? "border-purple bg-purple/10" : "border-border bg-white"}`}
+                className={`flex shrink-0 flex-col items-center rounded-xl border p-1.5 ${selectedCast.some((x) => x.id === c.id) ? "border-purple bg-purple/10" : "border-border bg-white"}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={c.photoUrl} alt={c.name} className="h-12 w-12 rounded-lg object-cover" />
@@ -287,6 +380,51 @@ export function DirectorPhotos({
                   </label>
                 )}
               </div>
+              {kind === "location" && (
+                <div className="mt-2 flex flex-col gap-2">
+                  {sets.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {sets.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => pickSet(c)}
+                          className={`flex shrink-0 flex-col items-center rounded-xl border p-1.5 ${setId === c.id ? "border-purple bg-purple/10" : "border-border bg-white"}`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={c.photoUrl} alt={c.name} className="h-12 w-20 rounded-lg object-cover" />
+                          <span className="mt-0.5 max-w-20 truncate text-[10px] font-bold">{c.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!list.length && (
+                    <div className="flex flex-col gap-1">
+                      <textarea
+                        aria-label="Describe the place"
+                        rows={2}
+                        className={`${inputCls} w-full`}
+                        placeholder="e.g. A 1980s Manhattan corner office, dark wood, big desk, black leather chair, skyscrapers through the windows at sunset"
+                        value={placeText}
+                        onChange={(e) => setPlaceText(e.target.value)}
+                      />
+                      <button type="button" disabled={!!placeProgress || placeText.trim().length < 8} onClick={drawPlace} className="self-start rounded-xl bg-purple px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                        {placeProgress ?? "✨ Draw this place (3 angles, free)"}
+                      </button>
+                    </div>
+                  )}
+                  {placeProgress && list.length > 0 && <p className="text-[11px] font-semibold text-purple">{placeProgress}</p>}
+                  {list.length > 0 && !setId && !placeProgress && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-2">
+                      <span className="text-[11px] font-semibold text-muted">Save this place for every scene here:</span>
+                      <input className={`${inputCls} w-40`} placeholder="Name, e.g. Victor's office" value={setName} onChange={(e) => setSetName(e.target.value)} />
+                      <button type="button" disabled={!setName.trim() || saving || isUploading(photos)} onClick={saveSet} className="rounded-xl bg-purple/10 px-3 py-1.5 text-xs font-bold text-purple disabled:opacity-50">
+                        {saving ? "Saving…" : "Save to Your sets"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               {kind === "character" && readyCharacters > 0 && (
                 <div className="mt-2 flex flex-col gap-2">
                   {!sheetProgress && photos.character.length < REF_LIMITS.character && photos.character.length < 4 && (
@@ -295,7 +433,7 @@ export function DirectorPhotos({
                     </button>
                   )}
                   {sheetProgress && <p className="text-[11px] font-semibold text-purple">{sheetProgress}</p>}
-                  {!castId && !sheetProgress && (
+                  {!sheetProgress && (
                     <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-2">
                       <span className="text-[11px] font-semibold text-muted">Save this person for next time:</span>
                       <input className={`${inputCls} w-28`} placeholder="Name" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
@@ -311,6 +449,11 @@ export function DirectorPhotos({
           );
         })}
       </div>
+      {selectedCast.length > 0 && (
+        <p className="mt-2 text-xs text-foreground">
+          🎭 <strong>In this film:</strong> {selectedCast.map((c) => c.name).join(", ")}
+        </p>
+      )}
       {totalPhotos > 0 && <p className="mt-1 text-[10px] text-muted">{totalPhotos} of 14 photos used.</p>}
     </details>
   );

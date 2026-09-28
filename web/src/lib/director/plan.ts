@@ -82,10 +82,12 @@ export type PlanInputs = {
   hasCharacterPhoto?: boolean;
   hasProductPhoto?: boolean;
   hasLocationPhoto?: boolean;
+  /** Named people from Your cast in this film (2026-09-29). */
+  cast?: Array<{ name: string; description: string }>;
 };
 
 export const MIN_SHOTS = 2;
-export const MAX_SHOTS = 5;
+export const MAX_SHOTS = 8; // a scripted scene needs room for every line
 export const DEFAULT_SHOTS = 3;
 
 const clampText = (v: unknown, max: number, fallback = ""): string =>
@@ -215,7 +217,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       move: pick(s.move, ALL_MOVE_IDS, t.move),
       action: clampText(s.action, 400, clampText(r.logline, 400, "the scene unfolds")),
       expression: hasPerson ? clampText(s.expression, 200, EMOTIONS[emotion].expression) : "",
-      dialogue: clampText(s.dialogue, 160),
+      dialogue: clampText(s.dialogue, 240),
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
       durationSeconds: Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds,
     });
@@ -277,7 +279,9 @@ Rules:
 - It must feel like ONE film, not random clips: one "look" (grade/film stock, palette family, camera character) for the whole film. Lighting MAY change between scenes when the setting changes (indoor vs outdoor, day vs night) - put that in each shot's "setting" and "lighting" - but it must stay motivated and inside the same grade and palette family, and shots in the same place keep the same lighting.
 - Describe the character once, specifically (age, build, 2-3 distinguishing features, hair) in "character"; clothing in "wardrobe". Never name real people, celebrities or famous fictional characters - describe an original person instead. No brand names unless the user gave them.
 - "action": what physically happens, in plain visual language. "expression": a physical micro-expression (a swallow, a glance down), never just the feeling's name.
-- "dialogue": short spoken lines only where they fit (UGC and ads usually speak; cinematic often silent). Max ~15 words per shot. Original lines only.
+- "dialogue": short spoken lines only where they fit (UGC and ads usually speak; cinematic often silent). Max ~20 words per shot. Original lines only - unless the user gives a script.
+- SCRIPTS: if the idea contains a script or dialogue (lines in quotes, or "NAME: line"), keep EVERY line word for word, in the same order, spread across the shots (one or two lines per shot, each shot long enough to say them), with the right speaker named in "action" (e.g. "Victor, leaning back, says:"). Never invent, cut, reorder or reword lines. Put stage directions into action, camera and expression.
+- CAST: if named cast members are given, use their exact names in "character" (one short description each, separated by "; ") and name who is in frame in every shot's "action". Never rename them.
 - durationSeconds per shot: commercial 2-4, ugc 4-6, cinematic 5-8, music_video 2-4, documentary 5-8.
 - If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression" and every "dialogue" empty, never describe faces, hands or people in "action", and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
 - If a character/product/location photo is provided, refer to it as "the exact person/product/location from the reference photo" and only add details that don't contradict it.
@@ -295,7 +299,10 @@ export function plannerUserMessage(inputs: PlanInputs): string {
     `Number of shots: ${Math.min(MAX_SHOTS, Math.max(MIN_SHOTS, inputs.shotCount ?? DEFAULT_SHOTS))}`,
     `Aspect ratio: ${inputs.aspectRatio && inputs.aspectRatio !== "auto" ? inputs.aspectRatio : "decide from the style"}`,
     `Reference photos provided: character=${!!inputs.hasCharacterPhoto}, product=${!!inputs.hasProductPhoto}, location=${!!inputs.hasLocationPhoto}`,
-  ].join("\n");
+    inputs.cast?.length ? `Cast (use these exact names; they have reference photos): ${inputs.cast.map((c) => `${c.name}${c.description ? ` - ${c.description}` : ""}`).join("; ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function reviseUserMessage(plan: DirectorPlan, instruction: string, shotIndex: number | null): string {

@@ -19,7 +19,37 @@ export type DirectorRefs = {
   characters?: string[];
   products?: string[];
   locations?: string[];
+  /** Named cast from Your cast (2026-09-29): their photos, in order, make up `characters`. */
+  people?: CastPerson[];
 };
+
+export type CastPerson = { name: string; description: string; photos: string[] };
+export const MAX_CAST = 3;
+
+/** Shares the 8 character slots fairly between up to 3 people (first photos first: face, 3/4s...). */
+export function allocateCast(people: CastPerson[]): CastPerson[] {
+  const list = people.slice(0, MAX_CAST);
+  const each = Math.max(1, Math.floor(REF_LIMITS.character / Math.max(1, list.length)));
+  return list.map((p) => ({ ...p, photos: p.photos.slice(0, each) }));
+}
+
+/**
+ * Tells the image model who is who: "Images 3, 4 and 5 show Victor (...)".
+ * Built from the final ordered image list, so it's right for any prompt.
+ */
+export function castLegend(ordered: string[], people: CastPerson[] | undefined): string {
+  if (!people?.length) return "";
+  const parts = people
+    .map((p) => {
+      const idx = p.photos.map((u) => ordered.indexOf(u) + 1).filter((n) => n > 0);
+      if (!idx.length) return "";
+      const which = idx.length === 1 ? `Image ${idx[0]} shows` : `Images ${idx.slice(0, -1).join(", ")} and ${idx[idx.length - 1]} show`;
+      return `${which} ${p.name}${p.description ? ` (${p.description.slice(0, 160)})` : ""}`;
+    })
+    .filter(Boolean);
+  if (!parts.length) return "";
+  return `Who is who in the reference images: ${parts.join("; ")}. Keep each person's face, hair and build exactly as in their own images - never mix faces between people.`;
+}
 
 const LIST_KEY = { character: "characters", product: "products", location: "locations" } as const;
 
@@ -101,4 +131,28 @@ export function characterFromTextPrompt(character: string, wardrobe: string): st
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+// ---- Location sheets (2026-09-29) ----
+// A set made from words: one establishing view, then the same place from
+// two more camera positions, always empty, so every scene filmed there
+// matches. Saved to "Your sets" like a cast member.
+export const LOCATION_ANGLES = [
+  { id: "wide", label: "Wide", instruction: "a wide establishing view from the entrance, showing the whole space" },
+  { id: "main", label: "Main view", instruction: "an eye-level view of the main area where the action happens, as a film camera would frame it" },
+  { id: "reverse", label: "Reverse", instruction: "the reverse angle - from the far side of the space looking back toward the entrance" },
+] as const;
+export type LocationAngleId = (typeof LOCATION_ANGLES)[number]["id"];
+
+export function locationAnglePrompt(angleId: LocationAngleId, description: string, fromReference: boolean): string {
+  const angle = LOCATION_ANGLES.find((a) => a.id === angleId) ?? LOCATION_ANGLES[0];
+  return [
+    fromReference
+      ? "Using the reference photo, show the SAME place from a new camera position: identical architecture, furniture, colours, materials, light and time of day."
+      : "Create ONE photorealistic film-set photograph of this place:",
+    `${description.trim().slice(0, 600)}.`,
+    `Camera: ${angle.instruction}.`,
+    "Completely EMPTY - no people, no hands, no faces.",
+    "Cinematic, physically real light and materials, natural depth of field, 35mm film look. ONE single photo filling the frame - never a collage or grid. No text, no watermark.",
+  ].join(" ");
 }

@@ -26,6 +26,10 @@ export async function POST(req: NextRequest) {
       hasCharacterPhoto: !!body.hasCharacterPhoto,
       hasProductPhoto: !!body.hasProductPhoto,
       hasLocationPhoto: !!body.hasLocationPhoto,
+      cast: (Array.isArray(body.cast) ? body.cast : [])
+        .slice(0, 3)
+        .map((c) => ({ name: String((c as { name?: unknown })?.name ?? "").slice(0, 60), description: String((c as { description?: unknown })?.description ?? "").slice(0, 300) }))
+        .filter((c) => c.name),
     });
     return publicJson({ plan, source });
   } catch (err) {

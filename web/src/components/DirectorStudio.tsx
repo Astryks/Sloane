@@ -5,6 +5,7 @@
 // storyboard (free, editable), then produces and stitches the film on any
 // model, pay as you go. See lib/director/* and /api/director/*.
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   ANGLES,
@@ -26,7 +27,7 @@ import {
   type VideoEngine,
 } from "@/lib/videoEngines";
 import type { DirectorRecipe } from "./DirectorRecipes";
-import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type RefPhotos } from "./DirectorPhotos";
+import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
 
 const DRAFT_KEY = "lucy_director_draft";
 const GOAL_LABEL: Record<string, string> = {
@@ -89,7 +90,7 @@ export function DirectorStudio({
   const [film, setFilm] = useState<FilmStatus | null>(null);
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [castId, setCastId] = useState<string | null>(null);
+  const [selectedCast, setSelectedCast] = useState<CastPick[]>([]);
   // "Use this recipe" from the examples gallery fills the form (new version = new tap).
   useEffect(() => {
     if (!recipe || filmId) return;
@@ -118,7 +119,7 @@ export function DirectorStudio({
     const p = new URLSearchParams(window.location.search);
     if (p.get("director") !== "1") return;
     window.history.replaceState(null, "", window.location.pathname + window.location.hash);
-    let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; refs?: Parameters<typeof photosFromLinks>[0]; castId?: string | null; auto?: boolean } | null = null;
+    let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; refs?: Parameters<typeof photosFromLinks>[0]; cast?: CastPick[]; auto?: boolean } | null = null;
     try {
       draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null");
       sessionStorage.removeItem(DRAFT_KEY);
@@ -129,7 +130,7 @@ export function DirectorStudio({
     if (VIDEO_PAYGO_ENGINES[draft.engine]) setEngine(draft.engine);
     if (p.get("canceled") === "1") return setNotice("Checkout canceled - nothing was charged. Your storyboard is still here.");
     if (draft.refs) setPhotos(photosFromLinks(draft.refs));
-    if (draft.castId) setCastId(draft.castId);
+    if (draft.cast?.length) setSelectedCast(draft.cast);
     setNotice("Payment received - starting your film…");
     autoApproveRef.current = !!draft.auto;
     autoCreateRef.current = true;
@@ -182,7 +183,8 @@ export function DirectorStudio({
           style,
           shotCount,
           aspectRatio: aspect,
-          hasCharacterPhoto: readyUrls(photos, "character").length > 0,
+          hasCharacterPhoto: readyUrls(photos, "character").length > 0 || selectedCast.length > 0,
+          cast: selectedCast.map((c) => ({ name: c.name, description: c.description })),
           hasProductPhoto: readyUrls(photos, "product").length > 0,
           hasLocationPhoto: readyUrls(photos, "location").length > 0,
         }),
@@ -269,7 +271,7 @@ export function DirectorStudio({
       form.append("engine", engine);
       form.append("idea", idea);
       form.append("plan", JSON.stringify(plan));
-      if (castId) form.append("savedCharacterId", castId);
+      if (selectedCast.length) form.append("savedCharacterIds", JSON.stringify(selectedCast.map((c) => c.id)));
       form.append("refs", JSON.stringify(refLinks));
       if (opts.auto) form.append("autoApprove", "1");
       const res = await fetch("/api/director/create", { method: "POST", body: form });
@@ -283,7 +285,7 @@ export function DirectorStudio({
       if (data.needCredit) {
         if (silentOnNoCredit) return false;
         try {
-          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ idea, plan, engine, refs: refLinks, castId, auto: !!opts.auto }));
+          sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ idea, plan, engine, refs: refLinks, cast: selectedCast, auto: !!opts.auto }));
         } catch {}
         const co = await fetch("/api/video-paygo/checkout", {
           method: "POST",
@@ -388,6 +390,9 @@ export function DirectorStudio({
         <p className="mt-1 text-xs text-muted">
           {formatUsd(perShot)} per shot · pay as you go · failed shots refunded
         </p>
+        <p className="mt-2 text-xs">
+          <Link href="/make-a-movie" className="font-semibold text-purple underline">🎥 Making a movie with your own characters? Follow the step-by-step guide</Link>
+        </p>
       </div>
 
       <div className="mt-5 flex flex-col gap-4">
@@ -422,7 +427,7 @@ export function DirectorStudio({
           </div>
         </div>
 
-        <DirectorPhotos photos={photos} setPhotos={setPhotos} castId={castId} setCastId={setCastId} onNotice={setNotice} onError={setError} />
+        <DirectorPhotos photos={photos} setPhotos={setPhotos} selectedCast={selectedCast} setSelectedCast={setSelectedCast} onNotice={setNotice} onError={setError} />
 
         <details className="rounded-2xl border border-border bg-white/70 p-3">
           <summary className="cursor-pointer text-sm font-bold text-foreground">3. ⚙️ Settings <span className="font-normal text-muted">(optional - Lucy picks)</span></summary>
@@ -610,7 +615,7 @@ export function DirectorStudio({
             <button type="button" onClick={() => setShowPrompts((v) => !v)} className="self-start text-[11px] font-semibold text-purple underline">
               {showPrompts ? "Hide" : "Show"} what Lucy sends to the model
             </button>
-            {showPrompts && <PromptPreview plan={plan} engine={engine} photos={photos} />}
+            {showPrompts && <PromptPreview plan={plan} engine={engine} photos={photos} castCount={selectedCast.length} />}
 
             <div className="rounded-xl bg-purple/5 p-3 text-sm">
               <p>
@@ -664,7 +669,7 @@ export function DirectorStudio({
                 <p className="text-sm font-bold text-foreground">Your film is ready 🎬</p>
                 {film.finalVideoUrl && <video src={film.finalVideoUrl} controls playsInline className="w-full rounded-xl" />}
                 {film.error && <p className="text-xs text-muted">{film.error}</p>}
-                {!castId && !castSaved && (film.characterPhotos?.length ?? 0) > 0 && (
+                {selectedCast.length === 0 && !castSaved && (film.characterPhotos?.length ?? 0) > 0 && (
                   <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white/70 p-2">
                     <span className="text-[11px] font-semibold text-muted">Love this character? Save them ({film.characterPhotos?.length} photos) for your next film:</span>
                     <input className={`${inputCls} w-32`} placeholder="Name" value={saveCastName} onChange={(e) => setSaveCastName(e.target.value)} />
@@ -691,14 +696,14 @@ export function DirectorStudio({
   );
 }
 
-function PromptPreview({ plan, engine, photos }: { plan: DirectorPlan; engine: VideoEngine; photos: RefPhotos }) {
+function PromptPreview({ plan, engine, photos, castCount }: { plan: DirectorPlan; engine: VideoEngine; photos: RefPhotos; castCount: number }) {
   const [prompts, setPrompts] = useState<string[]>([]);
   useEffect(() => {
     import("@/lib/director/compile").then(({ compileShotPrompt }) => {
-      const refs = { character: photos.character.length > 0, product: photos.product.length > 0, location: photos.location.length > 0 };
+      const refs = { character: photos.character.length > 0 || castCount > 0, product: photos.product.length > 0, location: photos.location.length > 0 };
       setPrompts(plan.shots.map((_, i) => compileShotPrompt(plan, i, refs, { nativeAudio: VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio })));
     });
-  }, [plan, engine, photos]);
+  }, [plan, engine, photos, castCount]);
   return (
     <ol className="flex flex-col gap-2 rounded-xl bg-cream p-3 text-[11px] leading-relaxed text-muted">
       {prompts.map((p, i) => (

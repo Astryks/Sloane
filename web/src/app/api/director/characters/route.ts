@@ -12,15 +12,20 @@ const MAX_CHARACTERS = 50;
 // reuse them in any Directed-by-Lucy film. A character can keep a whole
 // character sheet (up to 8 photos, as links from /api/director/upload).
 // Works for guests too (merged into their account if they sign in later).
+// ?kind=location / form kind=location -> the saved sets ("Your sets").
+function kindOf(v: unknown): "character" | "location" {
+  return v === "location" ? "location" : "character";
+}
+
 function toClient(c: SavedCharacter) {
   const photoUrls = savedCharacterPhotos(c);
   return { id: c.id, name: c.name, description: c.description, photoUrl: photoUrls[0], photoUrls };
 }
-export async function GET() {
+export async function GET(req: NextRequest) {
   await initSchema();
   const user = await getPaygoSessionUser();
   if (!user) return publicJson({ characters: [] });
-  const rows = await listSavedCharacters(user.id);
+  const rows = await listSavedCharacters(user.id, kindOf(req.nextUrl.searchParams.get("kind")));
   return publicJson({ characters: rows.map(toClient) });
 }
 
@@ -41,9 +46,10 @@ export async function POST(req: NextRequest) {
     if (!links.length && !hasFile) return publicJson({ error: "Add a clear photo of the character" }, { status: 400 });
     if (hasFile && (!photo.type.startsWith("image/") || photo.size > MAX_UPLOAD_BYTES)) return publicJson({ error: "Photo must be an image under 15MB" }, { status: 400 });
     const user = await getOrCreatePaygoSessionUser();
-    if ((await listSavedCharacters(user.id)).length >= MAX_CHARACTERS) return publicJson({ error: `You can save up to ${MAX_CHARACTERS} characters` }, { status: 400 });
+    const kind = kindOf(form.get("kind"));
+    if ((await listSavedCharacters(user.id, kind)).length >= MAX_CHARACTERS) return publicJson({ error: `You can save up to ${MAX_CHARACTERS}` }, { status: 400 });
     if (hasFile) links = [await uploadInputMedia(Buffer.from(await photo.arrayBuffer()), photo.type, "character.jpg", "vertex"), ...links].slice(0, REF_LIMITS.character);
-    const c = await createSavedCharacter(user.id, name, description, links);
+    const c = await createSavedCharacter(user.id, name, description, links, kind);
     return publicJson({ character: toClient(c) });
   } catch (err) {
     console.error("[director/characters] save failed", err);

@@ -96,6 +96,9 @@ export default function Page() {
           subtitle="So your person looks the same in every shot of your film. Easy enough for a 5-year-old, complete enough for a filmmaker."
         />
 
+        <p className="rounded-2xl bg-purple/10 p-3 text-sm text-foreground">
+          🎥 Making a whole movie? Follow <Link href="/make-a-movie" className="font-bold text-purple underline">Make your own movie</Link> - characters, places, script and filming, step by step.
+        </p>
         <SeoCard title="🧸 What is a character sheet?">
           <p>
             It&apos;s <strong className="text-foreground">photos of the same person from every side</strong> - like turning a toy around in your hand to see

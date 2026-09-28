@@ -47,7 +47,12 @@ function sentence(s: string): string {
 
 function subjectLine(plan: DirectorPlan, refs: RefFlags): string {
   const extra = plan.character && !/reference/i.test(plan.character) ? `; ${plan.character}` : "";
-  const who = refs.character ? `The person is the exact person from the character reference image - same face, identity, skin tone and hair${extra}` : plan.character;
+  const several = plan.character.includes(";");
+  const who = refs.character
+    ? several
+      ? `The people are exactly the people in the reference images - same faces, identity, skin tone and hair - ${plan.character}`
+      : `The person is the exact person from the character reference image - same face, identity, skin tone and hair${extra}`
+    : plan.character;
   return [who ? sentence(who) : "", plan.wardrobe ? sentence(`Wardrobe (identical in every shot): ${plan.wardrobe}`) : ""].filter(Boolean).join(" ");
 }
 

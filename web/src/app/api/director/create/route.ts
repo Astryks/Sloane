@@ -5,7 +5,7 @@ import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy"
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan } from "@/lib/director/plan";
-import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, buildRefs, type RefKind } from "@/lib/director/refs";
+import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
 import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
@@ -51,10 +51,16 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: "Plan your film first" }, { status: 400 });
     }
     let plan = sanitizePlan(rawPlan);
-    // A saved character from the library stands in for an uploaded photo.
-    const savedId = String(form.get("savedCharacterId") ?? "");
-    const saved = savedId ? await getSavedCharacter(user.id, savedId) : null;
-    if (saved && saved.description && !plan.character) plan = { ...plan, character: saved.description };
+    // Named cast from Your cast (up to 3 people, 2026-09-29); the older single
+    // savedCharacterId still works.
+    let castIds: string[] = [];
+    try {
+      const parsed = JSON.parse(String(form.get("savedCharacterIds") ?? "[]"));
+      if (Array.isArray(parsed)) castIds = parsed.map(String);
+    } catch {}
+    const legacyId = String(form.get("savedCharacterId") ?? "");
+    if (legacyId && !castIds.includes(legacyId)) castIds.unshift(legacyId);
+    const savedCast = (await Promise.all(castIds.slice(0, 3).map((id) => getSavedCharacter(user.id, id)))).filter((c) => !!c && c.kind !== "location");
     const idea = String(form.get("idea") ?? plan.logline).slice(0, 1500);
 
     const files: Record<"character" | "product" | "location", Blob | null> = { character: null, product: null, location: null };
@@ -67,11 +73,20 @@ export async function POST(req: NextRequest) {
       }
     }
     const links = parseRefLinks(form.get("refs"));
-    if (saved && !links.character.length && !files.character) links.character = savedCharacterPhotos(saved).slice(0, REF_LIMITS.character);
+    let people: CastPerson[] | undefined;
+    if (savedCast.length) {
+      const named = savedCast.map((c) => ({ name: c!.name, description: c!.description, photos: savedCharacterPhotos(c!) }));
+      // Anyone uploaded alongside the cast becomes one more (unnamed) person.
+      if (links.character.length) named.push({ name: "the person in the uploaded photos", description: "", photos: links.character });
+      people = allocateCast(named);
+      links.character = people.flatMap((p) => p.photos).slice(0, REF_LIMITS.character);
+      const everyoneNamed = people.every((p) => plan.character.includes(p.name));
+      if (!everyoneNamed) plan = { ...plan, character: people.map((p) => (p.description ? `${p.name}: ${p.description}` : p.name)).join("; ") };
+    }
     // Lucy makes the character sheet herself when there's a person and the
     // customer hasn't already given several angles.
     const characterPhotos = links.character.length + (files.character ? 1 : 0);
-    const autoCast = !!plan.character && characterPhotos <= AUTO_CAST_MAX_EXISTING;
+    const autoCast = !people && !!plan.character && characterPhotos <= AUTO_CAST_MAX_EXISTING;
     const autoApprove = String(form.get("autoApprove") ?? "") === "1";
     const refFlags = {
       character: characterPhotos > 0,
@@ -104,7 +119,7 @@ export async function POST(req: NextRequest) {
         idea,
         plan,
         engine,
-        refs: buildRefs(links),
+        refs: { ...buildRefs(links), ...(people ? { people } : {}) },
         totalCents,
         autoApprove,
         castStatus: autoCast ? "pending" : "done",

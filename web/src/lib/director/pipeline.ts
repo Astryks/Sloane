@@ -37,7 +37,7 @@ import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl,
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import type { DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
-import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt } from "./refs";
+import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt } from "./refs";
 import { refFlags } from "./filmAccess";
 
 // Marker stored as the request id when a still was made synchronously on
@@ -125,7 +125,7 @@ async function advanceAnchor(film: DirectorFilmRow, plan: DirectorPlan) {
     const refs = uploadedRefs(film);
     if (!film.anchor_request_id) {
       const { compileAnchorPrompt } = await import("./compile");
-      const prompt = compileAnchorPrompt(plan, refFlags(film));
+      const prompt = [compileAnchorPrompt(plan, refFlags(film)), castLegend(refs, film.refs.people)].filter(Boolean).join(" ");
       // Google first (Google credits); reseller job as the fallback.
       const googleUrl = await generateImageOnVertex(prompt, refs, plan.aspectRatio);
       if (googleUrl) return updateDirectorFilm(film.id, { anchor_request_id: VERTEX_SYNC, anchor_url: googleUrl, status: "frames" });
@@ -153,9 +153,10 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
     // and grade don't drift when the camera moves to a new angle.
     const refs = orderedRefs([shot.redraw_from_url, film.anchor_url], refList(film.refs, "product"), refList(film.refs, "character"), refList(film.refs, "location"));
     if (!shot.keyframe_request_id) {
-      const googleUrl = await generateImageOnVertex(shot.keyframe_prompt, refs, plan.aspectRatio);
+      const prompt = [shot.keyframe_prompt, castLegend(refs, film.refs.people)].filter(Boolean).join(" ");
+      const googleUrl = await generateImageOnVertex(prompt, refs, plan.aspectRatio);
       if (googleUrl) return updateDirectorShot(shot.id, { status: "keyframe", keyframe_request_id: VERTEX_SYNC, keyframe_url: googleUrl });
-      const requestId = await submitImage(shot.keyframe_prompt, refs, plan.aspectRatio);
+      const requestId = await submitImage(prompt, refs, plan.aspectRatio);
       return updateDirectorShot(shot.id, { status: "keyframe", keyframe_request_id: requestId });
     }
     const { done, url } = await pollImage(shot.keyframe_request_id, true);

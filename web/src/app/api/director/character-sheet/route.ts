@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getOrCreatePaygoSessionUser } from "@/lib/auth";
+import { isOwner } from "@/lib/owner";
 import { initSchema, takeDirectorPlanSlot } from "@/lib/db";
 import { generateImageOnVertex } from "@/lib/googleImage";
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
       .filter(isVendorMediaUrl);
     if (!photos.length) return publicJson({ error: "Add a clear photo of the person first" }, { status: 400 });
     const user = await getOrCreatePaygoSessionUser();
-    if (!(await takeDirectorPlanSlot(`sheet:${user.id}`, DAILY_ANGLE_CAP))) {
+    if (!isOwner(user) && !(await takeDirectorPlanSlot(`sheet:${user.id}`, DAILY_ANGLE_CAP))) {
       return publicJson({ error: "You've made 3 character sheets today - that's the daily limit. Try again tomorrow." }, { status: 429 });
     }
     const url = await generateImageOnVertex(sheetAnglePrompt(angle, String(body.description ?? "")), photos, "3:4");
