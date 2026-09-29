@@ -494,3 +494,27 @@ Next:
   2. MP4 / YouTube upload in step 1 - Gemini watches the clip and writes the shot list (camera, staging; own dialogue).
   3. Quality gap vs Higgsfield / Chloe vs History: try Veo reference-image mode (no drawn first frame), grittier stills, single-speaker takes, Kling 3.0.
   4. Lip-sync dub (Lucy voice -> Kling lipsync -> room sound mix); Modal tts/mix modes already deployed.
+
+## 2026-09-29 (night) - rebuild after Higgsfield / Chloe research
+Research summary (sources in the session; key points):
+- Higgsfield resells Seedance/Kling/Veo/Wan and wins on the *settings*: a per-film camera body, lens, lighting and grain ("the prompt describes what happens, the settings describe the world"), Soul ID trained faces, Elements with @tags, grading after generation.
+- Chloe vs History = one creator (Jonathan Laramy) using Claude for scripts and Seedance 2.0 for video, 9:16 handheld-selfie clips stitched into roughly 1-minute videos. Probably ElevenLabs voice and CapCut. The personality in the writing does most of the work.
+- Best practice: one speaker per shot, imperfect (handheld, grain, real skin), real room sound, no over-clean first frames, reference images for consistency.
+
+Shipped tonight:
+- **Copy a clip** (step 1): paste a YouTube link or upload an MP4 (client upload to Blob, up to 100MB, deleted after watching). Gemini watches it and writes the shot list in Lucy's script format for your cast, with new dialogue (never transcribed). Tested with a YouTube trailer (20s) and a 6MB MP4 (40s). Routes: /api/director/clip-upload, /api/director/analyze-clip.
+- **Camera format per film** (plan look): 35mm film (default), 16mm raw, cinema digital, phone / selfie vlog (default for UGC). Its wording goes into every shot and still.
+- **Realism pass** in the prompts: a human camera operator (micro-jitter, or tripod drift), candid skin, stray hairs and lived-in sets in the stills and shots, real room sound with no music, the subject off-centre and only the people the shot needs.
+- **Stitch finish** (Modal director-stitch, deployed): light moving grain on every shot, per-shot loudness normalisation, click-free cuts, continuous faint room tone under the film.
+- **Veo 3.1 "ingredients"** option (plan look checkbox, Veo 3.1 best only): films from the real cast and set photos (max 3) instead of a drawn first frame. Always 8s (a Veo requirement). Falls back to the storyboard frame if Veo refuses the references.
+- **Free storyboards**: "Check each step" charges nothing up front (3 free a day, then $1, taken off the film). The film is charged on Approve, with a Stripe top-up and auto-approve on return. "Just make it" still charges up front. Column director_films.paid_cents.
+- **Retake this shot**: after filming, re-film one shot with an optional note. It's charged at the shot price, re-voiced and re-joined. Several retakes can run at once.
+- **Selfie vlog recipe** with a real demo (/examples/recipe-vlog.mp4, Veo 3.1 + phone format).
+- **Script helper**: one speaker per shot, personality and verbal habits, numbers as words.
+- **Owner Seedance test** on free BytePlus tokens: 1.5 pro is retired (API NotFound). Seedance 1.0 pro was activated (free 2M tokens) and the owner's "Seedance" films use it (no sound). The comparison is in ~/Documents/Lucy Movie/Scenes/Model test/: Seedance 1.0 looks more like real film than Veo but is silent.
+- Kling free tier: refused non-members at peak ("system busy"). Everything is set up in Sid's account (54 credits, 720p 6s), so press Generate off-peak. Dreamina's free credits don't cover Seedance video (paywall).
+
+Not built / next:
+- Seedance 2.0 direct needs a BytePlus top-up above the reserve (2.0 fast is roughly US$0.7 per 8s at 720p, far cheaper than resellers). Then switch the owner test model to seedance-2-0-fast-260128 or seedance-2-0-260128.
+- Lip-sync dub (Lucy voice -> Kling lipsync) costs money on the backup provider, so it isn't wired; the Modal tts/mix modes are ready.
+- Model per shot (Veo close-ups, Kling two-shots), automatic bad-take detection, Soul-ID-style trained faces.
