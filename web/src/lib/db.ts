@@ -2581,6 +2581,12 @@ export async function getSavedCharacter(userId: string, id: string): Promise<Sav
   return (rows[0] as SavedCharacter) ?? null;
 }
 
+/** Rename / re-describe a saved person or set (2026-09-29). */
+export async function updateSavedCharacter(userId: string, id: string, name: string, description: string): Promise<SavedCharacter | null> {
+  const rows = await sql`UPDATE saved_characters SET name = ${name}, description = ${description} WHERE id = ${id} AND user_id = ${userId} RETURNING *`;
+  return (rows[0] as SavedCharacter) ?? null;
+}
+
 export async function deleteSavedCharacter(userId: string, id: string): Promise<boolean> {
   const rows = await sql`DELETE FROM saved_characters WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
   return rows.length > 0;

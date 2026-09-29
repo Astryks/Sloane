@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getOrCreatePaygoSessionUser, getPaygoSessionUser } from "@/lib/auth";
-import { createSavedCharacter, deleteSavedCharacter, initSchema, listSavedCharacters, savedCharacterPhotos, type SavedCharacter } from "@/lib/db";
+import { createSavedCharacter, deleteSavedCharacter, updateSavedCharacter, initSchema, listSavedCharacters, savedCharacterPhotos, type SavedCharacter } from "@/lib/db";
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { REF_LIMITS } from "@/lib/director/refs";
 import { uploadInputMedia } from "@/lib/mediaUpload";
@@ -55,6 +55,18 @@ export async function POST(req: NextRequest) {
     console.error("[director/characters] save failed", err);
     return publicJson({ error: "Couldn't save that character right now." }, { status: 500 });
   }
+}
+
+// Rename / re-describe: {id, name, description}.
+export async function PATCH(req: NextRequest) {
+  await initSchema();
+  const user = await getPaygoSessionUser();
+  const body = (await req.json().catch(() => ({}))) as { id?: unknown; name?: unknown; description?: unknown };
+  const name = String(body.name ?? "").trim().slice(0, 60);
+  if (!user || !name) return publicJson({ error: "Give it a name" }, { status: 400 });
+  const c = await updateSavedCharacter(user.id, String(body.id ?? ""), name, String(body.description ?? "").trim().slice(0, 400));
+  if (!c) return publicJson({ error: "Not found" }, { status: 404 });
+  return publicJson({ character: toClient(c) });
 }
 
 export async function DELETE(req: NextRequest) {
