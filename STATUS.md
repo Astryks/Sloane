@@ -15,10 +15,11 @@
   - Places once.
   - Script format and camera words, filming, joining scenes.
   - Linked from the Director panel, `/character-sheet` and the sitemap.
-- **Sid's cast (made on the live site, not saved yet):**
-  - The Mentor (6 angles), The Broker (6), The Trainer (4; face close-up doesn't match well - drop it; full and back still to draw).
-  - Office set: 3 angles, black chair.
-  - The browser pane was a guest session (signed out), so saving waits for Sid to sign in. Links are in the session scratchpad (`links.json`).
+- **Sid's cast: saved** to his personal-email account.
+  - Your cast: The Mentor (7 photos), The Broker (7), The Trainer (6; redrawn in a white open-collar shirt with a pendant via the new outfit option).
+  - Your sets: "Astryks office" (2 angles). A vast dark office with the Astryks logo as a backlit brushed-steel sign, via the new logo option.
+  - Note: `OWNER_EMAILS` is `support@astryks.com` only. On the personal email the sheet caps apply and films charge credit.
+- **New options:** outfit change on character sheets (same face, new clothes); a logo built into drawn sets (`logo` + `logoPlacement`).
 - **Next:** Sid sends the scene script -> plan and storyboard with Mentor + Broker in the office, review before filming.
 
 ## Latest update, 2026-09-27 (end of day) - Spec audit + pending list
