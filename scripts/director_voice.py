@@ -197,13 +197,30 @@ def _duration(path):
     return int(d.group(1)) * 3600 + int(d.group(2)) * 60 + float(d.group(3)) if d else 0.0
 
 
+def _acting(delivery):
+    """2026-09-30: the line's stage direction -> Chatterbox acting controls
+    (exaggeration = emotional intensity, cfg_weight = how tightly it sticks to
+    the reference's pace; lower = looser, more natural timing)."""
+    d = (delivery or "").lower()
+    if any(w in d for w in ("whisper", "quiet", "soft", "gentle", "tender", "sad", "hushed")):
+        return 0.35, 0.5
+    if any(w in d for w in ("excited", "angry", "shout", "boom", "roar", "laugh", "breathless", "furious", "thrilled", "yell")):
+        return 0.95, 0.3
+    if any(w in d for w in ("firm", "authorit", "confident", "stern", "cold", "commanding", "harsh")):
+        return 0.6, 0.45
+    if any(w in d for w in ("warm", "friendly", "curious", "smile", "playful", "bubbly")):
+        return 0.7, 0.38
+    return None, None
+
+
 @app.function(image=image, secrets=[fal_key_secret], timeout=300)
-def tts_line(voice_id, text, seconds):
+def tts_line(voice_id, text, seconds, delivery=""):
     """A shot's line in a Lucy voice (lucy-tts app), fitted to the shot: trimmed
     of dead air, sped up (max 1.3x) if it's too long, and padded to the shot's
     length with a short lead-in so the lip-sync model has room."""
     tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
-    r = tts.run_generate_preset.remote(text, voice_id)
+    exaggeration, cfg_weight = _acting(delivery)
+    r = tts.run_generate_preset.remote(text, voice_id, exaggeration, cfg_weight)
     if not isinstance(r, dict) or not r.get("audio_base64"):
         raise RuntimeError((r or {}).get("error", "no audio"))
     with tempfile.TemporaryDirectory() as tmp:
@@ -263,7 +280,7 @@ def web():
         elif mode == "convert" and _https(body.get("video_url")) and _https(body.get("reference_url")):
             call = Voice().convert.spawn(body["video_url"], body["reference_url"])
         elif mode == "tts" and isinstance(body.get("voice_id"), str) and isinstance(body.get("text"), str):
-            call = tts_line.spawn(body["voice_id"], body["text"][:400], float(body.get("seconds") or 8))
+            call = tts_line.spawn(body["voice_id"], body["text"][:400], float(body.get("seconds") or 8), str(body.get("delivery") or "")[:120])
         elif mode == "mix" and _https(body.get("video_url")) and _https(body.get("bed_video_url")):
             call = Voice().mix.spawn(body["video_url"], body["bed_video_url"])
         elif mode == "preset" and isinstance(body.get("voice_id"), str):

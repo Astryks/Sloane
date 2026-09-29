@@ -215,13 +215,14 @@ function shotIngredients(film: DirectorFilmRow, plan: DirectorPlan, idx: number)
 const TTS_PREFIX = "tts:";
 
 /** The spoken words + the speaker's Lucy voice, if this shot's speaker has one. */
-function voiceFirstLine(film: DirectorFilmRow, plan: DirectorPlan, idx: number): { speaker: string; voiceId: string; words: string } | null {
+function voiceFirstLine(film: DirectorFilmRow, plan: DirectorPlan, idx: number): { speaker: string; voiceId: string; words: string; delivery: string } | null {
   const shot = plan.shots[idx];
   const words = shot?.dialogue.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
   if (!shot || !words) return null;
   const who = speakerOf(shot, film.refs.people ?? []);
   const person = who >= 0 ? film.refs.people?.[who] : undefined;
-  return person?.voiceId ? { speaker: person.name, voiceId: person.voiceId, words } : null;
+  const delivery = [...shot.dialogue.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(", ") || shot.expression;
+  return person?.voiceId ? { speaker: person.name, voiceId: person.voiceId, words, delivery } : null;
 }
 
 /**
@@ -302,7 +303,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       let lineAudio: string | null = null;
       if (voiceFirst) {
         if (!shot.video_request_id) {
-          const r = await voiceCall("/start", { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, seconds: Math.min(15, Math.max(4, d ?? 8)) }).catch(() => null);
+          const r = await voiceCall("/start", { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, seconds: Math.min(15, Math.max(4, d ?? 8)) }).catch(() => null);
           if (r && typeof r.call_id === "string") return updateDirectorShot(shot.id, { video_request_id: `${TTS_PREFIX}${r.call_id}` });
         } else {
           const r = await voiceCall(`/result?call_id=${encodeURIComponent(shot.video_request_id.slice(TTS_PREFIX.length))}`).catch(() => null);
