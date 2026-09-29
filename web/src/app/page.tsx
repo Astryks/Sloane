@@ -1163,17 +1163,11 @@ function SiteNav() {
         <span className="text-xl font-extrabold tracking-tight text-foreground">Lucy Labs</span>
       </Link>
       <h1 className="text-base font-extrabold tracking-tight text-foreground sm:text-lg">
-        AI video, stills & voice
+        AI video and movies, pay as you go
       </h1>
       <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-semibold text-foreground/70">
-        <a href="#prompt-guide" className="hover:text-foreground">Prompt guide</a>
-        <a href="#ai-models-review" className="hover:text-foreground">AI models</a>
-        <a href="#voice" className="hover:text-foreground">Voice</a>
-        <a href="/stitch" className="hover:text-foreground">Free editor</a>
-        <a href="/ai-video-generation" className="hover:text-foreground">AI video</a>
-        <a href="/camera-moves" className="hover:text-foreground">Camera moves</a>
-        <a href="/study-film" className="hover:text-foreground">Study</a>
-        <a href="/billing" className="hover:text-foreground">Plans</a>
+        <a href="/make-a-movie" className="hover:text-foreground">How it works</a>
+        <a href="/billing" className="hover:text-foreground">Pricing</a>
         <a href="/account" className="hover:text-foreground">My account</a>
       </nav>
     </header>
@@ -1937,8 +1931,8 @@ function ModeSwitch({ mode, onChange }: { mode: "single" | "director"; onChange:
   );
   return (
     <div className="mt-4 flex gap-2">
-      {btn("single", "One video", "Your prompt, any model")}
-      {btn("director", "🎬 Directed by Lucy", "A full multi-shot film from one idea")}
+      {btn("single", "✏️ One video", "Type a prompt, pick any model, pay as you go")}
+      {btn("director", "🎬 Directed by Lucy", "Your characters, your script - a full scene in 3 steps")}
     </div>
   );
 }
@@ -1950,6 +1944,14 @@ export default function Home() {
     const p = new URLSearchParams(window.location.search);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (p.get("director") === "1" || window.location.hash === "#director") setMode("director");
+    // Old links to #voice / #prompt-guide / #ai-models-review now live inside "More tools".
+    if (/^#(voice|clone-voice|prompt-guide|ai-models-review|lucy-vs-plain|more-tools)$/.test(window.location.hash)) {
+      const more = document.getElementById("more-tools") as HTMLDetailsElement | null;
+      if (more) {
+        more.open = true;
+        setTimeout(() => document.querySelector(window.location.hash)?.scrollIntoView({ behavior: "smooth" }), 50);
+      }
+    }
   }, []);
   useEffect(() => {
     // Fire-and-forget: wakes up Modal well before the visitor finishes
@@ -1987,39 +1989,42 @@ export default function Home() {
         ) : (
           <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
         )}
-        <LucyVsPlainSection
-          onTry={() => {
-            setMode("director");
-            document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
-          }}
-        />
-        <DirectorRecipes
-          onUse={(r) => {
-            setMode("director");
-            setRecipe((prev) => ({ ...r, v: (prev?.v ?? 0) + 1 }));
-            document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
-          }}
-        />
-        <PromptGuideSection onTryVideo={handleTryVideoFromGuide} />
-        <ProductAdSection />
-
-        <VideoOptionCard
-          icon="🧵"
-          title="Free video editor"
-          description="Stitch different scenes together to create one video here for free. Combine your generated clips (from the generator above, or your storyboard) in order, right in your browser - add your own music if you want sound. Nothing is uploaded to our servers."
-          href="/stitch"
-          cta="Combine my videos"
-          imageSrc="/vintage-camera.jpg"
-        />
-
-        <div id="voice" className="flex scroll-mt-6 flex-col gap-8">
-          <div className="text-center">
-            <h2 className="text-xl font-extrabold tracking-tight">Voice</h2>
-            <p className="text-sm text-muted">Text to speech with our voices, or clone a voice with an account.</p>
+        <details id="more-tools" className="rounded-[28px] border border-white/60 bg-surface/90 p-5 shadow-soft backdrop-blur-xl">
+          <summary className="cursor-pointer text-sm font-bold text-foreground">🧰 More tools <span className="font-normal text-muted">- voices, free editor, prompt guide, examples, model reviews</span></summary>
+          <div className="mt-4 flex flex-col gap-8">
+            <VideoOptionCard
+              icon="🧵"
+              title="Free video editor"
+              description="Join your clips into one video, in your browser, for free."
+              href="/stitch"
+              cta="Combine my videos"
+              imageSrc="/vintage-camera.jpg"
+            />
+            <div id="voice" className="flex scroll-mt-6 flex-col gap-8">
+              <div className="text-center">
+                <h2 className="text-xl font-extrabold tracking-tight">Voice</h2>
+                <p className="text-sm text-muted">Text to speech with our voices, or clone a voice with an account.</p>
+              </div>
+              <PresetVoiceSection />
+              <CloneVoiceSection />
+            </div>
+            <DirectorRecipes
+              onUse={(r) => {
+                setMode("director");
+                setRecipe((prev) => ({ ...r, v: (prev?.v ?? 0) + 1 }));
+                document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            />
+            <LucyVsPlainSection
+              onTry={() => {
+                setMode("director");
+                document.getElementById("pay-as-you-go")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            />
+            <PromptGuideSection onTryVideo={handleTryVideoFromGuide} />
+            <ProductAdSection />
           </div>
-          <PresetVoiceSection />
-          <CloneVoiceSection />
-        </div>
+        </details>
 
         <Footer />
       </main>

@@ -30,6 +30,7 @@ import type { DirectorRecipe } from "./DirectorRecipes";
 import { ScriptHelp } from "./ScriptHelp";
 import { coverageByDefault } from "@/lib/director/coverage";
 import { CopyClip } from "./CopyClip";
+import { CharacterGuide } from "./CharacterGuide";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
 
 const DRAFT_KEY = "lucy_director_draft";
@@ -59,6 +60,18 @@ type FilmStatus = {
   dueOnApproveCents?: number;
 };
 const APPROVE_KEY = "lucy_director_approve";
+
+/** The shot sheet as plain text for Claude/ChatGPT to edit and hand back. */
+function sheetForAI(plan: DirectorPlan): string {
+  const shots = plan.shots
+    .map((s, i) => `SHOT ${i + 1} - ${s.size.replace(/_/g, " ")}, ${s.angle.replace(/_/g, " ")}, ${s.move.replace(/_/g, " ")}, about ${s.durationSeconds} seconds. ${s.action}${s.dialogue ? `\n${(s.speaker || "SPEAKER").toUpperCase()}: ${s.dialogue}` : ""}`)
+    .join("\n\n");
+  return `Here is the shot sheet for my film scene "${plan.title}". Improve it like a film director: better camera coverage (a wide, then over-the-shoulder close-ups on whoever is talking), natural lines with personality, one person speaking per shot, at most 18 spoken words per shot, numbers written as words. Keep the same characters and the same story. Reply with ONLY the full edited sheet in exactly this format.\n\n${shots}`;
+}
+
+function StepBadge({ n }: { n: number }) {
+  return <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-purple text-xs font-extrabold text-white">{n}</span>;
+}
 const DONE_STATES = ["completed", "failed", "cancelled"];
 const MOVIE_KEY = "lucy_movie_preset";
 type MoviePreset = {
@@ -80,11 +93,6 @@ function lineContinues(plan: DirectorPlan, i: number): boolean {
   const same = !prev.speaker || !cur.speaker || prev.speaker.toLowerCase() === cur.speaker.toLowerCase();
   return same && !/[.!?…]["')\]]*\s*$/.test(prev.dialogue.replace(/\([^)]*\)/g, "").trim());
 }
-const IDEA_EXAMPLES = [
-  "An old fisherman rows out at dawn on a misty lake and catches a glowing fish",
-  "A UGC ad: a woman in her bathroom shows her new face cream and says \"my skin feels like silk\"",
-  "A chef flips a pancake in a busy café kitchen and the whole team cheers",
-];
 
 const inputCls = "w-full rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
 
@@ -576,17 +584,71 @@ export function DirectorStudio({
       {modeSwitch}
       <div className="mt-4 text-center">
         <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">🎬 Directed by Lucy</h2>
-        <p className="mx-auto mt-1 max-w-lg text-base text-foreground">Write one sentence. Get a finished film.</p>
+        <p className="mx-auto mt-1 max-w-lg text-base text-foreground">Make a movie scene in 3 steps.</p>
         <p className="mt-1 text-xs text-muted">
           {formatUsd(perShot)} per shot · pay as you go · failed shots refunded
         </p>
         <p className="mt-2 text-xs">
-          <Link href="/make-a-movie" className="font-semibold text-purple underline">🎥 Making a movie with your own characters? Follow the step-by-step guide</Link>
+          <Link href="/make-a-movie" className="font-semibold text-purple underline">Full guide</Link>
         </p>
       </div>
 
       <div className="mt-5 flex flex-col gap-4">
-        <div className="rounded-2xl border border-purple/30 bg-white/70 p-3">
+        <div>
+          <p className="mb-1 flex items-center text-sm font-bold text-foreground">
+            <StepBadge n={1} /> Your characters (and places)
+          </p>
+          <CharacterGuide />
+        </div>
+        <DirectorPhotos
+          photos={photos}
+          setPhotos={setPhotos}
+          selectedCast={selectedCast}
+          setSelectedCast={setSelectedCast}
+          onNotice={setNotice}
+          onError={setError}
+          presetSetId={presetSetId}
+          onSetChange={setCurrentSetId}
+        />
+
+        <div>
+          <p className="mb-1 flex items-center text-sm font-bold text-foreground">
+            <StepBadge n={2} /> What&apos;s your movie about? <ScriptHelp />
+          </p>
+          <textarea
+            aria-label="Describe your film"
+            className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+            rows={5}
+            maxLength={4000}
+            placeholder="Write a simple idea - who, what happens, where, and anything they say. Then ask Claude to turn it into a detailed shot-by-shot script (tap ? for the prompt) and paste it back here."
+            value={idea}
+            onChange={(e) => setIdea(e.target.value)}
+          />
+          {scriptShotCount(idea) > 0 && (
+            <p className="mt-1 text-[11px] font-semibold text-purple">
+              ✓ Found {scriptShotCount(idea)} shots in your script - Lucy will plan exactly {scriptShotCount(idea)}.
+              {(idea.match(/^\s*SHOT\s*\d+/gim) ?? []).length > MAX_SHOTS ? ` (Only the first ${MAX_SHOTS} fit in one scene - put the rest in a second scene.)` : ""}
+            </p>
+          )}
+          <CopyClip castNames={selectedCast.map((c) => c.name)} notes={idea.length < 600 ? idea : ""} onScript={(script) => setIdea(script)} />
+          <p className="mt-2 text-[11px] text-muted">
+            ✨ Make it a proper script: tap <strong className="text-foreground">?</strong>, copy the prompt into{" "}
+            <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">Claude</a>,{" "}
+            <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">ChatGPT</a> or{" "}
+            <a href="https://gemini.google.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">Gemini</a> with your idea, and paste the script it writes back here. Lucy keeps every line word for word.
+          </p>
+        </div>
+
+        <div>
+          <p className="mb-1 flex items-center text-sm font-bold text-foreground">
+            <StepBadge n={3} /> Directed by Lucy
+          </p>
+          <p className="text-[11px] text-muted">
+            Lucy turns your script into a shot sheet - every camera angle and every line, scene by scene. Check it, change anything in plain words (or copy it to your AI and paste its edits back), then film.
+          </p>
+        </div>
+        <details className="rounded-2xl border border-purple/30 bg-white/70 p-3">
+          <summary className="cursor-pointer text-sm font-bold text-foreground">🎞 Your movie <span className="font-normal text-muted">(save your cast, set and look for every scene)</span></summary>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-bold text-foreground">🎞 Your movie</span>
             <select
@@ -619,61 +681,10 @@ export function DirectorStudio({
               onChange={(e) => setMovieNotes(e.target.value)}
             />
           </details>
-        </div>
-
-        <div>
-          <p className="mb-1 flex items-center text-sm font-bold text-foreground">
-            1. What&apos;s your film about? <ScriptHelp />
-          </p>
-          <textarea
-            aria-label="Describe your film"
-            className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-            rows={3}
-            maxLength={4000}
-            placeholder="A girl flies a red kite on a windy beach at sunset, laughing"
-            value={idea}
-            onChange={(e) => setIdea(e.target.value)}
-          />
-          {scriptShotCount(idea) > 0 && (
-            <p className="mt-1 text-[11px] font-semibold text-purple">
-              ✓ Found {scriptShotCount(idea)} shots in your script - Lucy will plan exactly {scriptShotCount(idea)}.
-              {(idea.match(/^\s*SHOT\s*\d+/gim) ?? []).length > MAX_SHOTS ? ` (Only the first ${MAX_SHOTS} fit in one scene - put the rest in a second scene.)` : ""}
-            </p>
-          )}
-          <CopyClip castNames={selectedCast.map((c) => c.name)} notes={idea.length < 600 ? idea : ""} onScript={(script) => setIdea(script)} />
-          <div className="mt-2 rounded-2xl bg-white/70 p-3 text-xs text-muted">
-            <p className="font-bold text-foreground">✏️ How to write it</p>
-            <p className="mt-1 flex flex-wrap items-center gap-1">
-              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">Who</span>+
-              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">does what</span>+
-              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">where</span>+
-              <span className="rounded-full bg-purple/10 px-2 py-0.5 font-bold text-purple">how it feels</span>
-            </p>
-            <p className="mt-2">Tap one to try it:</p>
-            <div className="mt-1 flex flex-col gap-1">
-              {IDEA_EXAMPLES.map((ex) => (
-                <button key={ex} type="button" onClick={() => setIdea(ex)} className="rounded-xl border border-border bg-white px-2 py-1.5 text-left text-xs text-foreground hover:border-purple">
-                  {ex}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2">Selling something? Say what it is and one thing it does. Want words spoken? Put them in &quot;quotes&quot;.</p>
-          </div>
-        </div>
-
-        <DirectorPhotos
-          photos={photos}
-          setPhotos={setPhotos}
-          selectedCast={selectedCast}
-          setSelectedCast={setSelectedCast}
-          onNotice={setNotice}
-          onError={setError}
-          presetSetId={presetSetId}
-          onSetChange={setCurrentSetId}
-        />
+        </details>
 
         <details className="rounded-2xl border border-border bg-white/70 p-3">
-          <summary className="cursor-pointer text-sm font-bold text-foreground">3. ⚙️ Settings <span className="font-normal text-muted">(optional - Lucy picks)</span></summary>
+          <summary className="cursor-pointer text-sm font-bold text-foreground">⚙️ Settings <span className="font-normal text-muted">(model, style, shots, shape - optional)</span></summary>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <label className="text-[11px] font-semibold text-muted">
               Style
@@ -725,28 +736,27 @@ export function DirectorStudio({
           </div>
         )}
 
-        {!filmId && (
+        <button
+          type="button"
+          onClick={() => planIt()}
+          disabled={planning || idea.trim().length < 3}
+          className="w-full rounded-2xl bg-purple py-4 text-base font-extrabold text-white shadow-soft disabled:opacity-50"
+        >
+          {planning ? "Lucy is writing your shot sheet…" : plan ? "🎬 Re-direct from scratch (free)" : "🎬 Directed by Lucy - make my shot sheet (free)"}
+        </button>
+        {!filmId && !plan && (
           <div className="flex flex-col gap-1">
             <button
               type="button"
               onClick={makeItNow}
               disabled={planning || creating || idea.trim().length < 3 || isUploading(photos)}
-              className="w-full rounded-2xl bg-purple py-4 text-base font-extrabold text-white shadow-soft disabled:opacity-50"
+              className="w-full rounded-2xl border-2 border-purple bg-white py-3 text-sm font-bold text-purple shadow-soft disabled:opacity-50"
             >
-              {planning || creating ? "Lucy is on it…" : `🎬 Just make it - ${formatUsd(perShot * (plan?.shots.length ?? (scriptShotCount(idea) || shotCount)))}`}
+              {creating ? "Lucy is on it…" : `Skip the checks - just make it (${formatUsd(perShot * (scriptShotCount(idea) || shotCount))})`}
             </button>
-            <p className="text-center text-[11px] text-muted">Lucy does everything. About 5-10 minutes.</p>
+            <p className="text-center text-[11px] text-muted">Lucy plans, draws and films it with no stops. About 5-10 minutes.</p>
           </div>
         )}
-
-        <button
-          type="button"
-          onClick={() => planIt()}
-          disabled={planning || idea.trim().length < 3}
-          className="w-full rounded-2xl border-2 border-purple bg-white py-3 text-sm font-bold text-purple shadow-soft disabled:opacity-50"
-        >
-          {planning ? "Lucy is planning your film…" : plan ? "Re-plan from scratch (free)" : "Or check each step first (free plan)"}
-        </button>
 
         {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
         {notice && <p className="rounded-2xl bg-white/80 p-3 text-sm text-foreground">{notice}</p>}
@@ -952,10 +962,23 @@ export function DirectorStudio({
               })}
             </ol>
 
+            <div className="rounded-xl bg-purple/5 p-2 text-[11px] text-muted">
+              <p>
+                🤝 <strong className="text-foreground">Work on it with your AI:</strong> copy the shot sheet into Claude or ChatGPT, ask it to improve the camera work or the lines, then paste its whole reply in the box below and tap Apply.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(sheetForAI(plan)).then(() => setNotice("Shot sheet copied - paste it into Claude or ChatGPT."))}
+                className="mt-1 rounded-lg bg-purple px-2 py-1 text-[11px] font-bold text-white"
+              >
+                📋 Copy the shot sheet for my AI
+              </button>
+            </div>
             <div className="flex gap-2">
-              <input
+              <textarea
                 className={inputCls}
-                placeholder='Change the whole film: "make it a UGC ad", "set it at night", "more energetic"…'
+                rows={2}
+                placeholder='Change the whole film ("set it at night", "more tension") - or paste your AI&apos;s edited shot sheet here…'
                 value={reviseText.all ?? ""}
                 onChange={(e) => setReviseText((r) => ({ ...r, all: e.target.value }))}
               />
