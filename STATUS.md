@@ -1,5 +1,26 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-29 - Multi-character cast, Your sets + "Draw this place", scripts verbatim, /make-a-movie guide
+
+- **Multi-character cast:** up to 3 people from Your cast per film.
+  - They share the 8 character photo slots.
+  - A who-is-who legend is added to every master-still and storyboard prompt, built from the final image order.
+  - The planner gets the cast names, and `plan.character` lists each person.
+- **Your sets:** saved locations (`saved_characters.kind='location'`). "Draw this place" makes a wide view from words, then main and reverse angles of the same room (`/api/director/location-sheet`).
+- **Scripts:** pasted lines are kept word for word, in order, across up to 8 shots (`MAX_SHOTS` 5 -> 8).
+- **Owner accounts** are uncapped on character and location sheets.
+- **New `/make-a-movie` guide:**
+  - Free helpers (ChatGPT, Gemini, Claude for scripts).
+  - Characters once: photo rules, copy-paste prompt, how to describe a character.
+  - Places once.
+  - Script format and camera words, filming, joining scenes.
+  - Linked from the Director panel, `/character-sheet` and the sitemap.
+- **Sid's cast (made on the live site, not saved yet):**
+  - The Mentor (6 angles), The Broker (6), The Trainer (4; face close-up doesn't match well - drop it; full and back still to draw).
+  - Office set: 3 angles, black chair.
+  - The browser pane was a guest session (signed out), so saving waits for Sid to sign in. Links are in the session scratchpad (`links.json`).
+- **Next:** Sid sends the scene script -> plan and storyboard with Mentor + Broker in the office, review before filming.
+
 ## Latest update, 2026-09-27 (end of day) - Spec audit + pending list
 
 Checked against the original spec (`~/Downloads/lucylabs_orchestration_engine.v2-original.md`).
