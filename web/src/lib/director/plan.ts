@@ -48,6 +48,8 @@ export type DirectorShot = {
   speaker: string; // who says the dialogue (a cast name, "" = none/unknown) - drives the voice lock
   sound: string; // ambience / score / sfx
   durationSeconds: number;
+  /** Coverage (2026-09-30): which camera setup films this shot, e.g. "master", "single:Liam", "two:Jess+Liam". */
+  setup?: string;
 };
 
 export type DirectorLook = {
@@ -93,6 +95,10 @@ const ALL_GOALS: DirectorGoal[] = ["sell", "story", "explain", "promote", "enter
 export type DirectorPlan = {
   /** Veo 3.1 "ingredients" (2026-09-29): animate from the cast + set photos instead of a drawn first frame. */
   fromPhotos?: boolean;
+  /** Coverage (2026-09-30): film like a real crew - a few camera setups, each drawn once and reused. */
+  coverage?: boolean;
+  /** 2026-09-30: skip the voice swap and keep the video model's own (more natural) voices. */
+  modelVoices?: boolean;
   title: string;
   logline: string;
   goal: DirectorGoal; // what the user is really trying to do - drives the structure
@@ -294,6 +300,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       speaker: clampText(s.speaker, 60),
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
       durationSeconds: fitToDialogue(clampText(s.dialogue, 240), Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds),
+      ...(typeof s.setup === "string" && s.setup.trim() ? { setup: clampText(s.setup, 120) } : {}),
     });
   }
   const aspect =
@@ -317,6 +324,8 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       ...(ALL_CAMERA_FORMATS.includes(lookRaw.format as CameraFormatId) ? { format: lookRaw.format as CameraFormatId } : {}),
     },
     ...(r.fromPhotos === true ? { fromPhotos: true } : {}),
+    ...(typeof r.coverage === "boolean" ? { coverage: r.coverage } : {}),
+    ...(r.modelVoices === true ? { modelVoices: true } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),
     location: clampText(r.location, 300),

@@ -28,6 +28,7 @@ import {
 } from "@/lib/videoEngines";
 import type { DirectorRecipe } from "./DirectorRecipes";
 import { ScriptHelp } from "./ScriptHelp";
+import { coverageByDefault } from "@/lib/director/coverage";
 import { CopyClip } from "./CopyClip";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
 
@@ -756,7 +757,19 @@ export function DirectorStudio({
                     ))}
                   </select>
                 </label>
-                {engine === "veo31" && (
+                <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
+                  <input type="checkbox" className="mt-0.5" checked={plan.coverage ?? coverageByDefault(plan)} onChange={(e) => editPlan({ coverage: e.target.checked })} />
+                  <span>
+                    🎬 Film it like a real crew - a few camera setups (a wide, and over-the-shoulder close-ups on each person) drawn once and reused, so every cut is the same room, the same moment and the same faces. Best for conversations.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
+                  <input type="checkbox" className="mt-0.5" checked={!!plan.modelVoices} onChange={(e) => editPlan({ modelVoices: e.target.checked || undefined })} />
+                  <span>
+                    🗣 Keep the video model&apos;s own voices (most natural - describe each voice in the cast, e.g. &quot;deep, calm, husky&quot;). Off = Lucy swaps in each person&apos;s chosen Lucy voice so it never changes between shots.
+                  </span>
+                </label>
+                {engine === "veo31" && !(plan.coverage ?? coverageByDefault(plan)) && (
                   <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
                     <input type="checkbox" className="mt-0.5" checked={!!plan.fromPhotos} onChange={(e) => editPlan({ fromPhotos: e.target.checked || undefined })} />
                     <span>

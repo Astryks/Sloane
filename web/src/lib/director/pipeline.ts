@@ -148,16 +148,37 @@ async function advanceAnchor(film: DirectorFilmRow, plan: DirectorPlan) {
 }
 
 /** Storyboard frame for one shot, edited FROM the anchor (+ product photo so its label stays exact). */
-async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: DirectorShotRow) {
+async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: DirectorShotRow, all: DirectorShotRow[]) {
   if (shot.keyframe_url || shot.error === "frame" || !film.anchor_url) return;
+  // Coverage (2026-09-30): one frame per camera setup. The first shot of each
+  // setup draws it (singles wait for the master and are edits of it); every
+  // other shot from that setup reuses the exact same frame. A redrawn shot
+  // (redraw_from_url) gets its own frame.
+  const setup = plan.coverage ? plan.shots[shot.idx]?.setup : undefined;
+  let setupPrompt = "";
+  let masterUrl: string | null = null;
+  if (setup && !shot.redraw_from_url) {
+    const setupOf = (s: DirectorShotRow) => plan.shots[s.idx]?.setup;
+    const owner = all.filter((s) => setupOf(s) === setup).sort((a, b) => a.idx - b.idx)[0];
+    if (owner && owner.id !== shot.id) {
+      if (owner.keyframe_url) return updateDirectorShot(shot.id, { status: "keyframe", keyframe_request_id: VERTEX_SYNC, keyframe_url: owner.keyframe_url });
+      if (owner.error === "frame") return updateDirectorShot(shot.id, { error: "frame" });
+      return; // wait for this setup's frame
+    }
+    const master = setup === "master" ? undefined : all.filter((s) => setupOf(s) === "master").sort((a, b) => a.idx - b.idx)[0];
+    if (master && !master.keyframe_url && master.error !== "frame") return; // singles are drawn from the master
+    masterUrl = master?.keyframe_url ?? null;
+    const { compileSetupKeyframePrompt } = await import("./compile");
+    setupPrompt = compileSetupKeyframePrompt(plan, setup, shot.idx, refFlags(film), !!masterUrl);
+  }
   if (!(await claimDirectorShot(shot.id))) return;
   try {
     // Redraws edit the shot's previous frame first; the anchor, product
     // photos and every character angle stay in the list so identity, label
     // and grade don't drift when the camera moves to a new angle.
-    const refs = orderedRefs([shot.redraw_from_url, film.anchor_url], refList(film.refs, "product"), refList(film.refs, "character"), refList(film.refs, "location"));
+    const refs = orderedRefs([shot.redraw_from_url, masterUrl, film.anchor_url], refList(film.refs, "product"), refList(film.refs, "character"), refList(film.refs, "location"));
     if (!shot.keyframe_request_id) {
-      const prompt = [shot.keyframe_prompt, castLegend(refs, film.refs.people)].filter(Boolean).join(" ");
+      const prompt = [setupPrompt || shot.keyframe_prompt, castLegend(refs, film.refs.people)].filter(Boolean).join(" ");
       const googleUrl = await generateImageOnVertex(prompt, refs, plan.aspectRatio);
       if (googleUrl) return updateDirectorShot(shot.id, { status: "keyframe", keyframe_request_id: VERTEX_SYNC, keyframe_url: googleUrl });
       const requestId = await submitImage(prompt, refs, plan.aspectRatio);
@@ -201,7 +222,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       // photos (who's in this shot + the set, max 3) instead of a drawn first
       // frame - Google's recommended way to keep dialogue scenes consistent,
       // and it skips the too-clean drawn still.
-      const ingredients = plan.fromPhotos && engine === "veo31" ? shotIngredients(film, plan, shot.idx) : [];
+      const ingredients = plan.fromPhotos && !plan.coverage && engine === "veo31" ? shotIngredients(film, plan, shot.idx) : [];
       const imageUrl = ingredients.length ? null : (shot.keyframe_url ?? null);
       let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
       // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
@@ -329,7 +350,7 @@ export function speakerOf(shot: DirectorShot | undefined, people: CastPerson[]):
 
 async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
   const people = film.refs.people ?? [];
-  if (!people.length || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
+  if (!people.length || plan.modelVoices || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
   if (!(await claimDirectorFilm(film.id))) return;
   try {
     const refs = JSON.parse(JSON.stringify(film.refs)) as typeof film.refs;
@@ -447,7 +468,7 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
   }
   let shots = await getDirectorShots(film.id);
   if (film.status === "frames") {
-    await Promise.all(shots.map((s) => advanceFrame(film, plan, s)));
+    await Promise.all(shots.map((s) => advanceFrame(film, plan, s, shots)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.keyframe_url || s.error === "frame")) {
       // One-tap films ("just make it") go straight to filming.

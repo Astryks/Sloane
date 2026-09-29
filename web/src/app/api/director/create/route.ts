@@ -5,6 +5,7 @@ import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy"
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan } from "@/lib/director/plan";
+import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
@@ -87,6 +88,10 @@ export async function POST(req: NextRequest) {
       // drop the voice, and Veo invents a new voice per clip without it.
       plan = { ...plan, character: people.map((p) => (p.description ? `${p.name}: ${p.description}` : p.name)).join("; ") };
     }
+    // Coverage (2026-09-30): scenes with 2+ people are filmed from a few
+    // reusable camera setups, like a real crew, unless the customer turned it off.
+    if (plan.coverage === undefined) plan = { ...plan, coverage: coverageByDefault(plan) };
+    plan = assignSetups(plan);
     // Lucy makes the character sheet herself when there's a person and the
     // customer hasn't already given several angles.
     const characterPhotos = links.character.length + (files.character ? 1 : 0);

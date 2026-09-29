@@ -20,6 +20,7 @@ import {
   type ShotSizeId,
 } from "./filmScience";
 import { CAMERA_FORMATS, type DirectorPlan, type DirectorShot } from "./plan";
+import { CONTINUITY_LINE, setupCamera } from "./coverage";
 
 // Angle notes carry "physical description - why a director uses it"; models
 // only need the physical part.
@@ -156,9 +157,13 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
   const style = PRODUCTION_STYLES[plan.style];
   const person = hasPerson(plan, refs);
   const moveText = (!person && OBJECT_MOVE_INSTRUCTIONS[shot.move]) || CAMERA_MOVES[shot.move].instruction;
+  const setup = plan.coverage && shot.setup ? setupCamera(plan, shot.setup) : "";
   const parts = [
-    sentence(`${sizeText(plan, refs, shot.size)}, ${ANGLES[shot.angle]}, ${SHOT_SIZES[shot.size].lensHint}`),
-    sentence(`Camera: ${moveText} - one continuous move only`),
+    setup || sentence(`${sizeText(plan, refs, shot.size)}, ${ANGLES[shot.angle]}, ${SHOT_SIZES[shot.size].lensHint}`),
+    setup
+      ? sentence(`Camera: ${shot.setup === "master" ? `${moveText}, small and slow` : "held on this setup, with only a slight natural drift or a very gentle push in - no big moves"}`)
+      : sentence(`Camera: ${moveText} - one continuous move only`),
+    setup ? CONTINUITY_LINE : "",
     person ? operatorLine(shot) : "",
     // 2026-09-29: "slow" camera words + long clips read as slow motion - keep the action live.
     shot.move === "slow_motion_hold"
@@ -216,6 +221,35 @@ export function compileAnchorPrompt(plan: DirectorPlan, refs: RefFlags): string 
     hasPerson(plan, refs) ? sentence(CANDID_PEOPLE) : "",
     hasPerson(plan, refs) ? "Medium-wide framing, natural pose, caught mid-moment rather than posing." : "Medium-wide framing.",
     "ONE single photograph filling the whole frame - never a collage, grid, panels or split screen. No text, no watermark.",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 2400);
+}
+
+/**
+ * Coverage still (2026-09-30): the frame for one camera setup, reused by every
+ * shot from that camera. The master is drawn from the anchor; singles and
+ * two-shots are edits of the master so the room, light and faces match.
+ */
+export function compileSetupKeyframePrompt(plan: DirectorPlan, setup: string, shotIndex: number, refs: RefFlags, hasMaster: boolean): string {
+  const shot = plan.shots[shotIndex];
+  const lead =
+    setup === "master" || !hasMaster
+      ? "Using the first image as the reference, create the WIDE MASTER still of this scene from the SAME film: same people (identical faces, hair and wardrobe), same room, same colour grade and film look."
+      : "The FIRST image is this scene's wide master shot. Create a new still from ANOTHER CAMERA in the same room at the same moment: exactly the same people (identical faces, hair, wardrobe and where they sit or stand), the same room, the same light and colour grade - only the camera position changes.";
+  return [
+    lead,
+    refs.character ? "The other reference photos show the same people from different angles - use them so every face stays identical from this camera." : "",
+    setupCamera(plan, setup),
+    shot?.setting ? sentence(`Setting: ${shot.setting}`) : plan.location ? sentence(`Setting: ${plan.location}`) : "",
+    sentence(`Light: ${plan.look.timeOfDay}, ${plan.look.keyLight}, staying within the same grade (${plan.look.grade})`),
+    shot ? sentence(`Moment: ${shot.action}`) : "",
+    shot?.expression ? sentence(`Expression: ${shot.expression}`) : "",
+    sentence(`Detail: ${realismText(plan, refs, setup === "master" ? "wide" : "medium_close_up")}`),
+    sentence(`It looks like ${formatOf(plan).still}`),
+    sentence(`${CANDID_PEOPLE}; caught mid-conversation, not posing`),
+    "ONE single photograph filling the whole frame - never a collage, grid, triptych, panels or split screen. No text, no watermark.",
   ]
     .filter(Boolean)
     .join(" ")
