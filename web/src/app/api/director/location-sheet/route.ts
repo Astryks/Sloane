@@ -26,11 +26,14 @@ export async function POST(req: NextRequest) {
       art?: unknown;
       artPlacement?: unknown;
       extras?: unknown;
+      edit?: unknown;
     };
     const angle = String(body.angle ?? "") as LocationAngleId;
     if (!LOCATION_ANGLES.some((a) => a.id === angle)) return publicJson({ error: "Unknown angle" }, { status: 400 });
     const description = String(body.description ?? "").trim();
-    if (description.length < 8) return publicJson({ error: "Describe the place in a sentence first" }, { status: 400 });
+    // 2026-09-29: "edit" = change one thing in an existing set photo, keep the rest.
+    const editText = String(body.edit ?? "").trim().slice(0, 400);
+    if (!editText && description.length < 8) return publicJson({ error: "Describe the place in a sentence first" }, { status: 400 });
     const photos = (Array.isArray(body.photos) ? body.photos : [])
       .slice(0, 3)
       .map((p) => resolveMediaUrl(String(p)))
@@ -40,6 +43,13 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: "That's today's limit for free sheets - try again tomorrow." }, { status: 429 });
     }
     const aspect = body.aspect === "9:16" ? "9:16" : "16:9";
+    if (editText) {
+      if (!photos.length) return publicJson({ error: "Pick the set photo to change first" }, { status: 400 });
+      const prompt = `Edit this photograph. Change ONLY this: ${editText}. Keep everything else exactly the same - same room, camera position, framing, furniture, screens, people, signage, light and colours. Photorealistic, one single photo, no added text.`;
+      const url = await generateImageOnVertex(prompt, photos.slice(0, 1), aspect);
+      if (!url) return publicJson({ error: "Lucy couldn't make that change right now - try again in a minute." }, { status: 503 });
+      return publicJson({ url, angle });
+    }
     // Optional brand logo, then optional artwork, after the room photo.
     const logo = body.logo ? resolveMediaUrl(String(body.logo)) : "";
     const withLogo = isVendorMediaUrl(logo);
