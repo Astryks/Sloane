@@ -1,5 +1,20 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-29 (evening) - Voice lock across shots, office redraw, art in sets
+
+- **Voice lock (LIVE, verified end to end):**
+  - `scripts/director_voice.py` is the Modal app `director-voice` (L4, https://mehta-siddharth09--director-voice-web.modal.run; URL defaulted in code, auth `MODAL_SHARED_SECRET`).
+  - How it works: Demucs splits speech from the room sound, Chatterbox VC converts the speech to a locked reference with the same timing (lip-sync kept), then it's level-matched and remixed on the untouched video.
+  - New film stage `voicing` (named cast only). Each speaker's reference is their chosen Lucy voice (`saved_characters.voice_id`, picker on Your cast) or the speech from their first speaking shot, which keeps its audio. The planner outputs `speaker` per shot; the fallback is the name closest before "says".
+  - Failures keep Veo's audio and never block the film.
+  - Test: 2-shot Veo Lite film, Jess speaking in both. Shot 1 was extracted as the reference, shot 2 converted, stitched and completed. Standalone test on a 14s clip: identical timing.
+- **Astryks office redrawn** (support@):
+  - Central desk, modern dual-monitor trading desks with charts and tickers, no CRTs.
+  - Backlit brushed-steel Astryks sign; Kirsty's portrait painting (astryks.com/art-preview) hung as art via the new `art` + `artPlacement` set option.
+  - Old version renamed "Astryks office (old, 80s terminals)".
+  - With 3 references the image model tends to copy the first view; explicit camera directions in the description fix that.
+- **Also:** rename cast/sets from the picker; cast descriptions (voice/accent) go verbatim into every shot.
+
 ## Latest update, 2026-09-29 - Multi-character cast, Your sets + "Draw this place", scripts verbatim, /make-a-movie guide
 
 - **Multi-character cast:** up to 3 people from Your cast per film.
