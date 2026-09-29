@@ -1,5 +1,21 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-29 (late) - Script clarity, speaker/off-screen, continuing lines; queued work
+
+- **Shipped:**
+  - Scripts up to 4,000 characters.
+  - Every shot names who speaks. Off-screen lines ("heard but not seen") keep the on-screen person's mouth closed. (bracket) directions become delivery.
+  - Shot prompts are rebuilt from the plan at filming time.
+  - Lines running across a cut get no pause at the start and no falling ending ("↪ continues from shot N" on the card).
+  - Calm, realistic background people doing ordinary desk work.
+  - Labelled shot cards (Camera: framing/angle/move/length; What happens; Who speaks; Says; Where).
+  - Remove button for saved cast/sets; saved cards can have their pictures replaced; set edit mode.
+  - Liam redrawn in a navy suit, patterned tie and pocket square (old: "Liam (blue shirt)").
+- **Queued - do AFTER Sid's current film finishes (touches create/approve/stitch):**
+  1. Free storyboards: charge only on Approve; 3 free per account per day, then $1 each; walk-away fee removed. Checkout moves to the Approve step.
+  2. "Movie look" presets: save a film's look (stock, grade, palette, lighting, sound bed) and reuse it for every scene so 100 films feel like one movie; loudness normalisation (loudnorm) in the Modal stitch.
+  3. New step 1: text or reference MP4 (Lucy analyses shots/camera/pace into a shot list); "?" guide with Claude/ChatGPT/Gemini links and a copy-paste prompt; optional in-app writing helper (our own AI account, priced first).
+
 ## Latest update, 2026-09-29 (night) - Realism fixes; cast and sets redrawn for review
 
 - **Realism (code):**
