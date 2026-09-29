@@ -27,6 +27,7 @@ import {
   type VideoEngine,
 } from "@/lib/videoEngines";
 import type { DirectorRecipe } from "./DirectorRecipes";
+import { ScriptHelp } from "./ScriptHelp";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
 
 const DRAFT_KEY = "lucy_director_draft";
@@ -62,6 +63,11 @@ type MoviePreset = {
   data: { style?: string; engine?: string; aspect?: string; castIds?: string[]; setId?: string | null; notes?: string; look?: DirectorPlan["look"] | null };
 };
 const MAX_WORDS_PER_SHOT = 18; // ~8s of natural speech - Veo's longest shot
+/** Number of "SHOT n" blocks in a pasted script (0 = a plain idea). */
+function scriptShotCount(text: string): number {
+  const n = (text.match(/^\s*SHOT\s*\d+/gim) ?? []).length;
+  return n >= 2 ? Math.min(MAX_SHOTS, n) : 0;
+}
 // Same rule as lib/director/compile.ts continuesFromPrevious (kept tiny and local for the card label).
 function lineContinues(plan: DirectorPlan, i: number): boolean {
   const prev = plan.shots[i - 1];
@@ -198,7 +204,7 @@ export function DirectorStudio({
   const restartPolling = () => setPollKey((k) => k + 1);
 
   const perShot = directorShotPriceCents(engine);
-  const total = plan ? perShot * plan.shots.length : perShot * shotCount;
+  const total = plan ? perShot * plan.shots.length : perShot * (scriptShotCount(idea) || shotCount);
   const engineEntries = Object.entries(VIDEO_PAYGO_ENGINES) as [VideoEngine, (typeof VIDEO_PAYGO_ENGINES)[VideoEngine]][];
 
   // Back from Stripe: restore the storyboard and produce the film once the credit lands.
@@ -269,7 +275,7 @@ export function DirectorStudio({
           idea: movieNotes.trim() ? `${movieNotes.trim()}\n\n${idea}` : idea,
           look: activePreset?.data.look ?? undefined,
           style,
-          shotCount,
+          shotCount: scriptShotCount(idea) || shotCount,
           aspectRatio: aspect,
           hasCharacterPhoto: readyUrls(photos, "character").length > 0 || selectedCast.length > 0,
           cast: selectedCast.map((c) => ({ name: c.name, description: c.description })),
@@ -523,7 +529,9 @@ export function DirectorStudio({
         </div>
 
         <div>
-          <p className="mb-1 text-sm font-bold text-foreground">1. What&apos;s your film about?</p>
+          <p className="mb-1 flex items-center text-sm font-bold text-foreground">
+            1. What&apos;s your film about? <ScriptHelp />
+          </p>
           <textarea
             aria-label="Describe your film"
             className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
@@ -533,6 +541,12 @@ export function DirectorStudio({
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
           />
+          {scriptShotCount(idea) > 0 && (
+            <p className="mt-1 text-[11px] font-semibold text-purple">
+              ✓ Found {scriptShotCount(idea)} shots in your script - Lucy will plan exactly {scriptShotCount(idea)}.
+              {(idea.match(/^\s*SHOT\s*\d+/gim) ?? []).length > MAX_SHOTS ? ` (Only the first ${MAX_SHOTS} fit in one scene - put the rest in a second scene.)` : ""}
+            </p>
+          )}
           <div className="mt-2 rounded-2xl bg-white/70 p-3 text-xs text-muted">
             <p className="font-bold text-foreground">✏️ How to write it</p>
             <p className="mt-1 flex flex-wrap items-center gap-1">
@@ -606,6 +620,17 @@ export function DirectorStudio({
           </p>
         </details>
 
+        {!filmId && !plan && idea.trim().length >= 3 && (
+          <div className="rounded-2xl bg-white/70 p-3 text-xs text-muted">
+            <p className="font-bold text-foreground">✅ Ready to plan</p>
+            <p className="mt-1">
+              🎬 {scriptShotCount(idea) || shotCount} shots · 🎭 {selectedCast.length ? selectedCast.map((c) => c.name).join(", ") : "Lucy casts it"} · 📍{" "}
+              {photos.location.length ? "your place" : "Lucy picks the place"} · 🎥 {VIDEO_PAYGO_ENGINES[engine].label} · {aspect === "auto" ? "shape: auto" : aspect}
+            </p>
+            <p className="mt-1">Planning is free. Nothing is filmed until you approve the storyboard.</p>
+          </div>
+        )}
+
         {!filmId && (
           <div className="flex flex-col gap-1">
             <button
@@ -614,7 +639,7 @@ export function DirectorStudio({
               disabled={planning || creating || idea.trim().length < 3 || isUploading(photos)}
               className="w-full rounded-2xl bg-purple py-4 text-base font-extrabold text-white shadow-soft disabled:opacity-50"
             >
-              {planning || creating ? "Lucy is on it…" : `🎬 Just make it - ${formatUsd(perShot * (plan?.shots.length ?? shotCount))}`}
+              {planning || creating ? "Lucy is on it…" : `🎬 Just make it - ${formatUsd(perShot * (plan?.shots.length ?? (scriptShotCount(idea) || shotCount)))}`}
             </button>
             <p className="text-center text-[11px] text-muted">Lucy does everything. About 5-10 minutes.</p>
           </div>

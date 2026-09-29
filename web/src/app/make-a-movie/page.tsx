@@ -162,16 +162,24 @@ export default function Page() {
 
         <Step n={4} title="Film it" id="film">
           <ol className="list-decimal space-y-1 pl-5">
-            <li>Paste your scene into <strong className="text-foreground">What&apos;s your film about?</strong></li>
+            <li>Paste your scene into <strong className="text-foreground">What&apos;s your film about?</strong> - tap the <strong className="text-foreground">?</strong> next to it for a copy-paste prompt that gets any free AI to write it in the right format. Lucy counts the shots for you.</li>
             <li>Tap the people in <strong className="text-foreground">Your cast</strong> (up to {MAX_CAST}) and the place in <strong className="text-foreground">Your sets</strong>.</li>
-            <li><strong className="text-foreground">Settings:</strong> Cinematic, 16:9, Veo (so they talk), and enough shots for your lines (up to 8).</li>
+            <li><strong className="text-foreground">Settings:</strong> Cinematic, 16:9, Veo (so they talk). Up to 8 shots per scene, about 18 spoken words per shot.</li>
             <li>Tap <strong className="text-foreground">Or check each step first</strong>. Read the plan. Change anything in plain words.</li>
             <li><strong className="text-foreground">Draw my storyboard</strong> → check every picture → redraw any that look wrong.</li>
             <li><strong className="text-foreground">Approve &amp; film it</strong>. 🎬</li>
           </ol>
         </Step>
 
-        <Step n={5} title="Join your scenes into a movie" id="join">
+        <Step n={5} title="Save your movie - set up once, reuse every scene" id="movie">
+          <p>
+            At the top of Directed by Lucy, tap <strong className="text-foreground">💾 Save as my movie</strong>. It keeps your style, model, shape,
+            cast, place, <strong className="text-foreground">movie notes</strong> (the look of your film, added to every scene) and the film&apos;s colour and light.
+          </p>
+          <p>Next time it loads by itself - just paste the next scene&apos;s shots and dialogue. Every scene looks, sounds and feels like the same movie.</p>
+        </Step>
+
+        <Step n={6} title="Join your scenes into a movie" id="join">
           <p>
             Make each scene the same way, download them, then put them in order in the{" "}
             <Link href="/stitch" className="font-semibold text-purple underline">free editor</Link>. Add music if you like.
