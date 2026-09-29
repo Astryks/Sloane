@@ -106,13 +106,19 @@ def stitch(video_urls):
             gains = [_clamp(ref[c] / m[c]) if m[c] > 1 else 1.0 for c in range(3)] if i > 0 else [1.0, 1.0, 1.0]
             vf = (
                 f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
-                f"fps=24,colorchannelmixer=rr={gains[0]:.4f}:gg={gains[1]:.4f}:bb={gains[2]:.4f},format=yuv420p"
+                f"fps=24,colorchannelmixer=rr={gains[0]:.4f}:gg={gains[1]:.4f}:bb={gains[2]:.4f},"
+                # 2026-09-29 film finish: one light, moving grain over every shot
+                # hides the too-clean AI look and the seams between models.
+                f"noise=c0s=5:c0f=t+u:c1s=2:c1f=t+u:c2s=2:c2f=t+u,format=yuv420p"
             )
+            # Same loudness in every shot, and tiny fades so cuts never click.
+            af = f"loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:d=0.02,afade=t=out:st={max(dur - 0.03, 0):.3f}:d=0.03"
             out = os.path.join(tmp, f"n{i}.mp4")
             cmd = ["ffmpeg", "-y", "-v", "error", "-i", p]
             if not has_audio:
                 cmd += ["-f", "lavfi", "-t", f"{max(dur, 0.1):.3f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
             cmd += ["-vf", vf, "-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
+                    "-af", af,
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
                     "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-shortest", out]
             _run(cmd)
@@ -124,7 +130,15 @@ def stitch(video_urls):
                 f.write(f"file '{n}'\n")
         final = os.path.join(tmp, "film.mp4")
         # Every input now shares codec/size/fps/audio format, so a copy-concat is safe.
-        _run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy", "-movflags", "+faststart", final])
+        joined = os.path.join(tmp, "joined.mp4")
+        _run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy", joined])
+        # A faint continuous room tone under the whole film, so the sound never
+        # drops to dead digital silence at a cut (a strong "AI clip" giveaway).
+        _run(["ffmpeg", "-y", "-v", "error", "-i", joined,
+              "-f", "lavfi", "-i", "anoisesrc=color=brown:amplitude=0.004:sample_rate=48000,lowpass=f=900,aformat=channel_layouts=stereo",
+              "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=first:normalize=0[a]",
+              "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+              "-movflags", "+faststart", final])
         return _upload(final, os.environ["FAL_KEY"])
 
 
