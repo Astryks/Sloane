@@ -28,6 +28,7 @@ import {
 } from "@/lib/videoEngines";
 import type { DirectorRecipe } from "./DirectorRecipes";
 import { ScriptHelp } from "./ScriptHelp";
+import { CopyClip } from "./CopyClip";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
 
 const DRAFT_KEY = "lucy_director_draft";
@@ -552,6 +553,7 @@ export function DirectorStudio({
               {(idea.match(/^\s*SHOT\s*\d+/gim) ?? []).length > MAX_SHOTS ? ` (Only the first ${MAX_SHOTS} fit in one scene - put the rest in a second scene.)` : ""}
             </p>
           )}
+          <CopyClip castNames={selectedCast.map((c) => c.name)} notes={idea.length < 600 ? idea : ""} onScript={(script) => setIdea(script)} />
           <div className="mt-2 rounded-2xl bg-white/70 p-3 text-xs text-muted">
             <p className="font-bold text-foreground">✏️ How to write it</p>
             <p className="mt-1 flex flex-wrap items-center gap-1">
