@@ -660,7 +660,7 @@ export function DirectorStudio({
             {film.status === "cancelled" && <p className="text-sm text-foreground">Cancelled - your credit has been refunded.</p>}
             {producing && (
               <p className="text-sm text-foreground">
-                {film.status === "anchor" && film.casting ? "Making your character sheet (every angle of your person)…" : film.status === "anchor" ? "Setting up your cast, location and light…" : film.status === "frames" ? "Drawing your storyboard frames…" : film.status === "stitching" ? "Joining your shots into one film…" : `Filming - ${doneShots.length} of ${film.shots.length} shots done…`}{" "}
+                {film.status === "anchor" && film.casting ? "Making your character sheet (every angle of your person)…" : film.status === "anchor" ? "Setting up your cast, location and light…" : film.status === "frames" ? "Drawing your storyboard frames…" : film.status === "voicing" ? "Matching each person's voice across every shot…" : film.status === "stitching" ? "Joining your shots into one film…" : `Filming - ${doneShots.length} of ${film.shots.length} shots done…`}{" "}
                 <span className="text-muted">({film.autoApprove ? "about 5-10 minutes - you can leave this tab open and come back" : "usually 2-5 minutes"})</span>
               </p>
             )}

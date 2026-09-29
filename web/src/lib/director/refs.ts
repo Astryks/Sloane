@@ -23,7 +23,18 @@ export type DirectorRefs = {
   people?: CastPerson[];
 };
 
-export type CastPerson = { name: string; description: string; photos: string[] };
+export type CastPerson = {
+  name: string;
+  description: string;
+  photos: string[];
+  /** Lucy voice to lock to ("" = keep the voice from their first speaking shot). */
+  voiceId?: string;
+  /** Locked reference voice (WAV) once known; "none" = couldn't make one. */
+  voiceRef?: string;
+  voiceJob?: string;
+  /** Shot the reference came from - it keeps its original audio. */
+  voiceShot?: number;
+};
 export const MAX_CAST = 3;
 
 /** Shares the 8 character slots fairly between up to 3 people (first photos first: face, 3/4s...). */

@@ -9,6 +9,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { PRESET_VOICES } from "@/lib/presetVoices";
 import { LOCATION_ANGLES, MAX_CAST, REF_LIMITS, SHEET_ANGLES, type RefKind, type SheetAngleId } from "@/lib/director/refs";
 
 export type RefPhoto = { id: string; url: string | null; preview: string; status: "uploading" | "ready" | "error"; label?: string };
@@ -30,7 +31,7 @@ export function photosFromLinks(links: Partial<Record<RefKind, string[]>>): RefP
   return out;
 }
 
-type SavedCharacter = { id: string; name: string; description: string; photoUrl: string; photoUrls?: string[] };
+type SavedCharacter = { id: string; name: string; description: string; photoUrl: string; photoUrls?: string[]; voiceId?: string };
 export type CastPick = { id: string; name: string; description: string };
 export const FREE_IMAGE_TOOLS = [
   { name: "ChatGPT", href: "https://chatgpt.com" },
@@ -175,6 +176,20 @@ export function DirectorPhotos({
       setSelectedCast((sel) => sel.map((x) => (x.id === c.id ? { ...x, name, description } : x)));
     }
     onNotice(`Renamed to ${name}.`);
+  }
+
+  /** Lock a saved person to a Lucy voice ("" = keep the voice from their first shot). */
+  async function setVoice(c: SavedCharacter, voiceId: string) {
+    const res = await fetch("/api/director/characters", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, name: c.name, description: c.description, voiceId }),
+    });
+    const data = await res.json();
+    if (!res.ok) return onError(data.error ?? "Couldn't set the voice");
+    setCast((list) => list.map((x) => (x.id === c.id ? { ...x, voiceId } : x)));
+    const label = PRESET_VOICES.find((v) => v.id === voiceId)?.label;
+    onNotice(label ? `${c.name} will sound like ${label} in every shot.` : `${c.name} keeps the voice from their first line, in every shot.`);
   }
 
   /** Up to 3 people from Your cast in one film - Lucy keeps each face separate. */
@@ -356,28 +371,33 @@ export function DirectorPhotos({
           <p className="mb-1 text-[11px] font-semibold text-muted">Your cast - tap up to {MAX_CAST} people for this film</p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {cast.map((c) => (
-              <button
+              <div
                 key={c.id}
-                type="button"
-                onClick={() => pickCast(c)}
                 className={`flex shrink-0 flex-col items-center rounded-xl border p-1.5 ${selectedCast.some((x) => x.id === c.id) ? "border-purple bg-purple/10" : "border-border bg-white"}`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={c.photoUrl} alt={c.name} className="h-12 w-12 rounded-lg object-cover" />
-                <span className="mt-0.5 max-w-16 truncate text-[10px] font-bold">{c.name}</span>
-                <span className="text-[9px] text-muted">{(c.photoUrls?.length ?? 1)} photo{(c.photoUrls?.length ?? 1) === 1 ? "" : "s"}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    rename(c, "character");
-                  }}
-                  className="text-[9px] font-semibold text-purple underline"
-                >
+                <button type="button" onClick={() => pickCast(c)} className="flex flex-col items-center" aria-pressed={selectedCast.some((x) => x.id === c.id)}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={c.photoUrl} alt={c.name} className="h-12 w-12 rounded-lg object-cover" />
+                  <span className="mt-0.5 max-w-20 truncate text-[10px] font-bold">{c.name}</span>
+                  <span className="text-[9px] text-muted">{(c.photoUrls?.length ?? 1)} photo{(c.photoUrls?.length ?? 1) === 1 ? "" : "s"}</span>
+                </button>
+                <button type="button" onClick={() => rename(c, "character")} className="text-[9px] font-semibold text-purple underline">
                   ✏️ rename
-                </span>
-              </button>
+                </button>
+                <select
+                  aria-label={`Voice for ${c.name}`}
+                  value={c.voiceId ?? ""}
+                  onChange={(e) => setVoice(c, e.target.value)}
+                  className="mt-0.5 max-w-24 rounded border border-border bg-white text-[9px]"
+                >
+                  <option value="">🎙 same voice every shot</option>
+                  {PRESET_VOICES.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      🎙 {v.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             ))}
           </div>
         </div>

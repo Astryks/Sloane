@@ -45,6 +45,7 @@ export type DirectorShot = {
   action: string; // what physically happens, in plain visual terms
   expression: string; // filmable micro-expression
   dialogue: string; // spoken line ("" = none)
+  speaker: string; // who says the dialogue (a cast name, "" = none/unknown) - drives the voice lock
   sound: string; // ambience / score / sfx
   durationSeconds: number;
 };
@@ -166,6 +167,7 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
     action: i === 0 ? idea : `${idea} - ${t.beat}`,
     expression: dir.expression,
     dialogue: "",
+    speaker: "",
     sound: soundFor(style, emotion),
     durationSeconds: seconds,
   }));
@@ -218,6 +220,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       action: clampText(s.action, 400, clampText(r.logline, 400, "the scene unfolds")),
       expression: hasPerson ? clampText(s.expression, 200, EMOTIONS[emotion].expression) : "",
       dialogue: clampText(s.dialogue, 240),
+      speaker: clampText(s.speaker, 60),
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
       durationSeconds: Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds,
     });
@@ -281,13 +284,14 @@ Rules:
 - "action": what physically happens, in plain visual language. "expression": a physical micro-expression (a swallow, a glance down), never just the feeling's name.
 - "dialogue": short spoken lines only where they fit (UGC and ads usually speak; cinematic often silent). Max ~20 words per shot. Original lines only - unless the user gives a script.
 - SCRIPTS: if the idea contains a script or dialogue (lines in quotes, or "NAME: line"), keep EVERY line word for word, in the same order, spread across the shots (one or two lines per shot, each shot long enough to say them), with the right speaker named in "action" (e.g. "Victor, leaning back, says:"). Never invent, cut, reorder or reword lines. Put stage directions into action, camera and expression.
+- "speaker": the exact name of whoever says that shot's dialogue (even if they're off screen), "" if nobody speaks.
 - CAST: if named cast members are given, use their exact names in "character" (one short description each, separated by "; ") and name who is in frame in every shot's "action". Never rename them.
 - durationSeconds per shot: commercial 2-4, ugc 4-6, cinematic 5-8, music_video 2-4, documentary 5-8.
 - If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression" and every "dialogue" empty, never describe faces, hands or people in "action", and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
 - If a character/product/location photo is provided, refer to it as "the exact person/product/location from the reference photo" and only add details that don't contradict it.
 
 Reply with JSON only:
-{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":""},"character":"","wardrobe":"","location":"","product":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","action":"","expression":"","dialogue":"","sound":"","durationSeconds":6}]}
+{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":""},"character":"","wardrobe":"","location":"","product":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","action":"","expression":"","dialogue":"","speaker":"","sound":"","durationSeconds":6}]}
 
 Menu:
 ${menu()}`;

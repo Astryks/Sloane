@@ -645,6 +645,10 @@ async function runSchemaMigrations() {
   await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS photo_urls JSONB NOT NULL DEFAULT '[]'::jsonb`;
   // The same library holds saved sets (locations) - kind 'location' (2026-09-29).
   await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'character'`;
+  // Voice lock (2026-09-29): a Lucy voice per saved person, and per-shot re-voicing state.
+  await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS voice_id TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS voice_request_id TEXT`;
+  await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS raw_video_url TEXT`;
   // Free storyboard planning is rate-limited per visitor (session or IP).
   await sql`
     CREATE TABLE IF NOT EXISTS director_plan_log (
@@ -2363,7 +2367,7 @@ export type DirectorFilmRow = {
   plan: unknown;
   engine: string;
   refs: DirectorRefs;
-  status: "anchor" | "frames" | "review" | "shots" | "stitching" | "completed" | "failed" | "cancelled";
+  status: "anchor" | "frames" | "review" | "shots" | "voicing" | "stitching" | "completed" | "failed" | "cancelled";
   revisions_used: number;
   auto_approve: boolean;
   cast_status: "pending" | "face" | "done";
@@ -2392,6 +2396,8 @@ export type DirectorShotRow = {
   video_request_id: string | null;
   video_url: string | null;
   error: string | null;
+  voice_request_id: string | null;
+  raw_video_url: string | null;
 };
 
 /** Counts this visitor's plans in the last 24h, then logs one more if under the cap. */
@@ -2450,6 +2456,20 @@ export async function claimDirectorFilm(filmId: string): Promise<boolean> {
   `;
   return rows.length > 0;
 }
+/** Voice lock: per-shot re-voicing state; the original clip is kept in raw_video_url. */
+export async function setDirectorShotVoice(shotId: string, f: { voice_request_id: string; video_url?: string; raw_video_url?: string }) {
+  await sql`
+    UPDATE director_shots SET
+      voice_request_id = ${f.voice_request_id},
+      raw_video_url = COALESCE(${f.raw_video_url ?? null}, raw_video_url),
+      video_url = COALESCE(${f.video_url ?? null}, video_url)
+    WHERE id = ${shotId}
+  `;
+}
+export async function setDirectorFilmRefs(filmId: string, refs: DirectorRefs) {
+  await sql`UPDATE director_films SET refs = ${JSON.stringify(refs)}::jsonb WHERE id = ${filmId}`;
+}
+
 /** Lucy's own character sheet: store the new photos and move the cast step on (releases the claim). */
 export async function setDirectorFilmCast(filmId: string, refs: DirectorRefs, castStatus: "face" | "done") {
   await sql`UPDATE director_films SET refs = ${JSON.stringify(refs)}::jsonb, cast_status = ${castStatus}, claimed_at = NULL WHERE id = ${filmId}`;
@@ -2550,7 +2570,7 @@ export async function failDirectorShot(shotId: string, error: string): Promise<b
 
 // --- Character library ---
 
-export type SavedCharacter = { id: string; user_id: string; name: string; description: string; photo_url: string; photo_urls: string[] | null; kind: "character" | "location"; created_at: string };
+export type SavedCharacter = { id: string; user_id: string; name: string; description: string; photo_url: string; photo_urls: string[] | null; kind: "character" | "location"; voice_id: string; created_at: string };
 
 /** All of a saved character's photos (older rows only have the single cover photo). */
 export function savedCharacterPhotos(c: SavedCharacter): string[] {
@@ -2582,8 +2602,11 @@ export async function getSavedCharacter(userId: string, id: string): Promise<Sav
 }
 
 /** Rename / re-describe a saved person or set (2026-09-29). */
-export async function updateSavedCharacter(userId: string, id: string, name: string, description: string): Promise<SavedCharacter | null> {
-  const rows = await sql`UPDATE saved_characters SET name = ${name}, description = ${description} WHERE id = ${id} AND user_id = ${userId} RETURNING *`;
+export async function updateSavedCharacter(userId: string, id: string, name: string, description: string, voiceId?: string): Promise<SavedCharacter | null> {
+  const rows = await sql`
+    UPDATE saved_characters SET name = ${name}, description = ${description}, voice_id = COALESCE(${voiceId ?? null}, voice_id)
+    WHERE id = ${id} AND user_id = ${userId} RETURNING *
+  `;
   return (rows[0] as SavedCharacter) ?? null;
 }
 

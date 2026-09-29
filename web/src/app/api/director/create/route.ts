@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     const links = parseRefLinks(form.get("refs"));
     let people: CastPerson[] | undefined;
     if (savedCast.length) {
-      const named = savedCast.map((c) => ({ name: c!.name, description: c!.description, photos: savedCharacterPhotos(c!) }));
+      const named: CastPerson[] = savedCast.map((c) => ({ name: c!.name, description: c!.description, photos: savedCharacterPhotos(c!), voiceId: c!.voice_id || "" }));
       // Anyone uploaded alongside the cast becomes one more (unnamed) person.
       if (links.character.length) named.push({ name: "the person in the uploaded photos", description: "", photos: links.character });
       people = allocateCast(named);

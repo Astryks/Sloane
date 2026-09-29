@@ -27,6 +27,8 @@ import {
   refundVideoCredit,
   releaseDirectorFilm,
   setDirectorFilmCast,
+  setDirectorFilmRefs,
+  setDirectorShotVoice,
   updateDirectorFilm,
   updateDirectorShot,
   type DirectorFilmRow,
@@ -37,7 +39,8 @@ import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl,
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import type { DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
-import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt } from "./refs";
+import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt, type CastPerson } from "./refs";
+import type { DirectorShot } from "./plan";
 import { refFlags } from "./filmAccess";
 
 // Marker stored as the request id when a still was made synchronously on
@@ -205,6 +208,123 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   }
 }
 
+// ---- Voice lock (2026-09-29) ----
+// scripts/director_voice.py on Modal: one voice per character across every
+// shot. Each person's reference is a Lucy voice they picked, or else the
+// speech from the first shot they talk in (that shot keeps its audio); every
+// other shot they speak in is re-voiced to it with timing kept, so lip-sync
+// is untouched. Any failure just keeps Veo's original audio.
+const VOICE_URL = process.env.MODAL_DIRECTOR_VOICE_URL || "https://mehta-siddharth09--director-voice-web.modal.run";
+
+async function voiceCall(path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const res = await fetch(`${VOICE_URL}${path}`, {
+    method: body ? "POST" : "GET",
+    headers: { Authorization: `Bearer ${process.env.MODAL_SHARED_SECRET}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`voice service ${res.status}`);
+  return (await res.json()) as Record<string, unknown>;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Index of the cast member who speaks in this shot, or -1. */
+export function speakerOf(shot: DirectorShot | undefined, people: CastPerson[]): number {
+  if (!shot?.dialogue?.trim()) return -1;
+  const first = (n: string) => n.trim().split(/\s+/)[0].toLowerCase();
+  if (shot.speaker) {
+    const i = people.findIndex((p) => p.name.toLowerCase() === shot.speaker.toLowerCase() || first(p.name) === first(shot.speaker));
+    if (i >= 0) return i;
+  }
+  // "X ... says": credit whoever is named closest before the speech verb.
+  const verb = /\b(says|said|asks|tells|replies|continues|speaks|mumbles|whispers|adds)\b/i.exec(shot.action);
+  if (verb) {
+    let best = -1;
+    let bestPos = -1;
+    people.forEach((p, i) => {
+      const re = new RegExp(`\\b${escapeRe(first(p.name))}\\b`, "gi");
+      for (const m of shot.action.matchAll(re)) {
+        if (m.index !== undefined && m.index < verb.index && m.index > bestPos && verb.index - m.index <= 60) {
+          best = i;
+          bestPos = m.index;
+        }
+      }
+    });
+    if (best >= 0) return best;
+  }
+  const named = people.map((p, i) => (new RegExp(`\\b${escapeRe(first(p.name))}\\b`, "i").test(shot.action) ? i : -1)).filter((i) => i >= 0);
+  if (named.length === 1) return named[0];
+  return people.length === 1 ? 0 : -1;
+}
+
+async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
+  const people = film.refs.people ?? [];
+  if (!people.length || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
+  if (!(await claimDirectorFilm(film.id))) return;
+  try {
+    const refs = JSON.parse(JSON.stringify(film.refs)) as typeof film.refs;
+    const cast = refs.people as CastPerson[];
+    let refsChanged = false;
+    const speaking = shots
+      .filter((s) => s.status === "completed" && s.video_url)
+      .map((s) => ({ s, who: speakerOf(plan.shots[s.idx], cast) }))
+      .filter((x) => x.who >= 0)
+      .sort((a, b) => a.s.idx - b.s.idx);
+
+    // 1. Everyone who speaks gets a locked reference voice.
+    for (const i of new Set(speaking.map((x) => x.who))) {
+      const p = cast[i];
+      if (p.voiceRef) continue;
+      if (!p.voiceJob) {
+        const firstShot = speaking.find((x) => x.who === i)!.s;
+        const body = p.voiceId ? { mode: "preset", voice_id: p.voiceId } : { mode: "extract", video_url: firstShot.video_url };
+        const r = await voiceCall("/start", body);
+        if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
+        p.voiceJob = r.call_id;
+        if (!p.voiceId) p.voiceShot = firstShot.idx;
+      } else {
+        const r = await voiceCall(`/result?call_id=${encodeURIComponent(p.voiceJob)}`);
+        if (r.status === "done" && typeof r.url === "string") p.voiceRef = r.url;
+        else if (r.status === "failed") {
+          console.error("[director] voice reference failed", p.name, r.error);
+          p.voiceRef = "none";
+        }
+      }
+      refsChanged = true;
+    }
+    if (refsChanged) await setDirectorFilmRefs(film.id, refs);
+
+    // 2. Re-voice every other shot each person speaks in.
+    let pending = cast.some((p, i) => speaking.some((x) => x.who === i) && !p.voiceRef);
+    for (const { s, who } of speaking) {
+      const p = cast[who];
+      if (!p.voiceRef) continue;
+      if (p.voiceRef === "none" || p.voiceShot === s.idx || s.voice_request_id === "done" || s.voice_request_id === "failed") continue;
+      if (!s.voice_request_id) {
+        const r = await voiceCall("/start", { mode: "convert", video_url: s.video_url, reference_url: p.voiceRef });
+        if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
+        await setDirectorShotVoice(s.id, { voice_request_id: r.call_id });
+        pending = true;
+        continue;
+      }
+      const r = await voiceCall(`/result?call_id=${encodeURIComponent(s.voice_request_id)}`);
+      if (r.status === "done" && typeof r.url === "string") {
+        await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: s.video_url ?? undefined, video_url: r.url });
+      } else if (r.status === "failed") {
+        console.error("[director] re-voice failed - keeping the original audio", s.id, r.error);
+        await setDirectorShotVoice(s.id, { voice_request_id: "failed" });
+      } else pending = true;
+    }
+    if (pending) return releaseDirectorFilm(film.id);
+    return updateDirectorFilm(film.id, { status: "stitching" });
+  } catch (err) {
+    // Never hold a film back over voices - stitch with Veo's own audio.
+    console.error("[director] voicing step failed - stitching with original audio", err);
+    return updateDirectorFilm(film.id, { status: "stitching" });
+  }
+}
+
 async function advanceStitch(film: DirectorFilmRow, shots: DirectorShotRow[]) {
   if (!(await claimDirectorFilm(film.id))) return;
   const done = shots.filter((s) => s.status === "completed" && s.video_url).map((s) => s.video_url as string);
@@ -270,9 +390,14 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await Promise.all(shots.map((s) => advanceVideo(film, plan, s)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.status === "completed" || s.status === "failed")) {
-      await updateDirectorFilm(film.id, { status: "stitching" });
+      // Named cast -> lock each person's voice before joining the shots.
+      await updateDirectorFilm(film.id, { status: film.refs.people?.length ? "voicing" : "stitching" });
     }
     return shots;
+  }
+  if (film.status === "voicing") {
+    await advanceVoicing(film, plan, shots);
+    return getDirectorShots(film.id);
   }
   if (film.status === "stitching") await advanceStitch(film, shots);
   return getDirectorShots(film.id);
