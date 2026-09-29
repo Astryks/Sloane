@@ -124,7 +124,7 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
     // 2026-09-29: "slow" camera words + long clips read as slow motion - keep the action live.
     shot.move === "slow_motion_hold"
       ? ""
-      : "Real-time footage at natural speed: people walk, gesture, blink and talk at a normal everyday pace, like a real film shoot - never slow motion, never floaty or dreamlike.",
+      : "Real-time footage at natural speed: people walk, gesture, blink and talk at a normal everyday pace, like a real film shoot - never slow motion, never floaty or dreamlike. Any background people move naturally and independently - typing, talking on phones, walking past, gesturing, sipping coffee - each doing their own thing at their own pace, never frozen, never repeating the same motion, never staring at the camera.",
     subjectLine(plan, refs),
     productLine(plan, refs),
     sentence(shot.action),
