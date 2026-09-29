@@ -91,6 +91,8 @@ export async function POST(req: NextRequest) {
     // Coverage (2026-09-30): scenes with 2+ people are filmed from a few
     // reusable camera setups, like a real crew, unless the customer turned it off.
     if (plan.coverage === undefined) plan = { ...plan, coverage: coverageByDefault(plan) };
+    // Selfie vlogs play as one continuous take (each shot starts on the last frame of the one before).
+    if (plan.chain === undefined) plan = { ...plan, chain: plan.style === "ugc" || plan.look.format === "phone" };
     plan = assignSetups(plan);
     // Lucy makes the character sheet herself when there's a person and the
     // customer hasn't already given several angles.

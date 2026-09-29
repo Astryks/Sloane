@@ -212,18 +212,66 @@ function shotIngredients(film: DirectorFilmRow, plan: DirectorPlan, idx: number)
 }
 
 /** Films one approved shot from its frame (or from text if the frame failed). */
-async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: DirectorShotRow) {
+const TTS_PREFIX = "tts:";
+
+/** The spoken words + the speaker's Lucy voice, if this shot's speaker has one. */
+function voiceFirstLine(film: DirectorFilmRow, plan: DirectorPlan, idx: number): { speaker: string; voiceId: string; words: string } | null {
+  const shot = plan.shots[idx];
+  const words = shot?.dialogue.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  if (!shot || !words) return null;
+  const who = speakerOf(shot, film.refs.people ?? []);
+  const person = who >= 0 ? film.refs.people?.[who] : undefined;
+  return person?.voiceId ? { speaker: person.name, voiceId: person.voiceId, words } : null;
+}
+
+/**
+ * Continuous takes (2026-09-30, the Chloe-vs-History trick): a shot that
+ * carries on the previous one - same camera setup under coverage, or every
+ * shot in a "one continuous take" film - starts on the previous shot's exact
+ * last frame, so the face, room and light carry straight over the cut.
+ */
+function chainedFrom(plan: DirectorPlan, idx: number): number | null {
+  if (idx === 0) return null;
+  const cur = plan.shots[idx];
+  const prev = plan.shots[idx - 1];
+  if (!cur || !prev) return null;
+  if (plan.chain) return idx - 1;
+  if (plan.coverage && cur.setup && cur.setup === prev.setup) return idx - 1;
+  return null;
+}
+
+async function lastFrameOf(videoUrl: string): Promise<string | null> {
+  if (!MODAL_STITCH || !process.env.MODAL_SHARED_SECRET) return null;
+  try {
+    const r = await modalStitch("/lastframe", { method: "POST", body: JSON.stringify({ video_url: videoUrl }) });
+    return typeof r.url === "string" ? r.url : null;
+  } catch (err) {
+    console.error("[director] last frame failed", err);
+    return null;
+  }
+}
+
+async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: DirectorShotRow, all: DirectorShotRow[] = []) {
   if (shot.status === "completed" || shot.status === "failed") return;
+  let chainFrame: string | null = null;
+  if (!shot.video_request_id || shot.video_request_id.startsWith(TTS_PREFIX)) {
+    const from = chainedFrom(plan, shot.idx);
+    const prev = from === null ? undefined : all.find((s) => s.idx === from);
+    if (prev && prev.status !== "failed") {
+      if (prev.status !== "completed" || !prev.video_url) return; // wait for the take before it
+      chainFrame = await lastFrameOf(prev.raw_video_url ?? prev.video_url);
+    }
+  }
   if (!(await claimDirectorShot(shot.id))) return;
   const engine = film.engine as VideoEngine;
   try {
-    if (!shot.video_request_id) {
+    if (!shot.video_request_id || shot.video_request_id.startsWith(TTS_PREFIX)) {
       // Veo 3.1 "ingredients" (2026-09-29): straight from the real cast and set
       // photos (who's in this shot + the set, max 3) instead of a drawn first
       // frame - Google's recommended way to keep dialogue scenes consistent,
       // and it skips the too-clean drawn still.
-      const ingredients = plan.fromPhotos && !plan.coverage && engine === "veo31" ? shotIngredients(film, plan, shot.idx) : [];
-      const imageUrl = ingredients.length ? null : (shot.keyframe_url ?? null);
+      const ingredients = plan.fromPhotos && !plan.coverage && !chainFrame && engine === "veo31" ? shotIngredients(film, plan, shot.idx) : [];
+      const imageUrl = chainFrame ?? (ingredients.length ? null : (shot.keyframe_url ?? null));
       let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
       // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
       // seedance-1-0-pro-250528 - 1.5 pro is retired - free tokens on our BytePlus account), the
@@ -246,7 +294,26 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       } catch (err) {
         console.error("[director] prompt rebuild failed - using the stored prompt", err);
       }
+      // Voice first (2026-09-30), Seedance 2.x only: record the line in the
+      // speaker's Lucy voice, then Seedance acts and lip-syncs to that audio
+      // (its reference_audio input) - natural lips AND the same voice every
+      // shot, no voice swap afterwards.
+      const voiceFirst = endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) && /seedance-2/.test(endpoint) && !plan.modelVoices ? voiceFirstLine(film, plan, shot.idx) : null;
+      let lineAudio: string | null = null;
+      if (voiceFirst) {
+        if (!shot.video_request_id) {
+          const r = await voiceCall("/start", { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, seconds: Math.min(15, Math.max(4, d ?? 8)) }).catch(() => null);
+          if (r && typeof r.call_id === "string") return updateDirectorShot(shot.id, { video_request_id: `${TTS_PREFIX}${r.call_id}` });
+        } else {
+          const r = await voiceCall(`/result?call_id=${encodeURIComponent(shot.video_request_id.slice(TTS_PREFIX.length))}`).catch(() => null);
+          if (r?.status === "running") return updateDirectorShot(shot.id, {});
+          if (r?.status === "done" && typeof r.url === "string") lineAudio = r.url;
+        }
+        if (lineAudio) prompt = `${voiceFirst.speaker} says: "${voiceFirst.words}" - the voice, timing, pauses and delivery follow Audio 1 exactly, lips perfectly in sync with Audio 1. ${prompt}`;
+      }
+      if (chainFrame) prompt = `ONE CONTINUOUS TAKE: this shot starts exactly on the given first frame, which is the last frame of the previous shot - same camera, same moment, same people in the same places; carry straight on with no cut and no reset. ${prompt}`;
       const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
+      if (lineAudio) input.reference_audio_urls = [lineAudio];
       if (ingredients.length) {
         delete input.image_url;
         input.reference_image_urls = ingredients;
@@ -254,7 +321,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       }
       // The reseller path caps Seedance at 4s; direct 1.5 pro takes 4-12s with sound.
       if (endpoint.startsWith(MODELARK_ENDPOINT_PREFIX)) {
-        input.duration = Math.min(12, Math.max(4, Math.round(d ?? 8)));
+        input.duration = Math.min(/seedance-2/.test(endpoint) ? 15 : 12, Math.max(4, Math.round(d ?? 8))); // Seedance 2.x: long takes up to 15s
         input.generate_audio = !/seedance-1-0/.test(endpoint); // 1.0 makes no sound
       }
       let requestId: string;
@@ -269,11 +336,14 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
           requestId = await submitVideoInferenceJob(endpoint, input);
           return updateDirectorShot(shot.id, { status: "video", video_endpoint: endpoint, video_request_id: requestId });
         }
-        // BytePlus lists some models with a vendor prefix - try that once.
-        if (!endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) || !/NotFound/.test(String(err)) || endpoint.includes("bytedance-")) throw err;
-        endpoint = `${MODELARK_ENDPOINT_PREFIX}bytedance-${endpoint.slice(MODELARK_ENDPOINT_PREFIX.length)}`;
+        // BytePlus lists some models with a vendor prefix (bytedance- / dreamina-) - try those once.
+        if (!endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) || !/NotFound/.test(String(err)) || /bytedance-|dreamina-/.test(endpoint)) throw err;
+        const bare = endpoint.slice(MODELARK_ENDPOINT_PREFIX.length);
+        const prefix = /seedance-2/.test(bare) ? "dreamina-" : "bytedance-";
+        endpoint = `${MODELARK_ENDPOINT_PREFIX}${prefix}${bare}`;
         requestId = await submitVideoInferenceJob(endpoint, input);
       }
+      if (lineAudio) await setDirectorShotVoice(shot.id, { voice_request_id: "done" }); // already in the right voice
       return updateDirectorShot(shot.id, { status: "video", video_endpoint: endpoint, video_request_id: requestId });
     }
     const endpoint = shot.video_endpoint as string;
@@ -477,7 +547,7 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     return shots;
   }
   if (film.status === "shots") {
-    await Promise.all(shots.map((s) => advanceVideo(film, plan, s)));
+    await Promise.all(shots.map((s) => advanceVideo(film, plan, s, shots)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.status === "completed" || s.status === "failed")) {
       // Named cast -> lock each person's voice before joining the shots.

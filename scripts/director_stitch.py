@@ -72,17 +72,17 @@ def _clamp(x):
     return max(1 - MAX_GAIN, min(1 + MAX_GAIN, x))
 
 
-def _upload(path, fal_key):
+def _upload(path, fal_key, content_type="video/mp4", name="film.mp4"):
     init = urllib.request.Request(
         "https://rest.fal.ai/storage/upload/initiate",
-        data=json.dumps({"file_name": "film.mp4", "content_type": "video/mp4"}).encode(),
+        data=json.dumps({"file_name": name, "content_type": content_type}).encode(),
         headers={"Authorization": f"Key {fal_key}", "Content-Type": "application/json"},
         method="POST",
     )
     with urllib.request.urlopen(init, timeout=30) as resp:
         d = json.loads(resp.read())
     with open(path, "rb") as f:
-        put = urllib.request.Request(d["upload_url"], data=f.read(), headers={"Content-Type": "video/mp4"}, method="PUT")
+        put = urllib.request.Request(d["upload_url"], data=f.read(), headers={"Content-Type": content_type}, method="PUT")
     with urllib.request.urlopen(put, timeout=120):
         pass
     return d["file_url"]
@@ -142,6 +142,18 @@ def stitch(video_urls):
         return _upload(final, os.environ["FAL_KEY"])
 
 
+@app.function(image=image, secrets=[fal_key_secret], timeout=120)
+def last_frame(video_url):
+    """Continuous takes (2026-09-30): the final frame of a finished shot, so the
+    next shot can start exactly where it ended (same face, room and light)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        v = os.path.join(tmp, "in.mp4")
+        urllib.request.urlretrieve(video_url, v)
+        out = os.path.join(tmp, "last.png")
+        _run(["ffmpeg", "-y", "-v", "error", "-sseof", "-0.25", "-i", v, "-frames:v", "1", "-update", "1", out])
+        return _upload(out, os.environ["FAL_KEY"], "image/png", "last.png")
+
+
 @app.function(image=image, secrets=[auth_secret])
 @modal.asgi_app()
 def web():
@@ -163,6 +175,15 @@ def web():
             raise fastapi.HTTPException(status_code=400, detail="Need at least two https video URLs")
         call = stitch.spawn(urls)
         return {"call_id": call.object_id}
+
+    @api.post("/lastframe")
+    async def lastframe(request: fastapi.Request):
+        _auth(request)
+        body = await request.json()
+        url = body.get("video_url")
+        if not (isinstance(url, str) and url.startswith("https://")):
+            raise fastapi.HTTPException(status_code=400, detail="Need an https video URL")
+        return {"url": await last_frame.remote.aio(url)}
 
     @api.get("/result")
     async def result(request: fastapi.Request, call_id: str):

@@ -84,11 +84,13 @@ function adaptFalShapedInputToModelArk(model: string, input: Record<string, unkn
     (typeof input.ratio === "string" && input.ratio) ||
     null;
   const generateAudio = Boolean(input.generate_audio);
+  const audioRefs = Array.isArray(input.reference_audio_urls) ? (input.reference_audio_urls as unknown[]).filter((u): u is string => typeof u === "string") : [];
   return buildModelArkCreateBody({
     model,
     prompt,
     imageUrl,
     referenceImageUrls: extraRefs,
+    referenceAudioUrls: audioRefs,
     durationSeconds,
     resolution,
     ratio,

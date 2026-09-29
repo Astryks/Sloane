@@ -88,7 +88,8 @@ function arkHeaders(): Record<string, string> {
 
 export type ModelArkContentItem =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string }; role?: string };
+  | { type: "image_url"; image_url: { url: string }; role?: string }
+  | { type: "audio_url"; audio_url: { url: string }; role: "reference_audio" };
 
 export type ModelArkCreateParams = {
   model: string;
@@ -99,6 +100,8 @@ export type ModelArkCreateParams = {
   imageRole?: "first_frame" | "reference_image";
   /** Extra reference images (product-ad dual-ref path). */
   referenceImageUrls?: string[];
+  /** Seedance 2.x (2026-09-30): the finished line as audio - the video acts and lip-syncs to it. */
+  referenceAudioUrls?: string[];
   durationSeconds: number;
   resolution?: string;
   ratio?: string | null;
@@ -126,6 +129,9 @@ export function buildModelArkCreateBody(params: ModelArkCreateParams): Record<st
       image_url: { url },
       role: "reference_image",
     });
+  }
+  for (const url of (params.referenceAudioUrls ?? []).slice(0, 3)) {
+    if (url) content.push({ type: "audio_url", audio_url: { url }, role: "reference_audio" });
   }
   const body: Record<string, unknown> = {
     model: params.model,

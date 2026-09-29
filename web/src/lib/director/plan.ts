@@ -99,6 +99,8 @@ export type DirectorPlan = {
   coverage?: boolean;
   /** 2026-09-30: skip the voice swap and keep the video model's own (more natural) voices. */
   modelVoices?: boolean;
+  /** 2026-09-30: one continuous take - every shot starts on the previous shot's last frame (vlogs, walk-and-talks). */
+  chain?: boolean;
   title: string;
   logline: string;
   goal: DirectorGoal; // what the user is really trying to do - drives the structure
@@ -326,6 +328,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
     ...(r.fromPhotos === true ? { fromPhotos: true } : {}),
     ...(typeof r.coverage === "boolean" ? { coverage: r.coverage } : {}),
     ...(r.modelVoices === true ? { modelVoices: true } : {}),
+    ...(typeof r.chain === "boolean" ? { chain: r.chain } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),
     location: clampText(r.location, 300),

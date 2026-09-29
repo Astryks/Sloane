@@ -764,6 +764,17 @@ export function DirectorStudio({
                   </span>
                 </label>
                 <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={plan.chain ?? (plan.style === "ugc" || plan.look.format === "phone")}
+                    onChange={(e) => editPlan({ chain: e.target.checked })}
+                  />
+                  <span>
+                    🔗 One continuous take - every shot starts on the last frame of the shot before, so it plays like one unbroken handheld clip (how selfie vlogs stay seamless). Shots film one after another, so it takes a little longer.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
                   <input type="checkbox" className="mt-0.5" checked={!!plan.modelVoices} onChange={(e) => editPlan({ modelVoices: e.target.checked || undefined })} />
                   <span>
                     🗣 Keep the video model&apos;s own voices (most natural - describe each voice in the cast, e.g. &quot;deep, calm, husky&quot;). Off = Lucy swaps in each person&apos;s chosen Lucy voice so it never changes between shots.
