@@ -178,6 +178,24 @@ export function DirectorPhotos({
     onNotice(`Renamed to ${name}.`);
   }
 
+  /** Remove a saved person or set for good (asks first). */
+  async function removeSaved(c: SavedCharacter, kind: "character" | "location") {
+    if (!window.confirm(`Remove "${c.name}" from Your ${kind === "location" ? "sets" : "cast"}? This can't be undone.`)) return;
+    const res = await fetch(`/api/director/characters?id=${encodeURIComponent(c.id)}`, { method: "DELETE" });
+    if (!res.ok) return onError("Couldn't remove it - try again.");
+    if (kind === "location") {
+      setSets((list) => list.filter((x) => x.id !== c.id));
+      if (setId === c.id) {
+        setSetId(null);
+        setPhotos((all) => ({ ...all, location: [] }));
+      }
+    } else {
+      setCast((list) => list.filter((x) => x.id !== c.id));
+      setSelectedCast((sel) => sel.filter((x) => x.id !== c.id));
+    }
+    onNotice(`Removed "${c.name}".`);
+  }
+
   /** Lock a saved person to a Lucy voice ("" = keep the voice from their first shot). */
   async function setVoice(c: SavedCharacter, voiceId: string) {
     const res = await fetch("/api/director/characters", {
@@ -381,9 +399,14 @@ export function DirectorPhotos({
                   <span className="mt-0.5 max-w-20 truncate text-[10px] font-bold">{c.name}</span>
                   <span className="text-[9px] text-muted">{(c.photoUrls?.length ?? 1)} photo{(c.photoUrls?.length ?? 1) === 1 ? "" : "s"}</span>
                 </button>
-                <button type="button" onClick={() => rename(c, "character")} className="text-[9px] font-semibold text-purple underline">
-                  ✏️ rename
-                </button>
+                <span className="flex gap-1">
+                  <button type="button" onClick={() => rename(c, "character")} className="text-[9px] font-semibold text-purple underline">
+                    ✏️ rename
+                  </button>
+                  <button type="button" onClick={() => removeSaved(c, "character")} className="text-[9px] font-semibold text-muted underline">
+                    🗑 remove
+                  </button>
+                </span>
                 <select
                   aria-label={`Voice for ${c.name}`}
                   value={c.voiceId ?? ""}
@@ -449,16 +472,29 @@ export function DirectorPhotos({
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={c.photoUrl} alt={c.name} className="h-12 w-20 rounded-lg object-cover" />
                           <span className="mt-0.5 max-w-20 truncate text-[10px] font-bold">{c.name}</span>
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              rename(c, "location");
-                            }}
-                            className="text-[9px] font-semibold text-purple underline"
-                          >
-                            ✏️ rename
+                          <span className="flex gap-1">
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                rename(c, "location");
+                              }}
+                              className="text-[9px] font-semibold text-purple underline"
+                            >
+                              ✏️ rename
+                            </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeSaved(c, "location");
+                              }}
+                              className="text-[9px] font-semibold text-muted underline"
+                            >
+                              🗑 remove
+                            </span>
                           </span>
                         </button>
                       ))}
