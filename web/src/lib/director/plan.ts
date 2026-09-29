@@ -55,7 +55,37 @@ export type DirectorLook = {
   keyLight: string; // direction + quality of the main light
   palette: string;
   grade: string;
+  /** Camera format for the whole film (2026-09-29, Higgsfield-style "the world it's shot in"). */
+  format?: CameraFormatId;
 };
+
+// One camera for the whole film, like choosing the camera body before a shoot.
+// The format's wording goes into every shot and still, so all shots share the
+// same texture (the biggest giveaway of AI video is a too-clean, too-smooth image).
+export const CAMERA_FORMATS = {
+  film35: {
+    label: "35mm film",
+    video: "Shot on 35mm motion-picture film: visible organic grain, gentle halation around bright highlights, soft highlight roll-off, real lens character, 24fps with natural motion blur",
+    still: "a frame from 35mm motion-picture film: organic grain, gentle halation, soft roll-off, real lens character",
+  },
+  film16: {
+    label: "16mm raw",
+    video: "Shot on 16mm film: strong organic grain, softer detail, slight gate weave, raw documentary texture, 24fps with natural motion blur",
+    still: "a frame from 16mm film: strong organic grain, softer detail, raw documentary texture",
+  },
+  digital: {
+    label: "Cinema digital",
+    video: "Shot on a cinema camera (ARRI-style): natural and clean but never plastic, realistic skin, gentle contrast, no over-sharpening, 24fps with natural motion blur",
+    still: "a cinema-camera frame: natural, gentle contrast, realistic skin, no over-sharpening",
+  },
+  phone: {
+    label: "Phone / selfie vlog",
+    video: "Shot on a phone held at arm's length or on a selfie stick, like a real vlog: handheld with small natural jitters, wide phone lens, auto-exposure and focus shifting slightly, mild phone compression, the person talks straight into the lens",
+    still: "a real phone photo from arm's length: wide phone lens, slightly imperfect exposure, mild compression, candid",
+  },
+} as const;
+export type CameraFormatId = keyof typeof CAMERA_FORMATS;
+export const ALL_CAMERA_FORMATS = Object.keys(CAMERA_FORMATS) as CameraFormatId[];
 
 export type DirectorGoal = "sell" | "story" | "explain" | "promote" | "entertain";
 const ALL_GOALS: DirectorGoal[] = ["sell", "story", "explain", "promote", "entertain"];
@@ -282,6 +312,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       keyLight: clampText(lookRaw.keyLight, 200, dl.keyLight),
       palette: clampText(lookRaw.palette, 200, dl.palette),
       grade: clampText(lookRaw.grade, 200, dl.grade),
+      ...(ALL_CAMERA_FORMATS.includes(lookRaw.format as CameraFormatId) ? { format: lookRaw.format as CameraFormatId } : {}),
     },
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),

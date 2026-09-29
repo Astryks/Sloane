@@ -19,7 +19,7 @@ import {
   realismForShot,
   type ShotSizeId,
 } from "./filmScience";
-import type { DirectorPlan, DirectorShot } from "./plan";
+import { CAMERA_FORMATS, type DirectorPlan, type DirectorShot } from "./plan";
 
 // Angle notes carry "physical description - why a director uses it"; models
 // only need the physical part.
@@ -64,6 +64,20 @@ function productLine(plan: DirectorPlan, refs: RefFlags): string {
   return sentence(`${base}; keep it large, sharp and clearly visible, and avoid fast motion across its label`);
 }
 
+// 2026-09-29 (Higgsfield / Chloe research): real footage is imperfect. A
+// human operator, a camera format with grain, skin that isn't airbrushed and
+// a room that sounds like a room - the too-clean first frame and too-smooth
+// camera are what read as "AI".
+function formatOf(plan: DirectorPlan) {
+  return CAMERA_FORMATS[plan.look.format ?? (plan.style === "ugc" ? "phone" : "film35")];
+}
+function operatorLine(shot: DirectorShot): string {
+  if (shot.move === "locked_off" || shot.move === "overhead_top_down" || shot.move === "product_hero_slide") return "On a tripod, with the tiny natural drift of a real camera - never frozen, never CGI-perfect.";
+  return "Operated by a real camera operator: subtle handheld micro-movement and slight focus breathing - never drone-smooth, never gliding like CGI.";
+}
+const CANDID_PEOPLE = "Candid and unposed, not a polished render: real skin with pores, fine lines and slight unevenness, stray hairs, natural asymmetry, clothes with real creases, a lived-in set with small everyday mess, light that is slightly uneven";
+const ROOM_SOUND = "Real location sound: the room tone of this place, soft breaths and small pauses between phrases, clothing rustle and small movement sounds - no background music, no studio-clean voice";
+
 function lookLine(plan: DirectorPlan, shot: DirectorShot): string {
   const style = PRODUCTION_STYLES[plan.style];
   const setting = shot.setting || plan.location;
@@ -71,7 +85,7 @@ function lookLine(plan: DirectorPlan, shot: DirectorShot): string {
   return [
     setting ? sentence(`Setting: ${setting}`) : "",
     sentence(`Lighting: ${light}`),
-    sentence(`Film look for the whole film: ${plan.look.grade}; palette ${plan.look.palette}; ${style.camera}, ${style.lens}`),
+    sentence(`Film look for the whole film: ${formatOf(plan).video}; ${plan.look.grade}; palette ${plan.look.palette}; ${style.camera}, ${style.lens}`),
   ]
     .filter(Boolean)
     .join(" ");
@@ -138,6 +152,7 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
   const parts = [
     sentence(`${sizeText(plan, refs, shot.size)}, ${ANGLES[shot.angle]}, ${SHOT_SIZES[shot.size].lensHint}`),
     sentence(`Camera: ${moveText} - one continuous move only`),
+    person ? operatorLine(shot) : "",
     // 2026-09-29: "slow" camera words + long clips read as slow motion - keep the action live.
     shot.move === "slow_motion_hold"
       ? ""
@@ -148,16 +163,18 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
     person && shot.expression ? sentence(`Performance: ${shot.expression}`) : "",
     opts.nativeAudio && shot.dialogue ? dialogueLine(plan, shot, shotIndex) : "",
     opts.nativeAudio && shot.sound ? sentence(`Sound: ${shot.sound}`) : "",
+    opts.nativeAudio && person ? sentence(ROOM_SOUND) : "",
     lookLine(plan, shot),
     (refs.character || plan.character) && (refs.location || plan.location || shot.setting)
       ? sentence(`Physically grounded in the scene: ${EMBEDDING_RULES[0]}; ${EMBEDDING_RULES[1]}`)
       : "",
     sentence(`Photoreal detail: ${realismText(plan, refs, shot.size)}`),
+    person ? sentence(CANDID_PEOPLE) : "",
     sentence(style.texture),
     // "TikTok/Reel ad" ideas pulled in fake social captions (garbled text) - be explicit.
     "Clean footage with no text of any kind added: no subtitles, no TikTok-style captions, no titles, no lower-thirds, no watermark, no logos - only text that is physically printed on the product itself.",
   ];
-  return parts.filter(Boolean).join(" ").slice(0, 2400);
+  return parts.filter(Boolean).join(" ").slice(0, 3200);
 }
 
 /**
@@ -184,7 +201,9 @@ export function compileAnchorPrompt(plan: DirectorPlan, refs: RefFlags): string 
       ? sentence(`Integration: ${EMBEDDING_RULES.slice(0, 3).join("; ")}`)
       : sentence("Integration: the subject physically sits in the scene - a real contact shadow where it touches the surface, its reflection in glossy surfaces, the scene's light and colour on its edges, matching perspective and lens blur"),
     sentence(`Detail: ${realismText(plan, refs, "medium")}`),
-    hasPerson(plan, refs) ? "Medium-wide framing, natural pose." : "Medium-wide framing.",
+    sentence(`It looks like ${formatOf(plan).still}`),
+    hasPerson(plan, refs) ? sentence(CANDID_PEOPLE) : "",
+    hasPerson(plan, refs) ? "Medium-wide framing, natural pose, caught mid-moment rather than posing." : "Medium-wide framing.",
     "ONE single photograph filling the whole frame - never a collage, grid, panels or split screen. No text, no watermark.",
   ]
     .filter(Boolean)
@@ -208,6 +227,8 @@ export function compileKeyframePrompt(plan: DirectorPlan, shotIndex: number, ref
     sentence(`Moment: ${shot.action}`),
     person && shot.expression ? sentence(`Expression: ${shot.expression}`) : "",
     sentence(`Detail: ${realismText(plan, refs, shot.size)}`),
+    sentence(`It looks like ${formatOf(plan).still}`),
+    person ? sentence(`${CANDID_PEOPLE}; caught mid-moment, subject slightly off-centre, only the people this shot needs in frame`) : "",
     "ONE single photograph filling the whole frame - never a collage, grid, triptych, panels or split screen. No text, no watermark.",
   ]
     .filter(Boolean)

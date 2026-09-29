@@ -18,7 +18,7 @@ import {
   ALL_STYLE_IDS,
   type ProductionStyleId,
 } from "@/lib/director/filmScience";
-import { MAX_SHOTS, MIN_SHOTS, DEFAULT_SHOTS, type DirectorPlan, type DirectorShot } from "@/lib/director/plan";
+import { MAX_SHOTS, MIN_SHOTS, DEFAULT_SHOTS, ALL_CAMERA_FORMATS, CAMERA_FORMATS, type CameraFormatId, type DirectorPlan, type DirectorShot } from "@/lib/director/plan";
 import {
   VIDEO_PAYGO_ENGINES,
   DIRECTOR_FEE_CENTS,
@@ -686,6 +686,18 @@ export function DirectorStudio({
                     <input className={inputCls} value={plan.look[k]} onChange={(e) => editPlan({ look: { ...plan.look, [k]: e.target.value } })} />
                   </label>
                 ))}
+                <label className="text-[11px] font-semibold text-muted">
+                  🎥 Camera (the whole film)
+                  <select
+                    className={inputCls}
+                    value={plan.look.format ?? (plan.style === "ugc" ? "phone" : "film35")}
+                    onChange={(e) => editPlan({ look: { ...plan.look, format: e.target.value as CameraFormatId } })}
+                  >
+                    {ALL_CAMERA_FORMATS.map((id) => (
+                      <option key={id} value={id}>{CAMERA_FORMATS[id].label}</option>
+                    ))}
+                  </select>
+                </label>
                 {(["character", "wardrobe", "location", "product"] as const).map((k) => (
                   <label key={k} className="text-[11px] font-semibold capitalize text-muted">
                     {k}
