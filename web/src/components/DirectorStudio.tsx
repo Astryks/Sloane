@@ -55,6 +55,13 @@ type FilmStatus = {
   refundIfCancelledCents?: number;
 };
 const DONE_STATES = ["completed", "failed", "cancelled"];
+const MOVIE_KEY = "lucy_movie_preset";
+type MoviePreset = {
+  id: string;
+  name: string;
+  data: { style?: string; engine?: string; aspect?: string; castIds?: string[]; setId?: string | null; notes?: string; look?: DirectorPlan["look"] | null };
+};
+const MAX_WORDS_PER_SHOT = 18; // ~8s of natural speech - Veo's longest shot
 // Same rule as lib/director/compile.ts continuesFromPrevious (kept tiny and local for the card label).
 function lineContinues(plan: DirectorPlan, i: number): boolean {
   const prev = plan.shots[i - 1];
@@ -99,6 +106,78 @@ export function DirectorStudio({
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedCast, setSelectedCast] = useState<CastPick[]>([]);
+  const [presets, setPresets] = useState<MoviePreset[]>([]);
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const [movieNotes, setMovieNotes] = useState("");
+  const [presetSetId, setPresetSetId] = useState<string | null>(null);
+  const [currentSetId, setCurrentSetId] = useState<string | null>(null);
+  const activePreset = presets.find((p) => p.id === presetId) ?? null;
+
+  async function applyPreset(p: MoviePreset | null) {
+    setPresetId(p?.id ?? null);
+    try {
+      if (p) localStorage.setItem(MOVIE_KEY, p.id);
+      else localStorage.removeItem(MOVIE_KEY);
+    } catch {}
+    if (!p) return;
+    const d = p.data;
+    if (d.style && (d.style === "auto" || (ALL_STYLE_IDS as string[]).includes(d.style))) setStyle(d.style as ProductionStyleId | "auto");
+    if (d.engine && VIDEO_PAYGO_ENGINES[d.engine as VideoEngine]) setEngine(d.engine as VideoEngine);
+    if (d.aspect === "16:9" || d.aspect === "9:16" || d.aspect === "auto") setAspect(d.aspect);
+    setMovieNotes(d.notes ?? "");
+    setPresetSetId(d.setId ?? null);
+    if (d.castIds?.length) {
+      try {
+        const all = ((await (await fetch("/api/director/characters")).json()).characters ?? []) as CastPick[];
+        setSelectedCast(d.castIds.map((id) => all.find((c) => c.id === id)).filter((c): c is CastPick => !!c).map((c) => ({ id: c.id, name: c.name, description: c.description })));
+      } catch {}
+    }
+  }
+
+  // Load saved movies; re-open the last one used so nothing needs setting up again.
+  useEffect(() => {
+    fetch("/api/director/presets")
+      .then((r) => r.json())
+      .then((d) => {
+        const list = (Array.isArray(d.presets) ? d.presets : []) as MoviePreset[];
+        setPresets(list);
+        let last: string | null = null;
+        try {
+          last = localStorage.getItem(MOVIE_KEY);
+        } catch {}
+        const p = list.find((x) => x.id === last);
+        if (p) applyPreset(p);
+      })
+      .catch(() => {});
+     
+  }, []);
+
+  async function saveMovie() {
+    const name = window.prompt("Name this movie (its settings load automatically next time):", activePreset?.name ?? "My movie")?.trim();
+    if (!name) return;
+    const data = {
+      style,
+      engine,
+      aspect,
+      castIds: selectedCast.map((c) => c.id),
+      setId: currentSetId,
+      notes: movieNotes,
+      look: plan?.look ?? activePreset?.data.look ?? null,
+    };
+    const res = await fetch("/api/director/presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: activePreset && activePreset.name === name ? activePreset.id : undefined, name, data }),
+    });
+    const out = await res.json();
+    if (!res.ok) return setError(out.error ?? "Couldn't save");
+    setPresets((list) => [out.preset, ...list.filter((x) => x.id !== out.preset.id)]);
+    setPresetId(out.preset.id);
+    try {
+      localStorage.setItem(MOVIE_KEY, out.preset.id);
+    } catch {}
+    setNotice(`Saved "${name}" - its cast, set, style, notes${data.look ? ", film look" : ""} load automatically next time.`);
+  }
   // "Use this recipe" from the examples gallery fills the form (new version = new tap).
   useEffect(() => {
     if (!recipe || filmId) return;
@@ -187,7 +266,8 @@ export function DirectorStudio({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          idea,
+          idea: movieNotes.trim() ? `${movieNotes.trim()}\n\n${idea}` : idea,
+          look: activePreset?.data.look ?? undefined,
           style,
           shotCount,
           aspectRatio: aspect,
@@ -407,6 +487,41 @@ export function DirectorStudio({
       </div>
 
       <div className="mt-5 flex flex-col gap-4">
+        <div className="rounded-2xl border border-purple/30 bg-white/70 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-bold text-foreground">🎞 Your movie</span>
+            <select
+              aria-label="Your movie"
+              className={`${inputCls} w-auto min-w-40 flex-1`}
+              value={presetId ?? ""}
+              onChange={(e) => applyPreset(presets.find((p) => p.id === e.target.value) ?? null)}
+            >
+              <option value="">None - start fresh</option>
+              {presets.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <button type="button" onClick={saveMovie} className="rounded-xl bg-purple/10 px-3 py-1.5 text-xs font-bold text-purple">
+              💾 {activePreset ? "Update" : "Save as my movie"}
+            </button>
+          </div>
+          <p className="mt-1 text-[11px] text-muted">
+            Saves your style, model, shape, cast, set, notes and film look - so every scene looks, sounds and feels like the same movie.
+          </p>
+          <details className="mt-1" open={!!movieNotes || undefined}>
+            <summary className="cursor-pointer text-[11px] font-semibold text-purple">📝 Movie notes - added to every scene (look, life, set)</summary>
+            <textarea
+              aria-label="Movie notes"
+              className={`${inputCls} mt-1`}
+              rows={4}
+              maxLength={1500}
+              placeholder="LOOK: shot on 35mm film, grain, warm lamp light… LIFE: calm office, people working… SET: modern trading desks…"
+              value={movieNotes}
+              onChange={(e) => setMovieNotes(e.target.value)}
+            />
+          </details>
+        </div>
+
         <div>
           <p className="mb-1 text-sm font-bold text-foreground">1. What&apos;s your film about?</p>
           <textarea
@@ -438,7 +553,16 @@ export function DirectorStudio({
           </div>
         </div>
 
-        <DirectorPhotos photos={photos} setPhotos={setPhotos} selectedCast={selectedCast} setSelectedCast={setSelectedCast} onNotice={setNotice} onError={setError} />
+        <DirectorPhotos
+          photos={photos}
+          setPhotos={setPhotos}
+          selectedCast={selectedCast}
+          setSelectedCast={setSelectedCast}
+          onNotice={setNotice}
+          onError={setError}
+          presetSetId={presetSetId}
+          onSetChange={setCurrentSetId}
+        />
 
         <details className="rounded-2xl border border-border bg-white/70 p-3">
           <summary className="cursor-pointer text-sm font-bold text-foreground">3. ⚙️ Settings <span className="font-normal text-muted">(optional - Lucy picks)</span></summary>
@@ -590,6 +714,9 @@ export function DirectorStudio({
                       <label className="text-[10px] font-bold uppercase tracking-wide text-muted">
                         💬 Says <span className="font-normal normal-case">(exact words · add (off screen) if we don&apos;t see them)</span>
                         {i > 0 && lineContinues(plan, i) && <span className="ml-1 rounded bg-purple/10 px-1 font-semibold normal-case text-purple">↪ continues from shot {i}</span>}
+                        {s.dialogue.replace(/\([^)]*\)/g, " ").split(/\s+/).filter(Boolean).length > MAX_WORDS_PER_SHOT && (
+                          <span className="ml-1 rounded bg-coral/10 px-1 font-semibold normal-case text-coral-dark">⚠ long for one 8-second shot - split it across two shots</span>
+                        )}
                         <input className={`${inputCls} mt-1 font-normal normal-case`} value={s.dialogue} placeholder="No dialogue in this shot" onChange={(e) => editShot(i, { dialogue: e.target.value })} />
                       </label>
                     </div>

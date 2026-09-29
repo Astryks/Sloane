@@ -31,6 +31,16 @@ export async function POST(req: NextRequest) {
         .map((c) => ({ name: String((c as { name?: unknown })?.name ?? "").slice(0, 60), description: String((c as { description?: unknown })?.description ?? "").slice(0, 300) }))
         .filter((c) => c.name),
     });
+    // "Your movie": keep the saved film look so every scene matches.
+    const lk = body.look as Record<string, unknown> | undefined;
+    if (lk && typeof lk === "object" && typeof lk.grade === "string" && lk.grade) {
+      plan.look = {
+        timeOfDay: String(lk.timeOfDay ?? plan.look.timeOfDay).slice(0, 80),
+        keyLight: String(lk.keyLight ?? plan.look.keyLight).slice(0, 200),
+        palette: String(lk.palette ?? plan.look.palette).slice(0, 200),
+        grade: String(lk.grade).slice(0, 200),
+      };
+    }
     return publicJson({ plan, source });
   } catch (err) {
     console.error("[director/plan] failed", err);

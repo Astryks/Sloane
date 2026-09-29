@@ -98,7 +98,11 @@ export function DirectorPhotos({
   setSelectedCast,
   onNotice,
   onError,
+  presetSetId,
+  onSetChange,
 }: {
+  presetSetId?: string | null;
+  onSetChange?: (id: string | null) => void;
   photos: RefPhotos;
   setPhotos: React.Dispatch<React.SetStateAction<RefPhotos>>;
   selectedCast: CastPick[];
@@ -130,6 +134,22 @@ export function DirectorPhotos({
       .then((d) => setSets(Array.isArray(d.characters) ? d.characters : []))
       .catch(() => {});
   }, []);
+
+  // "Your movie": select its saved set once the sets have loaded.
+  useEffect(() => {
+    if (!presetSetId || setId === presetSetId) return;
+    const c = sets.find((x) => x.id === presetSetId);
+    if (!c) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSetId(c.id);
+    const links = (c.photoUrls?.length ? c.photoUrls : [c.photoUrl]).slice(0, REF_LIMITS.location);
+    setPhotos((all) => ({ ...all, location: links.map((url) => ({ id: newId(), url, preview: url, status: "ready" as const })) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetSetId, sets]);
+  useEffect(() => {
+    onSetChange?.(setId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setId]);
 
   const patch = (kind: RefKind, id: string, p: Partial<RefPhoto>) =>
     setPhotos((all) => ({ ...all, [kind]: all[kind].map((x) => (x.id === id ? { ...x, ...p } : x)) }));

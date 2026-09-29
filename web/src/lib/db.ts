@@ -645,6 +645,18 @@ async function runSchemaMigrations() {
   await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS photo_urls JSONB NOT NULL DEFAULT '[]'::jsonb`;
   // The same library holds saved sets (locations) - kind 'location' (2026-09-29).
   await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'character'`;
+  // "Your movie" presets (2026-09-29): style/model/shape, cast, set, standing
+  // notes and the locked film look, reused for every scene.
+  await sql`
+    CREATE TABLE IF NOT EXISTS director_presets (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_director_presets_user ON director_presets(user_id)`;
   // Voice lock (2026-09-29): a Lucy voice per saved person, and per-shot re-voicing state.
   await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS voice_id TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS voice_request_id TEXT`;
@@ -2599,6 +2611,22 @@ export async function createSavedCharacter(
 export async function getSavedCharacter(userId: string, id: string): Promise<SavedCharacter | null> {
   const rows = await sql`SELECT * FROM saved_characters WHERE id = ${id} AND user_id = ${userId}`;
   return (rows[0] as SavedCharacter) ?? null;
+}
+
+export type DirectorPreset = { id: string; user_id: string; name: string; data: Record<string, unknown>; updated_at: string };
+
+export async function listDirectorPresets(userId: string): Promise<DirectorPreset[]> {
+  return (await sql`SELECT * FROM director_presets WHERE user_id = ${userId} ORDER BY updated_at DESC LIMIT 30`) as DirectorPreset[];
+}
+export async function saveDirectorPreset(userId: string, id: string | null, name: string, data: unknown): Promise<DirectorPreset | null> {
+  const rows = id
+    ? await sql`UPDATE director_presets SET name = ${name}, data = ${JSON.stringify(data)}::jsonb, updated_at = now() WHERE id = ${id} AND user_id = ${userId} RETURNING *`
+    : await sql`INSERT INTO director_presets (user_id, name, data) VALUES (${userId}, ${name}, ${JSON.stringify(data)}::jsonb) RETURNING *`;
+  return (rows[0] as DirectorPreset) ?? null;
+}
+export async function deleteDirectorPreset(userId: string, id: string): Promise<boolean> {
+  const rows = await sql`DELETE FROM director_presets WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+  return rows.length > 0;
 }
 
 /** Rename / re-describe a saved person or set (2026-09-29). */
