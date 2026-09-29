@@ -98,11 +98,16 @@ export const SHEET_ANGLES = [
 
 export type SheetAngleId = (typeof SHEET_ANGLES)[number]["id"];
 
-export function sheetAnglePrompt(angleId: SheetAngleId, description: string): string {
+export function sheetAnglePrompt(angleId: SheetAngleId, description: string, outfit = ""): string {
   const angle = SHEET_ANGLES.find((a) => a.id === angleId) ?? SHEET_ANGLES[0];
+  const newOutfit = outfit.trim().slice(0, 300);
   return [
     "Using the reference photo(s), create ONE new photograph of the exact same person for a character reference sheet.",
-    "Keep them identical: same face shape, eyes, nose, mouth, skin tone and texture, freckles or marks, hair colour, hairstyle and length, body type, age and the same clothes.",
+    newOutfit
+      ? "Keep them identical: same face shape, eyes, nose, mouth, skin tone and texture, freckles or marks, hair colour, hairstyle and length, body type and age."
+      : "Keep them identical: same face shape, eyes, nose, mouth, skin tone and texture, freckles or marks, hair colour, hairstyle and length, body type, age and the same clothes.",
+    // 2026-09-29: change the outfit, keep the person.
+    newOutfit ? `Change ONLY their clothes - they now wear: ${newOutfit}. Nothing of the old outfit remains.` : "",
     description ? `About them: ${description.trim().slice(0, 300)}.` : "",
     `Framing: ${angle.instruction}.`,
     "Plain light-grey studio background, soft even front light, no harsh shadows, nothing in their hands.",
@@ -144,14 +149,19 @@ export const LOCATION_ANGLES = [
 ] as const;
 export type LocationAngleId = (typeof LOCATION_ANGLES)[number]["id"];
 
-export function locationAnglePrompt(angleId: LocationAngleId, description: string, fromReference: boolean): string {
+export function locationAnglePrompt(angleId: LocationAngleId, description: string, fromReference: boolean, logo?: { placement: string }): string {
   const angle = LOCATION_ANGLES.find((a) => a.id === angleId) ?? LOCATION_ANGLES[0];
+  const logoImage = fromReference ? "the SECOND image" : "the reference image";
   return [
     fromReference
-      ? "Using the reference photo, show the SAME place from a new camera position: identical architecture, furniture, colours, materials, light and time of day."
+      ? "Using the FIRST image, show the SAME place from a new camera position: identical architecture, furniture, colours, materials, light and time of day."
       : "Create ONE photorealistic film-set photograph of this place:",
     `${description.trim().slice(0, 600)}.`,
     `Camera: ${angle.instruction}.`,
+    // 2026-09-29: a brand logo built into the set, never pasted on top.
+    logo
+      ? `${logoImage[0].toUpperCase()}${logoImage.slice(1)} is a company logo. Build it into the room as a real physical object - ${logo.placement.trim().slice(0, 200) || "brushed-metal letters mounted on a wall"} - reproducing its exact shape and lettering, lit by the room's own light with real shadows and reflections. If this camera angle can't see that spot, leave it out. No other logos or text.`
+      : "",
     "Completely EMPTY - no people, no hands, no faces.",
     "Cinematic, physically real light and materials, natural depth of field, 35mm film look. ONE single photo filling the frame - never a collage or grid. No text, no watermark.",
   ].join(" ");

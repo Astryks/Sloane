@@ -17,7 +17,7 @@ const DAILY_ANGLE_CAP = 18; // three full sheets
 export async function POST(req: NextRequest) {
   try {
     await initSchema();
-    const body = (await req.json().catch(() => ({}))) as { photos?: unknown; angle?: unknown; description?: unknown };
+    const body = (await req.json().catch(() => ({}))) as { photos?: unknown; angle?: unknown; description?: unknown; outfit?: unknown };
     const angle = String(body.angle ?? "") as SheetAngleId;
     if (!SHEET_ANGLES.some((a) => a.id === angle)) return publicJson({ error: "Unknown angle" }, { status: 400 });
     const photos = (Array.isArray(body.photos) ? body.photos : [])
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     if (!isOwner(user) && !(await takeDirectorPlanSlot(`sheet:${user.id}`, DAILY_ANGLE_CAP))) {
       return publicJson({ error: "You've made 3 character sheets today - that's the daily limit. Try again tomorrow." }, { status: 429 });
     }
-    const url = await generateImageOnVertex(sheetAnglePrompt(angle, String(body.description ?? "")), photos, "3:4");
+    const url = await generateImageOnVertex(sheetAnglePrompt(angle, String(body.description ?? ""), String(body.outfit ?? "")), photos, "3:4");
     if (!url) return publicJson({ error: "Lucy couldn't draw that angle right now - try again in a minute." }, { status: 503 });
     return publicJson({ url, angle });
   } catch (err) {

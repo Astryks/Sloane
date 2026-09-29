@@ -111,6 +111,9 @@ export function DirectorPhotos({
   const [placeText, setPlaceText] = useState("");
   const [placeProgress, setPlaceProgress] = useState<string | null>(null);
   const [setName, setSetName] = useState("");
+  const [outfit, setOutfit] = useState("");
+  const [logo, setLogo] = useState<{ url: string; preview: string } | null>(null);
+  const [logoPlacement, setLogoPlacement] = useState("");
   const [saveName, setSaveName] = useState("");
   const [saveDesc, setSaveDesc] = useState("");
   const [saving, setSaving] = useState(false);
@@ -187,7 +190,7 @@ export function DirectorPhotos({
       const res = await fetch("/api/director/location-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description, angle, photos: refs }),
+        body: JSON.stringify({ description, angle, photos: refs, logo: logo?.url, logoPlacement }),
       });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't draw that view");
@@ -252,7 +255,7 @@ export function DirectorPhotos({
         const res = await fetch("/api/director/character-sheet", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ photos: sources, angle: angle.id, description: saveDesc }),
+          body: JSON.stringify({ photos: sources, angle: angle.id, description: saveDesc, outfit }),
         });
         const data = await res.json();
         if (!res.ok || !data.url) throw new Error(data.error ?? "Couldn't draw that angle");
@@ -408,6 +411,33 @@ export function DirectorPhotos({
                         value={placeText}
                         onChange={(e) => setPlaceText(e.target.value)}
                       />
+                      <div className="flex flex-wrap items-center gap-2">
+                        {logo ? (
+                          <>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={logo.preview} alt="Logo" className="h-8 w-8 rounded bg-foreground object-contain" />
+                            <input className={`${inputCls} min-w-40 flex-1`} placeholder="Where? e.g. brushed-steel letters behind the desk" value={logoPlacement} onChange={(e) => setLogoPlacement(e.target.value)} />
+                            <button type="button" onClick={() => setLogo(null)} className="text-[10px] text-purple underline">Remove logo</button>
+                          </>
+                        ) : (
+                          <label className="cursor-pointer text-[11px] font-semibold text-purple underline">
+                            + Add your logo to the set (optional)
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                e.target.value = "";
+                                if (!f) return;
+                                uploadOne(f)
+                                  .then((url) => setLogo({ url, preview: URL.createObjectURL(f) }))
+                                  .catch((err) => onError(err instanceof Error ? err.message : "Couldn't add that logo"));
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
                       <button type="button" disabled={!!placeProgress || placeText.trim().length < 8} onClick={drawPlace} className="self-start rounded-xl bg-purple px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
                         {placeProgress ?? "✨ Draw this place (3 angles, free)"}
                       </button>
@@ -428,9 +458,17 @@ export function DirectorPhotos({
               {kind === "character" && readyCharacters > 0 && (
                 <div className="mt-2 flex flex-col gap-2">
                   {!sheetProgress && photos.character.length < REF_LIMITS.character && photos.character.length < 4 && (
-                    <button type="button" onClick={makeSheet} className="self-start rounded-xl bg-purple px-3 py-1.5 text-xs font-bold text-white">
-                      ✨ Show me every angle first (free)
-                    </button>
+                    <div className="flex flex-col gap-1">
+                      <input
+                        className={`${inputCls} w-full`}
+                        placeholder="Optional: new outfit, e.g. a crisp white button-down shirt, open collar"
+                        value={outfit}
+                        onChange={(e) => setOutfit(e.target.value)}
+                      />
+                      <button type="button" onClick={makeSheet} className="self-start rounded-xl bg-purple px-3 py-1.5 text-xs font-bold text-white">
+                        ✨ Show me every angle first (free)
+                      </button>
+                    </div>
                   )}
                   {sheetProgress && <p className="text-[11px] font-semibold text-purple">{sheetProgress}</p>}
                   {!sheetProgress && (
