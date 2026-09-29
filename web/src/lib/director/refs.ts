@@ -144,7 +144,8 @@ export function characterFromTextPrompt(character: string, wardrobe: string): st
 // matches. Saved to "Your sets" like a cast member.
 export const LOCATION_ANGLES = [
   { id: "wide", label: "Wide", instruction: "a wide establishing view from the entrance, showing the whole space" },
-  { id: "main", label: "Main view", instruction: "an eye-level view of the main area where the action happens, as a film camera would frame it" },
+  // 2026-09-29: "main" kept coming back as a near-copy of "wide" - force a real move.
+  { id: "main", label: "Main view", instruction: "a completely different camera position from the first image: standing in the middle of the space, turned about 90 degrees to look across the main area where the action happens, closer and at eye level - it must NOT repeat the first image's framing" },
   { id: "reverse", label: "Reverse", instruction: "the reverse angle - from the far side of the space looking back toward the entrance" },
 ] as const;
 export type LocationAngleId = (typeof LOCATION_ANGLES)[number]["id"];
