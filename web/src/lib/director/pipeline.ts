@@ -207,7 +207,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       // The reseller path caps Seedance at 4s; direct 1.5 pro takes 4-12s with sound.
       if (endpoint.startsWith(MODELARK_ENDPOINT_PREFIX)) {
         input.duration = Math.min(12, Math.max(4, Math.round(d ?? 8)));
-        input.generate_audio = true;
+        input.generate_audio = !/seedance-1-0/.test(endpoint); // 1.0 makes no sound
       }
       let requestId: string;
       try {
