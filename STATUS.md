@@ -11,6 +11,12 @@
   - Labelled shot cards (Camera: framing/angle/move/length; What happens; Who speaks; Says; Where).
   - Remove button for saved cast/sets; saved cards can have their pictures replaced; set edit mode.
   - Liam redrawn in a navy suit, patterned tie and pocket square (old: "Liam (blue shirt)").
+- **"Your movie" presets (LIVE):**
+  - `director_presets` stores style/model/shape, cast ids, set id, movie notes (prepended to every scene) and the locked film look (the plan route overrides `plan.look`).
+  - The last-used movie re-opens automatically (localStorage).
+  - Sid's saved movie: "Astryks film" (Cinematic, Veo, 16:9, Liam + Jess, Astryks floor, LOOK/LIFE/SET notes, mid-morning 35mm look).
+- **Planner fix:** output cap raised to 12288 (7-shot scripts had overflowed 4096 and fallen back); the fallback planner reads SHOT blocks. Shot cards warn when a line is over ~18 words (one 8s shot).
+- **Queued item 2 is partly done:** the film look is now locked per movie. Loudness normalisation in the stitch is still to do.
 - **Queued - do AFTER Sid's current film finishes (touches create/approve/stitch):**
   1. Free storyboards: charge only on Approve; 3 free per account per day, then $1 each; walk-away fee removed. Checkout moves to the Approve step.
   2. "Movie look" presets: save a film's look (stock, grade, palette, lighting, sound bed) and reuse it for every scene so 100 films feel like one movie; loudness normalisation (loudnorm) in the Modal stitch.
