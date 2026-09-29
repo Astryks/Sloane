@@ -73,7 +73,7 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     supportsDurationChoice: true,
   },
   veo: {
-    label: "Veo",
+    label: "Veo Fast",
     versionLabel: "Veo 3.1 Fast",
     tier: "standard",
     durationSeconds: 8,
@@ -103,15 +103,18 @@ export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
     supportsDurationChoice: true,
     supportsNegativePrompt: true,
   },
+  // 2026-09-29: up to 8s so a full line fits (4s cut dialogue off); priced
+  // on its own at $4.99 - see VIDEO_ENGINE_PRICE_CENTS below.
   veo31: {
-    label: "Veo 3.1",
-    versionLabel: "Veo 3.1",
+    label: "Veo Best",
+    versionLabel: "Veo 3.1 (best quality)",
     tier: "premium",
-    durationSeconds: 4,
+    durationSeconds: 8,
     popular: false,
-    pickerNote: "4s clip · top-quality tier, native voice",
+    pickerNote: "up to 8s · best quality and lip sync, native voice",
     supportsNativeAudio: true,
     aspectRatioOptions: ["16:9", "9:16"],
+    supportsDurationChoice: true,
     supportsNegativePrompt: true,
   },
   kling: {
@@ -260,8 +263,12 @@ export const VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS: Record<VideoEngine, number
   minimax: 5,
 };
 
+// Engines that cost more than their tier covers (2026-09-29): Veo 3.1
+// standard at 8s is ~$3.68 buffered, so $4.99 keeps the $1 profit floor.
+const VIDEO_ENGINE_PRICE_CENTS: Partial<Record<VideoEngine, number>> = { veo31: 499 };
+
 export function videoPriceCents(engine: VideoEngine): number {
-  return VIDEO_TIER_PRICE_CENTS[VIDEO_PAYGO_ENGINES[engine].tier];
+  return VIDEO_ENGINE_PRICE_CENTS[engine] ?? VIDEO_TIER_PRICE_CENTS[VIDEO_PAYGO_ENGINES[engine].tier];
 }
 
 // "Directed by Lucy" (2026-09-27): per-shot price = the model's normal tier

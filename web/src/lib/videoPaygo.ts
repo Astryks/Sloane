@@ -196,13 +196,13 @@ const VIDEO_PAYGO_VENDOR: Record<VideoEngine, VendorFields> = {
     ? {
         falEndpoint: vertexEndpointToken(VERTEX_VEO_STANDARD_MODEL),
         falImageToVideoEndpoint: vertexEndpointToken(VERTEX_VEO_STANDARD_MODEL),
-        falDurationValue: "4s",
+        falDurationValue: "8s",
         inferenceProvider: "vertex",
       }
     : {
         falEndpoint: "fal-ai/veo3.1",
         falImageToVideoEndpoint: "fal-ai/veo3.1/image-to-video",
-        falDurationValue: "4s",
+        falDurationValue: "8s",
         inferenceProvider: "fal",
       },
   kling: {
@@ -287,7 +287,7 @@ export const VIDEO_PAYGO_ENGINE_COST_USD: Record<VideoEngine, number> = {
   seedance: SEEDANCE_ON_MODELARK ? 1.1 : 2.23, // ModelArk Fast 8s @ ~$0.12/s + 15% | reseller 8s @ $0.2419/s + 15%
   veo: 1.38,
   veolite: VEO_ON_VERTEX ? 0.46 : 1.38, // 8s x ~$0.05/s (Lite w/ audio, 720p) + 15%
-  veo31: 1.84, // 4s x ~$0.40/s (Veo 3.1 standard w/ audio) + 15% buffer - profit ~$1.73 at $3.99
+  veo31: 3.68, // 8s x ~$0.40/s (Veo 3.1 standard w/ audio) + 15% buffer - priced $4.99 (videoPriceCents)
   kling: 1.61,
   klingv3: 2.254, // 10s @ $0.196/s (worst real tier, audio+voice) + 15% buffer - see VIDEO_PAYGO_ENGINES.klingv3
   minimax: 0.74,

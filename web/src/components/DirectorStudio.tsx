@@ -602,7 +602,7 @@ export function DirectorStudio({
               Model
               <select className={inputCls} value={engine} onChange={(e) => setEngine(e.target.value as VideoEngine)}>
                 {engineEntries.map(([id, e]) => (
-                  <option key={id} value={id}>{e.label} - {formatUsd(directorShotPriceCents(id))}/shot</option>
+                  <option key={id} value={id}>{e.versionLabel} - {formatUsd(directorShotPriceCents(id))}/shot</option>
                 ))}
               </select>
             </label>
