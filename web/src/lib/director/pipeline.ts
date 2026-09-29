@@ -39,6 +39,7 @@ import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl,
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import type { DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
+import { MODELARK_ENDPOINT_PREFIX, getModelArkApiKey } from "../modelArk";
 import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt, type CastPerson } from "./refs";
 import type { DirectorShot } from "./plan";
 import { refFlags } from "./filmAccess";
@@ -180,7 +181,16 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   try {
     if (!shot.video_request_id) {
       const imageUrl = shot.keyframe_url ?? null;
-      const endpoint = resolveVideoEndpoint(engine, !!imageUrl);
+      let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
+      // Owner test (2026-09-29): with BYTEPLUS_OWNER_SEEDANCE_MODEL set (e.g.
+      // seedance-1-5-pro-251215, free tokens on our BytePlus account), the
+      // owner's Seedance films run there directly; customers are unaffected.
+      const ownerModel = process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim();
+      if (engine === "seedance" && ownerModel && getModelArkApiKey()) {
+        const { getUserById } = await import("../db");
+        const { isOwner } = await import("../owner");
+        if (isOwner(await getUserById(film.user_id))) endpoint = `${MODELARK_ENDPOINT_PREFIX}${ownerModel}`;
+      }
       const d = plan.shots[shot.idx]?.durationSeconds ?? null;
       // Rebuild the prompt from the (possibly edited) plan with the current
       // compiler, so fixes like naming the speaker apply to films that were
@@ -194,6 +204,11 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         console.error("[director] prompt rebuild failed - using the stored prompt", err);
       }
       const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
+      // The reseller path caps Seedance at 4s; direct 1.5 pro takes 4-12s with sound.
+      if (endpoint.startsWith(MODELARK_ENDPOINT_PREFIX)) {
+        input.duration = Math.min(12, Math.max(4, Math.round(d ?? 8)));
+        input.generate_audio = true;
+      }
       const requestId = await submitVideoInferenceJob(endpoint, input);
       return updateDirectorShot(shot.id, { status: "video", video_endpoint: endpoint, video_request_id: requestId });
     }
