@@ -200,6 +200,9 @@ export function DirectorStudio({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Couldn't plan that");
       setPlan(data.plan);
+      if (data.source === "rules") {
+        setNotice("Lucy's full planner was busy, so this is a simple draft built straight from your script. Tap “Re-plan from scratch (free)” for the full plan with camera angles and timing.");
+      }
       return data.plan as DirectorPlan;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't plan that");

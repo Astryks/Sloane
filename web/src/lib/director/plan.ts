@@ -153,24 +153,55 @@ function secondsFor(style: ProductionStyleId, emotion: EmotionId): number {
   return Math.round(Math.min(10, Math.max(4, ((lo + hi) / 2) * EMOTIONS[emotion].pace)));
 }
 
+/**
+ * Reads a pasted script ("SHOT 3 - camera/action" blocks with "NAME: line"
+ * dialogue) so even the fallback planner keeps each shot's own action,
+ * speaker and words (2026-09-29 - it used to copy the whole idea into
+ * every shot).
+ */
+export function parseScriptShots(idea: string): Array<{ action: string; dialogue: string; speaker: string }> {
+  const blocks = idea.split(/^\s*SHOT\s*\d+\s*[-:–.]?\s*/gim).slice(1);
+  if (blocks.length < 2) return [];
+  return blocks.map((block) => {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    const said: string[] = [];
+    let speaker = "";
+    const action: string[] = [];
+    for (const line of lines) {
+      const m = /^([A-Z][A-Za-z .'-]{0,30}):\s*(.+)$/.exec(line);
+      if (m && m[1] === m[1].toUpperCase() && !/^(LOOK|LIFE|SET|CAST|NOTE)$/.test(m[1].trim())) {
+        speaker ||= m[1].trim().split(/\s+/)[0].replace(/^./, (c) => c).toLowerCase().replace(/^./, (c) => c.toUpperCase());
+        said.push(m[2].trim());
+      } else action.push(line);
+    }
+    return { action: action.join(" ").slice(0, 400), dialogue: said.join(" ").slice(0, 240), speaker };
+  });
+}
+
 export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   const idea = inputs.idea.trim();
+  const scripted = parseScriptShots(idea);
   const style = inputs.style && inputs.style !== "auto" ? inputs.style : detectStyle(idea);
   const emotion = detectEmotion(idea, style);
-  const count = Math.min(MAX_SHOTS, Math.max(MIN_SHOTS, inputs.shotCount ?? DEFAULT_SHOTS));
+  const count = Math.min(MAX_SHOTS, Math.max(MIN_SHOTS, scripted.length || inputs.shotCount || DEFAULT_SHOTS));
   const dir = EMOTIONS[emotion];
   const seconds = secondsFor(style, emotion);
-  const shots: DirectorShot[] = TEMPLATES[style].slice(0, count).map((t, i) => ({
-    ...t,
-    setting: "",
-    lighting: "",
-    action: i === 0 ? idea : `${idea} - ${t.beat}`,
-    expression: dir.expression,
-    dialogue: "",
-    speaker: "",
-    sound: soundFor(style, emotion),
-    durationSeconds: seconds,
-  }));
+  const tmpl = TEMPLATES[style];
+  const shots: DirectorShot[] = Array.from({ length: count }, (_, i) => {
+    const t = tmpl[i % tmpl.length];
+    const sc = scripted[i];
+    return {
+      ...t,
+      setting: "",
+      lighting: "",
+      action: sc ? sc.action || t.beat : i === 0 ? idea : `${idea} - ${t.beat}`,
+      expression: sc?.speaker ? dir.expression : scripted.length ? "" : dir.expression,
+      dialogue: sc?.dialogue ?? "",
+      speaker: sc?.speaker ?? "",
+      sound: soundFor(style, emotion),
+      durationSeconds: seconds,
+    };
+  });
   return sanitizePlan(
     {
       title: idea.slice(0, 60),
@@ -186,7 +217,7 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
       product: inputs.hasProductPhoto ? "the exact product from the product reference photo" : "",
       shots,
     },
-    inputs,
+    { ...inputs, shotCount: count },
   );
 }
 

@@ -32,7 +32,8 @@ export async function geminiJson<T>(system: string, user: string, opts: { temper
         generationConfig: {
           responseMimeType: "application/json",
           temperature: opts.temperature ?? 0.5,
-          maxOutputTokens: opts.maxOutputTokens ?? 4096,
+          // 7-8 shot scripted plans overflowed 4096 and fell back to the rules planner (2026-09-29).
+          maxOutputTokens: opts.maxOutputTokens ?? 12288,
         },
       }),
       signal: controller.signal,
