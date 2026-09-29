@@ -521,6 +521,16 @@ export function DirectorStudio({
     }
   }
 
+  async function retake(i: number) {
+    const data = await filmAction("retake", { shotIdx: i, note: reviseText[`take${i}`] ?? "" }, `take${i}`);
+    if (data) {
+      setReviseText((r) => ({ ...r, [`take${i}`]: "" }));
+      setFilm((f) => (f ? { ...f, status: "shots", finalVideoUrl: null, shots: f.shots.map((s) => (s.idx === i ? { ...s, status: "keyframe", videoUrl: null, error: null } : s)) } : f));
+      setNotice(`Retaking shot ${i + 1} - Lucy will re-join the film when it's done.`);
+      restartPolling();
+    }
+  }
+
   async function cancelFilm() {
     const data = await filmAction("cancel", {}, "cancel");
     if (data) {
@@ -855,6 +865,19 @@ export function DirectorStudio({
                       </div>
                     )}
                     {st?.videoUrl && <video src={st.videoUrl} controls playsInline className="mt-2 w-full rounded-lg" />}
+                    {film && (film.status === "completed" || film.status === "failed") && (
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          className={inputCls}
+                          placeholder='Retake note (optional): "nobody behind him", "she smiles more"…'
+                          value={reviseText[`take${i}`] ?? ""}
+                          onChange={(e) => setReviseText((r) => ({ ...r, [`take${i}`]: e.target.value }))}
+                        />
+                        <button type="button" disabled={!!busy} onClick={() => retake(i)} className="shrink-0 rounded-xl bg-purple/10 px-3 text-xs font-bold text-purple disabled:opacity-50">
+                          {busy === `take${i}` ? "…" : `🎲 Retake - ${formatUsd(perShot)}`}
+                        </button>
+                      </div>
+                    )}
                     {!st?.videoUrl && st?.keyframeUrl && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={st.keyframeUrl} alt={`Shot ${i + 1} frame`} className="mt-2 w-full rounded-lg" />

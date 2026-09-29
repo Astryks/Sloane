@@ -2582,6 +2582,22 @@ export async function markDirectorFilmRefunded(filmId: string, cents: number) {
 }
 
 /** Marks a shot failed exactly once; returns true only for the caller that did it (so only one refund). */
+/** Retake (2026-09-29): film one finished shot again and re-join the film. */
+export async function resetDirectorShotForRetake(filmId: string, shotId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_films SET status = 'shots', final_video_url = NULL, stitch_request_id = NULL, error = NULL, claimed_at = NULL
+    WHERE id = ${filmId} AND status IN ('completed', 'failed')
+    RETURNING id
+  `;
+  if (!rows.length) return false;
+  await sql`
+    UPDATE director_shots SET status = 'keyframe', video_endpoint = NULL, video_request_id = NULL, video_url = NULL,
+      voice_request_id = NULL, raw_video_url = NULL, error = NULL, claimed_at = NULL
+    WHERE id = ${shotId}
+  `;
+  return true;
+}
+
 export async function failDirectorShot(shotId: string, error: string): Promise<boolean> {
   const rows = await sql`
     UPDATE director_shots SET status = 'failed', error = ${error.slice(0, 500)}, claimed_at = NULL
