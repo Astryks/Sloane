@@ -16,7 +16,16 @@ const DAILY_ANGLE_CAP = 18;
 export async function POST(req: NextRequest) {
   try {
     await initSchema();
-    const body = (await req.json().catch(() => ({}))) as { description?: unknown; angle?: unknown; photos?: unknown; aspect?: unknown; logo?: unknown; logoPlacement?: unknown };
+    const body = (await req.json().catch(() => ({}))) as {
+      description?: unknown;
+      angle?: unknown;
+      photos?: unknown;
+      aspect?: unknown;
+      logo?: unknown;
+      logoPlacement?: unknown;
+      art?: unknown;
+      artPlacement?: unknown;
+    };
     const angle = String(body.angle ?? "") as LocationAngleId;
     if (!LOCATION_ANGLES.some((a) => a.id === angle)) return publicJson({ error: "Unknown angle" }, { status: 400 });
     const description = String(body.description ?? "").trim();
@@ -30,11 +39,19 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: "That's today's limit for free sheets - try again tomorrow." }, { status: 429 });
     }
     const aspect = body.aspect === "9:16" ? "9:16" : "16:9";
-    // Optional brand logo, always the last reference image.
+    // Optional brand logo, then optional artwork, after the room photo.
     const logo = body.logo ? resolveMediaUrl(String(body.logo)) : "";
     const withLogo = isVendorMediaUrl(logo);
-    const refs = withLogo ? [...photos, logo] : photos;
-    const prompt = locationAnglePrompt(angle, description, photos.length > 0, withLogo ? { placement: String(body.logoPlacement ?? "") } : undefined);
+    const art = body.art ? resolveMediaUrl(String(body.art)) : "";
+    const withArt = isVendorMediaUrl(art);
+    const refs = [...photos.slice(0, 1), ...(withLogo ? [logo] : []), ...(withArt ? [art] : [])];
+    const prompt = locationAnglePrompt(
+      angle,
+      description,
+      photos.length > 0,
+      withLogo ? { placement: String(body.logoPlacement ?? "") } : undefined,
+      withArt ? { placement: String(body.artPlacement ?? "") } : undefined,
+    );
     const url = await generateImageOnVertex(prompt, refs, aspect);
     if (!url) return publicJson({ error: "Lucy couldn't draw that view right now - try again in a minute." }, { status: 503 });
     return publicJson({ url, angle });

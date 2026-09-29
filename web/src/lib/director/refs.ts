@@ -150,9 +150,20 @@ export const LOCATION_ANGLES = [
 ] as const;
 export type LocationAngleId = (typeof LOCATION_ANGLES)[number]["id"];
 
-export function locationAnglePrompt(angleId: LocationAngleId, description: string, fromReference: boolean, logo?: { placement: string }): string {
+const ORDINAL = ["FIRST", "SECOND", "THIRD", "FOURTH"];
+
+export function locationAnglePrompt(
+  angleId: LocationAngleId,
+  description: string,
+  fromReference: boolean,
+  logo?: { placement: string },
+  art?: { placement: string },
+): string {
   const angle = LOCATION_ANGLES.find((a) => a.id === angleId) ?? LOCATION_ANGLES[0];
-  const logoImage = fromReference ? "the SECOND image" : "the reference image";
+  // Reference order: [room (if any), logo (if any), artwork (if any)].
+  let next = fromReference ? 1 : 0;
+  const logoImage = logo ? `the ${ORDINAL[next++]} image` : "";
+  const artImage = art ? `the ${ORDINAL[next++]} image` : "";
   return [
     fromReference
       ? "Using the FIRST image, show the SAME place from a new camera position: identical architecture, furniture, colours, materials, light and time of day."
@@ -163,7 +174,11 @@ export function locationAnglePrompt(angleId: LocationAngleId, description: strin
     logo
       ? `${logoImage[0].toUpperCase()}${logoImage.slice(1)} is a company logo. Build it into the room as a real physical object - ${logo.placement.trim().slice(0, 200) || "brushed-metal letters mounted on a wall"} - reproducing its exact shape and lettering, lit by the room's own light with real shadows and reflections. If this camera angle can't see that spot, leave it out. No other logos or text.`
       : "",
-    "Completely EMPTY - no people, no hands, no faces.",
+    // 2026-09-29: the customer's own artwork hung in the set.
+    art
+      ? `${artImage[0].toUpperCase()}${artImage.slice(1)} is an artwork. Hang it as large framed canvases - ${art.placement.trim().slice(0, 200) || "on the main walls"} - the same painting and others in exactly the same hand, style, brushwork and palette, lit by the room's light.`
+      : "",
+    "Completely EMPTY - no people, no hands, no faces (except faces inside paintings).",
     "Cinematic, physically real light and materials, natural depth of field, 35mm film look. ONE single photo filling the frame - never a collage or grid. No text, no watermark.",
   ].join(" ");
 }
