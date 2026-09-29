@@ -19,6 +19,10 @@
   - Your cast: The Mentor (7 photos), The Broker (7), The Trainer (6; redrawn in a white open-collar shirt with a pendant via the new outfit option).
   - Your sets: "Astryks office" (2 angles). A vast dark office with the Astryks logo as a backlit brushed-steel sign, via the new logo option.
   - Note: `OWNER_EMAILS` is `support@astryks.com` only. On the personal email the sheet caps apply and films charge credit.
+- **Copied to support@astryks.com (owner):**
+  - Your cast: Jess (ex-Trainer; Australian voice), Liam (Brooklyn), Lawrence Neilson (soft husky British narrator voice). Voices are in the descriptions.
+  - Your sets: Astryks office, Classic corner office, Astryks floor (lobby with brushed-steel logo -> office floor -> doors to the corner office).
+- **Code:** cast descriptions (including voice/accent) go into every shot verbatim; rename cast/sets from the picker (PATCH); the "main" set angle is forced to a different camera position.
 - **New options:** outfit change on character sheets (same face, new clothes); a logo built into drawn sets (`logo` + `logoPlacement`).
 - **Next:** Sid sends the scene script -> plan and storyboard with Mentor + Broker in the office, review before filming.
 
