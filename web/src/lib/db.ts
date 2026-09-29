@@ -2586,7 +2586,7 @@ export async function markDirectorFilmRefunded(filmId: string, cents: number) {
 export async function resetDirectorShotForRetake(filmId: string, shotId: string): Promise<boolean> {
   const rows = await sql`
     UPDATE director_films SET status = 'shots', final_video_url = NULL, stitch_request_id = NULL, error = NULL, claimed_at = NULL
-    WHERE id = ${filmId} AND status IN ('completed', 'failed')
+    WHERE id = ${filmId} AND status IN ('completed', 'failed', 'shots', 'voicing', 'stitching')
     RETURNING id
   `;
   if (!rows.length) return false;

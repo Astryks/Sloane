@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     const { film, plan } = owned;
     const idx = Number(body.shotIdx);
     if (!Number.isInteger(idx) || idx < 0 || idx >= plan.shots.length) return publicJson({ error: "Unknown shot" }, { status: 400 });
-    if (film.status !== "completed" && film.status !== "failed") return publicJson({ error: "Wait for the film to finish, then retake a shot." }, { status: 409 });
+    if (!["completed", "failed", "shots", "voicing", "stitching"].includes(film.status)) return publicJson({ error: "Approve the storyboard first - retakes are for filmed shots." }, { status: 409 });
     const shots = await getDirectorShots(film.id);
     const shot = shots[idx];
     if (!shot) return publicJson({ error: "Unknown shot" }, { status: 400 });
