@@ -628,6 +628,10 @@ async function runSchemaMigrations() {
   // character sheet herself ('done' for rows made before this existed).
   await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS auto_approve BOOLEAN NOT NULL DEFAULT false`;
   await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS cast_status TEXT NOT NULL DEFAULT 'done'`;
+  // Free storyboards (2026-09-29): NULL = the whole film was paid up front (older
+  // films, "Just make it"); a number = only that much (a storyboard fee, often
+  // 0) has been paid, and the rest is charged when the customer approves.
+  await sql`ALTER TABLE director_films ADD COLUMN IF NOT EXISTS paid_cents INTEGER`;
   await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS redraw_from_url TEXT`;
   // Character library (2026-09-27): save a cast member once, reuse in any film.
   await sql`
@@ -2384,6 +2388,7 @@ export type DirectorFilmRow = {
   auto_approve: boolean;
   cast_status: "pending" | "face" | "done";
   refunded_cents: number;
+  paid_cents: number | null;
   total_cents: number;
   anchor_request_id: string | null;
   anchor_url: string | null;
@@ -2429,11 +2434,13 @@ export async function createDirectorFilm(params: {
   totalCents: number;
   autoApprove?: boolean;
   castStatus?: "pending" | "done";
+  /** Omit when the whole film is paid now; otherwise what has been paid so far. */
+  paidCents?: number | null;
   shots: Array<{ prompt: string; keyframePrompt: string; priceCents: number }>;
 }): Promise<string> {
   const rows = await sql`
-    INSERT INTO director_films (user_id, idea, plan, engine, refs, total_cents, auto_approve, cast_status)
-    VALUES (${params.userId}, ${params.idea}, ${JSON.stringify(params.plan)}::jsonb, ${params.engine}, ${JSON.stringify(params.refs)}::jsonb, ${params.totalCents}, ${params.autoApprove ?? false}, ${params.castStatus ?? "done"})
+    INSERT INTO director_films (user_id, idea, plan, engine, refs, total_cents, auto_approve, cast_status, paid_cents)
+    VALUES (${params.userId}, ${params.idea}, ${JSON.stringify(params.plan)}::jsonb, ${params.engine}, ${JSON.stringify(params.refs)}::jsonb, ${params.totalCents}, ${params.autoApprove ?? false}, ${params.castStatus ?? "done"}, ${params.paidCents ?? null})
     RETURNING id
   `;
   const filmId = rows[0].id as string;
@@ -2445,6 +2452,11 @@ export async function createDirectorFilm(params: {
     `;
   }
   return filmId;
+}
+
+/** Records that the film is now fully paid (null) or restores a partial payment. */
+export async function setDirectorFilmPaid(filmId: string, paidCents: number | null): Promise<void> {
+  await sql`UPDATE director_films SET paid_cents = ${paidCents} WHERE id = ${filmId}`;
 }
 
 export async function getDirectorFilm(filmId: string): Promise<DirectorFilmRow | null> {

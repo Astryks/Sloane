@@ -55,7 +55,9 @@ type FilmStatus = {
   maxRevisions?: number;
   totalCents?: number;
   refundIfCancelledCents?: number;
+  dueOnApproveCents?: number;
 };
+const APPROVE_KEY = "lucy_director_approve";
 const DONE_STATES = ["completed", "failed", "cancelled"];
 const MOVIE_KEY = "lucy_movie_preset";
 type MoviePreset = {
@@ -213,6 +215,22 @@ export function DirectorStudio({
     const p = new URLSearchParams(window.location.search);
     if (p.get("director") !== "1") return;
     window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+    let approveId: string | null = null;
+    try {
+      approveId = sessionStorage.getItem(APPROVE_KEY);
+      sessionStorage.removeItem(APPROVE_KEY);
+    } catch {}
+    if (approveId) {
+      setFilmId(approveId);
+      if (p.get("canceled") === "1") return setNotice("Checkout canceled - nothing was charged. Your storyboard is still here.");
+      setNotice("Payment received - filming your storyboard…");
+      // Stripe's webhook can land a moment after the redirect - retry briefly.
+      for (let i = 0; i < 15; i++) {
+        if (await approve(approveId, true)) return setNotice(null);
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      return setNotice("Your payment is still being confirmed - press Approve & film it in a moment.");
+    }
     let draft: { idea: string; plan: DirectorPlan; engine: VideoEngine; refs?: Parameters<typeof photosFromLinks>[0]; cast?: CastPick[]; auto?: boolean } | null = null;
     try {
       draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null");
@@ -465,11 +483,41 @@ export function DirectorStudio({
     }
   }
 
-  async function approve() {
-    const data = await filmAction("approve", {}, "approve");
-    if (data) {
-      setFilm((f) => (f ? { ...f, status: "shots" } : f));
-      restartPolling();
+  async function approve(id: string | null = filmId, fromCheckout = false): Promise<boolean> {
+    if (!id) return false;
+    setBusy("approve");
+    setError(null);
+    try {
+      const res = await fetch("/api/director/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filmId: id }) });
+      const data = await res.json();
+      if (res.ok) {
+        setFilm((f) => (f ? { ...f, status: "shots", dueOnApproveCents: 0 } : f));
+        restartPolling();
+        return true;
+      }
+      if (data.needCredit && !fromCheckout) {
+        // Free storyboard, paid film: top up the exact amount, then come back and film.
+        try {
+          sessionStorage.setItem(APPROVE_KEY, id);
+        } catch {}
+        const co = await fetch("/api/video-paygo/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ packId: "exact", cents: data.totalCents, returnTo: "director" }),
+        });
+        const cd = await co.json();
+        if (cd.url) {
+          window.location.href = cd.url;
+          return false;
+        }
+      }
+      if (!fromCheckout) setError(data.error ?? "That didn't work");
+      return false;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That didn't work");
+      return false;
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -847,12 +895,12 @@ export function DirectorStudio({
               disabled={creating || !!producing || isUploading(photos)}
               className="w-full rounded-2xl bg-purple py-4 text-base font-bold text-white shadow-soft disabled:opacity-50"
             >
-              {creating ? "Starting…" : isUploading(photos) ? "Adding your photos…" : `Draw my storyboard - ${formatUsd(total)} →`}
+              {creating ? "Starting…" : isUploading(photos) ? "Adding your photos…" : "Draw my storyboard - free →"}
             </button>}
             {!filmId && (
               <p className="-mt-1 text-center text-[11px] text-muted">
-                Pay as you go - no subscription, no account needed. Lucy draws every frame first; nothing is filmed until you approve.
-                Change your mind before filming and everything except the direction fee goes back to your credit.
+                The storyboard is free (3 a day, then {formatUsd(100)} each, taken off the film). You only pay {formatUsd(total)} when you approve filming -
+                no subscription, no account needed.
               </p>
             )}
           </div>
@@ -866,11 +914,11 @@ export function DirectorStudio({
                 <p className="text-xs text-muted">
                   Redraw any frame in plain words ({redrawsLeft} of {film.maxRevisions ?? 5} redraws left) or edit a shot&apos;s text. Nothing is filmed until you approve.
                 </p>
-                <button type="button" disabled={!!busy} onClick={approve} className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft disabled:opacity-50">
-                  {busy === "approve" ? "Starting…" : "Approve & film it 🎬"}
+                <button type="button" disabled={!!busy} onClick={() => approve()} className="w-full rounded-2xl bg-purple py-3 text-sm font-bold text-white shadow-soft disabled:opacity-50">
+                  {busy === "approve" ? "Starting…" : `Approve & film it${film.dueOnApproveCents ? ` - ${formatUsd(film.dueOnApproveCents)}` : ""} 🎬`}
                 </button>
                 <button type="button" disabled={!!busy} onClick={cancelFilm} className="text-[11px] font-semibold text-muted underline">
-                  Cancel and put {formatUsd(film.refundIfCancelledCents ?? 0)} back in my credit
+                  {film.refundIfCancelledCents ? `Cancel and put ${formatUsd(film.refundIfCancelledCents)} back in my credit` : "Cancel - nothing is charged"}
                 </button>
               </div>
             )}

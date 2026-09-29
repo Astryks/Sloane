@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getPaygoSessionUser } from "@/lib/auth";
-import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, savedCharacterPhotos, spendVideoCredit } from "@/lib/db";
+import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, savedCharacterPhotos, spendVideoCredit, takeDirectorPlanSlot } from "@/lib/db";
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
@@ -12,6 +12,8 @@ import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
 
 export const maxDuration = 60;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+const FREE_BOARDS_PER_DAY = 3;
+const STORYBOARD_FEE_CENTS = 100;
 
 // Charges the whole film up front (shots x per-shot price), stores the plan
 // and compiled prompts, and hands off to /api/director/status to produce it.
@@ -98,9 +100,25 @@ export async function POST(req: NextRequest) {
 
     const perShot = directorShotPriceCents(engine);
     const totalCents = perShot * plan.shots.length;
-    if (isOwner(user)) await addVideoCredits(user.id, totalCents);
-    if (!(await spendVideoCredit(user.id, totalCents))) {
-      return publicJson({ error: `This film costs ${formatUsd(totalCents)} - add credit to make it`, needCredit: true, totalCents }, { status: 402 });
+    // Free storyboards (2026-09-29): checking each step first costs nothing
+    // up front - the film is charged on "Approve & film it". The first
+    // FREE_BOARDS_PER_DAY storyboards a day are free, then $1 each (the
+    // stills cost us ~$1-1.50 a board), credited toward the film.
+    // "Just make it" (autoApprove) is still charged in full now.
+    let chargeNow = totalCents;
+    let paidCents: number | null = null;
+    if (!autoApprove) {
+      const free = isOwner(user) || (await takeDirectorPlanSlot(`board:${user.id}`, FREE_BOARDS_PER_DAY));
+      chargeNow = free ? 0 : STORYBOARD_FEE_CENTS;
+      paidCents = chargeNow;
+    } else if (isOwner(user)) await addVideoCredits(user.id, totalCents);
+    if (chargeNow > 0 && !(await spendVideoCredit(user.id, chargeNow))) {
+      return publicJson(
+        autoApprove
+          ? { error: `This film costs ${formatUsd(totalCents)} - add credit to make it`, needCredit: true, totalCents }
+          : { error: `You've used today's ${FREE_BOARDS_PER_DAY} free storyboards - this one is ${formatUsd(STORYBOARD_FEE_CENTS)}, taken off the film's price.`, needCredit: true, totalCents: STORYBOARD_FEE_CENTS },
+        { status: 402 },
+      );
     }
 
     try {
@@ -109,7 +127,7 @@ export async function POST(req: NextRequest) {
         if (f) links[k] = [await uploadInputMedia(Buffer.from(await f.arrayBuffer()), f.type, `${k}.jpg`, "vertex"), ...links[k]].slice(0, REF_LIMITS[k]);
       }
     } catch (err) {
-      await addVideoCredits(user.id, totalCents);
+      if (chargeNow > 0) await addVideoCredits(user.id, chargeNow);
       console.error("[director/create] upload failed", err);
       return publicJson({ error: "Couldn't upload your photos - you haven't been charged." }, { status: 500 });
     }
@@ -125,6 +143,7 @@ export async function POST(req: NextRequest) {
         totalCents,
         autoApprove,
         castStatus: autoCast ? "pending" : "done",
+        paidCents,
         shots: plan.shots.map((_, i) => ({
           prompt: compileShotPrompt(plan, i, refFlags, { nativeAudio }),
           keyframePrompt: compileKeyframePrompt(plan, i, { ...refFlags, character: refFlags.character || autoCast }),
@@ -133,7 +152,7 @@ export async function POST(req: NextRequest) {
       });
       return publicJson({ filmId, totalCents });
     } catch (err) {
-      await addVideoCredits(user.id, totalCents);
+      if (chargeNow > 0) await addVideoCredits(user.id, chargeNow);
       console.error("[director/create] failed", err);
       return publicJson({ error: "Couldn't start your film - you haven't been charged." }, { status: 500 });
     }

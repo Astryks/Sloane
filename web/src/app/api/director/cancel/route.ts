@@ -16,10 +16,11 @@ export async function POST(req: NextRequest) {
   if (!(await transitionDirectorFilm(film.id, ["anchor", "frames", "review"], "cancelled"))) {
     return publicJson({ error: "Filming has already started, so this film can't be cancelled." }, { status: 409 });
   }
-  const refund = film.total_cents - walkawayKeepCents(plan.shots.length, film.total_cents);
+  // A free storyboard was never charged for the film - only a storyboard fee (if any) was paid, and it's kept.
+  const refund = film.paid_cents !== null ? 0 : film.total_cents - walkawayKeepCents(plan.shots.length, film.total_cents);
   if (refund > 0) {
     await addVideoCredits(film.user_id, refund);
     await markDirectorFilmRefunded(film.id, refund);
   }
-  return publicJson({ ok: true, refundedCents: refund, message: `${formatUsd(refund)} is back in your Lucy credit.` });
+  return publicJson({ ok: true, refundedCents: refund, message: film.paid_cents !== null ? "Cancelled - nothing was charged for the film." : `${formatUsd(refund)} is back in your Lucy credit.` });
 }
