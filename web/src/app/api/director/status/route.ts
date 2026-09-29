@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
       totalCents: fresh.total_cents,
       dueOnApproveCents: fresh.paid_cents === null ? 0 : Math.max(0, fresh.total_cents - fresh.paid_cents),
       refundIfCancelledCents: fresh.paid_cents !== null ? 0 : fresh.total_cents - walkawayKeepCents((fresh.plan as { shots?: unknown[] }).shots?.length ?? shots.length, fresh.total_cents),
-      shots: shots.map((s) => ({ idx: s.idx, status: s.status, keyframeUrl: s.keyframe_url, videoUrl: s.video_url, error: s.status === "failed" ? "This shot couldn't be rendered - it's been refunded." : s.error === "frame" ? "Couldn't draw this frame - it will be filmed from the description." : null })),
+      shots: shots.map((s) => ({ idx: s.idx, status: s.status, keyframeUrl: s.keyframe_url, videoUrl: s.video_url, error: s.status === "failed" ? "This shot couldn't be rendered - it's been refunded." : s.error === "frame" ? "Couldn't draw this frame - it will be filmed from the description." : s.error === "voice" ? "The voice didn't lock on this shot - tap Retake." : null })),
     });
   } catch (err) {
     console.error("[director/status] failed", err);

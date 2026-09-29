@@ -5,6 +5,7 @@ import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy"
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan } from "@/lib/director/plan";
+import { PRESET_VOICES } from "@/lib/presetVoices";
 import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
@@ -13,6 +14,16 @@ import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
 
 export const maxDuration = 60;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+/** A Lucy voice for someone who didn't pick one: their namesake voice, else one matching their gender. */
+function autoVoiceFor(name: string, description: string): string {
+  const first = name.trim().split(/\s+/)[0].toLowerCase();
+  const namesake = PRESET_VOICES.find((v) => v.label.toLowerCase() === first);
+  if (namesake) return namesake.id;
+  const d = `${description} ${name}`.toLowerCase();
+  if (/\b(woman|women|girl|she|her|female|lady|mother|mum|mom)\b/.test(d)) return "harper";
+  return /\b(old|older|grey|gray|silver|senior|elderly|50s|60s|fifties|sixties)\b/.test(d) ? "voice_tech" : "liam";
+}
 const FREE_BOARDS_PER_DAY = 3;
 const STORYBOARD_FEE_CENTS = 100;
 
@@ -78,7 +89,10 @@ export async function POST(req: NextRequest) {
     const links = parseRefLinks(form.get("refs"));
     let people: CastPerson[] | undefined;
     if (savedCast.length) {
-      const named: CastPerson[] = savedCast.map((c) => ({ name: c!.name, description: c!.description, photos: savedCharacterPhotos(c!), voiceId: c!.voice_id || "" }));
+      // Everyone who talks gets a fixed Lucy voice (2026-09-30) - without one,
+      // a person's voice came from their first shot, so one shot where the
+      // model used the wrong voice spread to all their lines.
+      const named: CastPerson[] = savedCast.map((c) => ({ name: c!.name, description: c!.description, photos: savedCharacterPhotos(c!), voiceId: c!.voice_id || autoVoiceFor(c!.name, c!.description) }));
       // Anyone uploaded alongside the cast becomes one more (unnamed) person.
       if (links.character.length) named.push({ name: "the person in the uploaded photos", description: "", photos: links.character });
       people = allocateCast(named);

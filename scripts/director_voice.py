@@ -174,6 +174,14 @@ class Voice:
                 conv = self.vc.generate(src, target_voice_path=ref)  # [1, m] at self.vc.sr
             conv = torchaudio.functional.resample(conv.cpu().float(), self.vc.sr, SR)[0].numpy()
             conv = np.pad(conv, (0, max(0, n - len(conv))))[:n]
+            # 2026-09-30: never hand back the wrong person's voice. If the
+            # converted line's pitch is far from the reference speaker's
+            # (e.g. a woman's pitch left on Lawrence's line), fail so Lucy
+            # retries, then flags the shot.
+            ref_audio, _ = sf.read(ref, dtype="float32", always_2d=True)
+            ref_f0, out_f0 = _median_f0(ref_audio.mean(1), SR_OF(ref)), _median_f0(conv, SR)
+            if ref_f0 and out_f0 and not (0.72 < out_f0 / ref_f0 < 1.38):
+                raise RuntimeError(f"voice mismatch: converted {out_f0:.0f}Hz vs speaker {ref_f0:.0f}Hz")
             # Same loudness as Veo's original speech.
             rms_in = float(np.sqrt(np.mean(speech.mean(0) ** 2)) + 1e-8)
             rms_out = float(np.sqrt(np.mean(conv ** 2)) + 1e-8)
@@ -188,6 +196,21 @@ class Voice:
                 "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", out,
             ])
             return _upload(out, "video/mp4", "shot.mp4", os.environ["FAL_KEY"])
+
+
+def SR_OF(path):
+    import soundfile as sf
+    return sf.info(path).samplerate
+
+
+def _median_f0(audio, sr):
+    """Median speaking pitch in Hz (0 if too little voiced speech)."""
+    import librosa
+    import numpy as np
+    y = librosa.resample(np.asarray(audio, dtype=np.float32), orig_sr=sr, target_sr=16000)[: 16000 * 20]
+    f0, voiced, _ = librosa.pyin(y, fmin=60, fmax=400, sr=16000, frame_length=1024)
+    f0 = f0[voiced & ~np.isnan(f0)]
+    return float(np.median(f0)) if len(f0) > 20 else 0.0
 
 
 def _duration(path):

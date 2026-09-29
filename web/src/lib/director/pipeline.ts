@@ -465,19 +465,30 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
       const p = cast[who];
       if (!p.voiceRef) continue;
       if (p.voiceRef === "none" || p.voiceShot === s.idx || s.voice_request_id === "done" || s.voice_request_id === "failed") continue;
-      if (!s.voice_request_id) {
-        const r = await voiceCall("/start", { mode: "convert", video_url: s.video_url, reference_url: p.voiceRef });
+      // 2026-09-30: a failed swap is retried once (the retry is marked "r:"),
+      // and the voice service now rejects a result whose pitch doesn't match
+      // the speaker (e.g. a woman's voice left on Lawrence's line).
+      if (!s.voice_request_id || s.voice_request_id === "retry") {
+        const r = await voiceCall("/start", { mode: "convert", video_url: s.raw_video_url ?? s.video_url, reference_url: p.voiceRef });
         if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
-        await setDirectorShotVoice(s.id, { voice_request_id: r.call_id });
+        await setDirectorShotVoice(s.id, { voice_request_id: `${s.voice_request_id === "retry" ? "r:" : ""}${r.call_id}` });
         pending = true;
         continue;
       }
-      const r = await voiceCall(`/result?call_id=${encodeURIComponent(s.voice_request_id)}`);
+      const job = s.voice_request_id.replace(/^r:/, "");
+      const r = await voiceCall(`/result?call_id=${encodeURIComponent(job)}`);
       if (r.status === "done" && typeof r.url === "string") {
-        await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: s.video_url ?? undefined, video_url: r.url });
+        await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: s.raw_video_url ?? s.video_url ?? undefined, video_url: r.url });
       } else if (r.status === "failed") {
-        console.error("[director] re-voice failed - keeping the original audio", s.id, r.error);
-        await setDirectorShotVoice(s.id, { voice_request_id: "failed" });
+        if (!s.voice_request_id.startsWith("r:")) {
+          console.error("[director] re-voice failed - retrying once", s.id, r.error);
+          await setDirectorShotVoice(s.id, { voice_request_id: "retry" });
+          pending = true;
+        } else {
+          console.error("[director] re-voice failed twice - flagging the shot", s.id, r.error);
+          await setDirectorShotVoice(s.id, { voice_request_id: "failed" });
+          await updateDirectorShot(s.id, { error: "voice" });
+        }
       } else pending = true;
     }
     if (pending) return releaseDirectorFilm(film.id);
