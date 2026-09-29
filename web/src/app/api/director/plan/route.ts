@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as Record<string, unknown>;
     const idea = String(body.idea ?? "").trim();
     if (idea.length < 3) return publicJson({ error: "Describe your idea in a few words" }, { status: 400 });
-    if (idea.length > 1500) return publicJson({ error: "Keep the idea under 1,500 characters" }, { status: 400 });
+    if (idea.length > 4000) return publicJson({ error: "Keep the idea or script under 4,000 characters - split a longer script into two scenes" }, { status: 400 });
     if (!(await underPlanCap(req))) return publicJson({ error: "You've planned a lot today - try again tomorrow, or make one of your storyboards." }, { status: 429 });
     const style = ALL_STYLE_IDS.includes(body.style as ProductionStyleId) ? (body.style as ProductionStyleId) : "auto";
     const aspect = body.aspectRatio === "16:9" || body.aspectRatio === "9:16" ? body.aspectRatio : "auto";

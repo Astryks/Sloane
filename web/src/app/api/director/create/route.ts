@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const legacyId = String(form.get("savedCharacterId") ?? "");
     if (legacyId && !castIds.includes(legacyId)) castIds.unshift(legacyId);
     const savedCast = (await Promise.all(castIds.slice(0, 3).map((id) => getSavedCharacter(user.id, id)))).filter((c) => !!c && c.kind !== "location");
-    const idea = String(form.get("idea") ?? plan.logline).slice(0, 1500);
+    const idea = String(form.get("idea") ?? plan.logline).slice(0, 4000);
 
     const files: Record<"character" | "product" | "location", Blob | null> = { character: null, product: null, location: null };
     for (const k of ["character", "product", "location"] as const) {

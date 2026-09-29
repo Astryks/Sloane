@@ -402,7 +402,7 @@ export function DirectorStudio({
             aria-label="Describe your film"
             className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
             rows={3}
-            maxLength={1500}
+            maxLength={4000}
             placeholder="A girl flies a red kite on a windy beach at sunset, laughing"
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
