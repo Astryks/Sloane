@@ -91,7 +91,20 @@ function castNames(plan: DirectorPlan): string[] {
     .filter((n) => n && n.length <= 40 && /^[A-Z]/.test(n));
 }
 
-function dialogueLine(plan: DirectorPlan, shot: DirectorShot): string {
+// A sentence that runs over a cut: "…think of investing" | "in stocks, …".
+const ENDS_SENTENCE = /[.!?…]["')\]]*\s*$/;
+export function continuesFromPrevious(plan: DirectorPlan, shotIndex: number): boolean {
+  const prev = plan.shots[shotIndex - 1];
+  const cur = plan.shots[shotIndex];
+  if (!prev?.dialogue?.trim() || !cur?.dialogue?.trim()) return false;
+  const sameSpeaker = !prev.speaker || !cur.speaker || prev.speaker.toLowerCase() === cur.speaker.toLowerCase();
+  return sameSpeaker && !ENDS_SENTENCE.test(prev.dialogue.replace(/\([^)]*\)/g, "").trim());
+}
+export function runsIntoNext(plan: DirectorPlan, shotIndex: number): boolean {
+  return continuesFromPrevious(plan, shotIndex + 1);
+}
+
+function dialogueLine(plan: DirectorPlan, shot: DirectorShot, shotIndex: number): string {
   const directions = [...shot.dialogue.matchAll(/\(([^)]*)\)/g)].map((m) => m[1].trim());
   const words = shot.dialogue.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim().replace(/"/g, "'");
   if (!words) return "";
@@ -102,7 +115,11 @@ function dialogueLine(plan: DirectorPlan, shot: DirectorShot): string {
   const offScreen = OFF_SCREEN.test(`${shot.dialogue} ${shot.action} ${shot.expression}`) || (!!speaker && names.length > 1 && !inAction(speaker));
   const others = names.filter((n) => first(n).toLowerCase() !== first(speaker).toLowerCase());
   const delivery = directions.filter((d) => !OFF_SCREEN.test(d)).join(", ");
-  const how = delivery ? ` (${delivery})` : "";
+  const continuity = [
+    continuesFromPrevious(plan, shotIndex) ? "continuing mid-sentence from the previous shot - they are already talking as the shot begins, no pause and no fresh start" : "",
+    runsIntoNext(plan, shotIndex) ? "the sentence carries on into the next shot - keep talking right to the end of this shot, no closing pause or falling intonation" : "",
+  ].filter(Boolean);
+  const how = delivery || continuity.length ? ` (${[delivery, ...continuity].filter(Boolean).join("; ")})` : "";
   if (!speaker) return sentence(`Dialogue, spoken clearly and naturally${how}: "${words}"`);
   if (offScreen) {
     const listeners = others.length ? ` ${others.join(" and ")} does not speak - mouth closed, just listening and reacting.` : "";
@@ -129,7 +146,7 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
     productLine(plan, refs),
     sentence(shot.action),
     person && shot.expression ? sentence(`Performance: ${shot.expression}`) : "",
-    opts.nativeAudio && shot.dialogue ? dialogueLine(plan, shot) : "",
+    opts.nativeAudio && shot.dialogue ? dialogueLine(plan, shot, shotIndex) : "",
     opts.nativeAudio && shot.sound ? sentence(`Sound: ${shot.sound}`) : "",
     lookLine(plan, shot),
     (refs.character || plan.character) && (refs.location || plan.location || shot.setting)

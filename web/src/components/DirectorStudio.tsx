@@ -55,6 +55,14 @@ type FilmStatus = {
   refundIfCancelledCents?: number;
 };
 const DONE_STATES = ["completed", "failed", "cancelled"];
+// Same rule as lib/director/compile.ts continuesFromPrevious (kept tiny and local for the card label).
+function lineContinues(plan: DirectorPlan, i: number): boolean {
+  const prev = plan.shots[i - 1];
+  const cur = plan.shots[i];
+  if (!prev?.dialogue?.trim() || !cur?.dialogue?.trim()) return false;
+  const same = !prev.speaker || !cur.speaker || prev.speaker.toLowerCase() === cur.speaker.toLowerCase();
+  return same && !/[.!?…]["')\]]*\s*$/.test(prev.dialogue.replace(/\([^)]*\)/g, "").trim());
+}
 const IDEA_EXAMPLES = [
   "An old fisherman rows out at dawn on a misty lake and catches a glowing fish",
   "A UGC ad: a woman in her bathroom shows her new face cream and says \"my skin feels like silk\"",
@@ -578,6 +586,7 @@ export function DirectorStudio({
                       </label>
                       <label className="text-[10px] font-bold uppercase tracking-wide text-muted">
                         💬 Says <span className="font-normal normal-case">(exact words · add (off screen) if we don&apos;t see them)</span>
+                        {i > 0 && lineContinues(plan, i) && <span className="ml-1 rounded bg-purple/10 px-1 font-semibold normal-case text-purple">↪ continues from shot {i}</span>}
                         <input className={`${inputCls} mt-1 font-normal normal-case`} value={s.dialogue} placeholder="No dialogue in this shot" onChange={(e) => editShot(i, { dialogue: e.target.value })} />
                       </label>
                     </div>
