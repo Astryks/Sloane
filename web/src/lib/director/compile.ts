@@ -71,6 +71,13 @@ function productLine(plan: DirectorPlan, refs: RefFlags): string {
 function formatOf(plan: DirectorPlan) {
   return CAMERA_FORMATS[plan.look.format ?? (plan.style === "ugc" ? "phone" : "film35")];
 }
+// 2026-09-29: the background-extras line put office workers into a private
+// corner office. Only invite extras where the place really has other people.
+const CROWD_WORDS = /\b(trading floor|open[- ]plan|floor of|desks|crowd|crowded|busy|market|street|caf[eé]|restaurant|bar|station|airport|party|class(room)?|audience|team|traders|workers|staff|shoppers|passers?-?by|extras|people working)\b/i;
+function crowdedPlace(plan: DirectorPlan, shot: DirectorShot): boolean {
+  if (/\b(only|alone|nobody else|no one else|private)\b/i.test(`${plan.location} ${shot.setting} ${shot.action}`) && !/\bcrowd/i.test(shot.action)) return false;
+  return CROWD_WORDS.test(`${plan.location} ${shot.setting} ${shot.action}`);
+}
 function operatorLine(shot: DirectorShot): string {
   if (shot.move === "locked_off" || shot.move === "overhead_top_down" || shot.move === "product_hero_slide") return "On a tripod, with the tiny natural drift of a real camera - never frozen, never CGI-perfect.";
   return "Operated by a real camera operator: subtle handheld micro-movement and slight focus breathing - never drone-smooth, never gliding like CGI.";
@@ -156,7 +163,11 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
     // 2026-09-29: "slow" camera words + long clips read as slow motion - keep the action live.
     shot.move === "slow_motion_hold"
       ? ""
-      : "Real-time footage at natural speed: people walk, gesture, blink and talk at a normal everyday pace, like a real film shoot - never slow motion, never floaty or dreamlike. Any background people are calm and realistic, just doing ordinary work: mostly seated at their desks typing, reading their screens, the occasional quiet phone call or sip of coffee, now and then someone walking past - small natural movements, each at their own pace, nothing dramatic, no big gestures, never frozen, never repeating the same motion, never looking at the camera.",
+      : `Real-time footage at natural speed: people walk, gesture, blink and talk at a normal everyday pace, like a real film shoot - never slow motion, never floaty or dreamlike. ${
+          crowdedPlace(plan, shot)
+            ? "Any background people are calm and realistic, just doing ordinary work: mostly seated at their desks typing, reading their screens, the occasional quiet phone call or sip of coffee, now and then someone walking past - small natural movements, each at their own pace, nothing dramatic, no big gestures, never frozen, never repeating the same motion, never looking at the camera."
+            : "Only the people this shot is about are in the room - no extras, nobody else in the background."
+        }`,
     subjectLine(plan, refs),
     productLine(plan, refs),
     sentence(shot.action),
