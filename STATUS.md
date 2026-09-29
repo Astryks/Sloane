@@ -478,3 +478,7 @@ Next:
 - **Unit Economics:** Cost per video minute modeled at ~$0.097 maintaining >65% margins.
 
 - 2026-09-23: Trimmed AI models review — removed per-model notes, Harper script, lip-sync/caveat paragraphs, and storyboard CTA (one-photo claim was too absolute).
+
+## 2026-09-29 - Veo 3.1 best quality, BytePlus check
+- Veo 3.1 standard ("Veo 3.1 (best quality)") now films up to 8s (was 4s, which cut lines off). Own price $4.99 single / $5.99 per Director shot (cost ~$3.68 at 8s). Director picker shows full model names (Veo 3.1 Fast vs best quality).
+- BytePlus ModelArk: Seedance 2.0, 2.0-fast and 2.0-mini all refuse activation ("balance and coupons lower than the reserved amount") with the $10 balance + Free Credits Only Mode on. Seedance 1.5 pro is active with 2M free tokens (docs list it as retired). No BYTEPLUS_ARK_API_KEY set yet - owner must create it in the console and add it to Vercel.
