@@ -173,6 +173,23 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   }
 }
 
+/** The people in this shot (speaker first) and the set: one photo each, max 3. */
+function shotIngredients(film: DirectorFilmRow, plan: DirectorPlan, idx: number): string[] {
+  const shot = plan.shots[idx];
+  if (!shot) return [];
+  const people = film.refs.people ?? [];
+  const text = `${shot.action} ${shot.expression}`.toLowerCase();
+  const inShot = people.filter((p) => {
+    const first = p.name.split(/\s+/)[0].toLowerCase();
+    const speaks = (shot.speaker || "").toLowerCase().startsWith(first) && !/off[- ]?screen/i.test(shot.dialogue);
+    return speaks || text.includes(first);
+  });
+  inShot.sort((a, b) => Number((b.name.split(/\s+/)[0].toLowerCase() === (shot.speaker || "").split(/\s+/)[0].toLowerCase())) - Number((a.name.split(/\s+/)[0].toLowerCase() === (shot.speaker || "").split(/\s+/)[0].toLowerCase())));
+  const location = refList(film.refs, "location")[0];
+  const out = [...inShot.slice(0, location ? 2 : 3).map((p) => p.photos[0]).filter(Boolean), ...(location ? [location] : [])];
+  return out.length ? out : [];
+}
+
 /** Films one approved shot from its frame (or from text if the frame failed). */
 async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: DirectorShotRow) {
   if (shot.status === "completed" || shot.status === "failed") return;
@@ -180,7 +197,12 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   const engine = film.engine as VideoEngine;
   try {
     if (!shot.video_request_id) {
-      const imageUrl = shot.keyframe_url ?? null;
+      // Veo 3.1 "ingredients" (2026-09-29): straight from the real cast and set
+      // photos (who's in this shot + the set, max 3) instead of a drawn first
+      // frame - Google's recommended way to keep dialogue scenes consistent,
+      // and it skips the too-clean drawn still.
+      const ingredients = plan.fromPhotos && engine === "veo31" ? shotIngredients(film, plan, shot.idx) : [];
+      const imageUrl = ingredients.length ? null : (shot.keyframe_url ?? null);
       let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
       // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
       // seedance-1-0-pro-250528 - 1.5 pro is retired - free tokens on our BytePlus account), the
@@ -204,6 +226,10 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         console.error("[director] prompt rebuild failed - using the stored prompt", err);
       }
       const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
+      if (ingredients.length) {
+        delete input.image_url;
+        input.reference_image_urls = ingredients;
+      }
       // The reseller path caps Seedance at 4s; direct 1.5 pro takes 4-12s with sound.
       if (endpoint.startsWith(MODELARK_ENDPOINT_PREFIX)) {
         input.duration = Math.min(12, Math.max(4, Math.round(d ?? 8)));

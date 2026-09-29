@@ -698,6 +698,14 @@ export function DirectorStudio({
                     ))}
                   </select>
                 </label>
+                {engine === "veo31" && (
+                  <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
+                    <input type="checkbox" className="mt-0.5" checked={!!plan.fromPhotos} onChange={(e) => editPlan({ fromPhotos: e.target.checked || undefined })} />
+                    <span>
+                      🧩 Film straight from my cast &amp; set photos (no drawn first frame) - Veo builds each shot from the real photos, which often looks more natural. The storyboard is still drawn so you can check the plan.
+                    </span>
+                  </label>
+                )}
                 {(["character", "wardrobe", "location", "product"] as const).map((k) => (
                   <label key={k} className="text-[11px] font-semibold capitalize text-muted">
                     {k}

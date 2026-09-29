@@ -91,6 +91,8 @@ export type DirectorGoal = "sell" | "story" | "explain" | "promote" | "entertain
 const ALL_GOALS: DirectorGoal[] = ["sell", "story", "explain", "promote", "entertain"];
 
 export type DirectorPlan = {
+  /** Veo 3.1 "ingredients" (2026-09-29): animate from the cast + set photos instead of a drawn first frame. */
+  fromPhotos?: boolean;
   title: string;
   logline: string;
   goal: DirectorGoal; // what the user is really trying to do - drives the structure
@@ -314,6 +316,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       grade: clampText(lookRaw.grade, 200, dl.grade),
       ...(ALL_CAMERA_FORMATS.includes(lookRaw.format as CameraFormatId) ? { format: lookRaw.format as CameraFormatId } : {}),
     },
+    ...(r.fromPhotos === true ? { fromPhotos: true } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),
     location: clampText(r.location, 300),
