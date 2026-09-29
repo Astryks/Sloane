@@ -539,26 +539,52 @@ export function DirectorStudio({
                       </p>
                       {st && <span className="text-[10px] font-bold uppercase text-muted">{stepLabel[st.status] ?? st.status}</span>}
                     </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <select className={inputCls} value={s.size} onChange={(e) => editShot(i, { size: e.target.value as DirectorShot["size"] })} aria-label="Shot size">
-                        {ALL_SIZE_IDS.map((id) => <option key={id} value={id}>{SHOT_SIZES[id].label}</option>)}
-                      </select>
-                      <select className={inputCls} value={s.angle} onChange={(e) => editShot(i, { angle: e.target.value as DirectorShot["angle"] })} aria-label="Angle">
-                        {ALL_ANGLE_IDS.map((id) => <option key={id} value={id}>{id.replace(/_/g, " ")}</option>)}
-                      </select>
-                      <select className={inputCls} value={s.move} onChange={(e) => editShot(i, { move: e.target.value as DirectorShot["move"] })} aria-label="Camera move" title={CAMERA_MOVES[s.move].useFor}>
-                        {ALL_MOVE_IDS.map((id) => <option key={id} value={id}>{CAMERA_MOVES[id].label}</option>)}
-                      </select>
-                      <select className={inputCls} value={s.durationSeconds} onChange={(e) => editShot(i, { durationSeconds: Number(e.target.value) })} aria-label="Length">
-                        {[3, 4, 5, 6, 7, 8, 10].map((n) => <option key={n} value={n}>{n}s</option>)}
-                      </select>
+                    <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-muted">🎥 Camera</p>
+                    <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <label className="text-[10px] font-semibold text-muted">
+                        📷 Framing
+                        <select className={inputCls} value={s.size} onChange={(e) => editShot(i, { size: e.target.value as DirectorShot["size"] })}>
+                          {ALL_SIZE_IDS.map((id) => <option key={id} value={id}>{SHOT_SIZES[id].label}</option>)}
+                        </select>
+                      </label>
+                      <label className="text-[10px] font-semibold text-muted">
+                        📐 Angle
+                        <select className={inputCls} value={s.angle} onChange={(e) => editShot(i, { angle: e.target.value as DirectorShot["angle"] })}>
+                          {ALL_ANGLE_IDS.map((id) => <option key={id} value={id}>{id.replace(/_/g, " ")}</option>)}
+                        </select>
+                      </label>
+                      <label className="text-[10px] font-semibold text-muted">
+                        🎥 Camera move
+                        <select className={inputCls} value={s.move} onChange={(e) => editShot(i, { move: e.target.value as DirectorShot["move"] })} title={CAMERA_MOVES[s.move].useFor}>
+                          {ALL_MOVE_IDS.map((id) => <option key={id} value={id}>{CAMERA_MOVES[id].label}</option>)}
+                        </select>
+                      </label>
+                      <label className="text-[10px] font-semibold text-muted">
+                        ⏱ Length
+                        <select className={inputCls} value={s.durationSeconds} onChange={(e) => editShot(i, { durationSeconds: Number(e.target.value) })}>
+                          {[3, 4, 5, 6, 7, 8, 10].map((n) => <option key={n} value={n}>{n}s</option>)}
+                        </select>
+                      </label>
                     </div>
                     <p className="mt-1 text-[10px] text-muted">{ANGLES[s.angle]} · {CAMERA_MOVES[s.move].useFor}</p>
-                    <textarea className={`${inputCls} mt-2`} rows={2} value={s.action} onChange={(e) => editShot(i, { action: e.target.value })} aria-label="What happens" />
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                      <input className={inputCls} value={s.dialogue} placeholder="Spoken line (optional)" onChange={(e) => editShot(i, { dialogue: e.target.value })} />
-                      <input className={inputCls} value={s.setting} placeholder="Setting (blank = main location)" onChange={(e) => editShot(i, { setting: e.target.value })} />
+                    <label className="mt-2 block text-[10px] font-bold uppercase tracking-wide text-muted">
+                      🎬 What happens <span className="font-normal normal-case">(action only - no spoken words here)</span>
+                      <textarea className={`${inputCls} mt-1 font-normal normal-case`} rows={2} value={s.action} onChange={(e) => editShot(i, { action: e.target.value })} />
+                    </label>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-[8rem_1fr]">
+                      <label className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                        💬 Who speaks
+                        <input className={`${inputCls} mt-1 font-normal normal-case`} value={s.speaker} placeholder="Nobody" onChange={(e) => editShot(i, { speaker: e.target.value })} />
+                      </label>
+                      <label className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                        💬 Says <span className="font-normal normal-case">(exact words · add (off screen) if we don&apos;t see them)</span>
+                        <input className={`${inputCls} mt-1 font-normal normal-case`} value={s.dialogue} placeholder="No dialogue in this shot" onChange={(e) => editShot(i, { dialogue: e.target.value })} />
+                      </label>
                     </div>
+                    <label className="mt-2 block text-[10px] font-bold uppercase tracking-wide text-muted">
+                      📍 Where
+                      <input className={`${inputCls} mt-1 font-normal normal-case`} value={s.setting} placeholder="Blank = the main location" onChange={(e) => editShot(i, { setting: e.target.value })} />
+                    </label>
                     <div className="mt-2 flex gap-2">
                       <input
                         className={inputCls}
