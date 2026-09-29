@@ -2602,9 +2602,22 @@ export async function getSavedCharacter(userId: string, id: string): Promise<Sav
 }
 
 /** Rename / re-describe a saved person or set (2026-09-29). */
-export async function updateSavedCharacter(userId: string, id: string, name: string, description: string, voiceId?: string): Promise<SavedCharacter | null> {
+export async function updateSavedCharacter(
+  userId: string,
+  id: string,
+  name: string,
+  description: string,
+  voiceId?: string,
+  photoUrls?: string[],
+): Promise<SavedCharacter | null> {
+  const photos = photoUrls?.length ? photoUrls : null;
   const rows = await sql`
-    UPDATE saved_characters SET name = ${name}, description = ${description}, voice_id = COALESCE(${voiceId ?? null}, voice_id)
+    UPDATE saved_characters SET
+      name = ${name},
+      description = ${description},
+      voice_id = COALESCE(${voiceId ?? null}, voice_id),
+      photo_url = COALESCE(${photos ? photos[0] : null}, photo_url),
+      photo_urls = COALESCE(${photos ? JSON.stringify(photos) : null}::jsonb, photo_urls)
     WHERE id = ${id} AND user_id = ${userId} RETURNING *
   `;
   return (rows[0] as SavedCharacter) ?? null;

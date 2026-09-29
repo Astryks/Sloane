@@ -61,11 +61,13 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   await initSchema();
   const user = await getPaygoSessionUser();
-  const body = (await req.json().catch(() => ({}))) as { id?: unknown; name?: unknown; description?: unknown; voiceId?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { id?: unknown; name?: unknown; description?: unknown; voiceId?: unknown; photos?: unknown };
   const name = String(body.name ?? "").trim().slice(0, 60);
   if (!user || !name) return publicJson({ error: "Give it a name" }, { status: 400 });
   const voiceId = typeof body.voiceId === "string" ? body.voiceId.replace(/[^a-z0-9_]/gi, "").slice(0, 40) : undefined;
-  const c = await updateSavedCharacter(user.id, String(body.id ?? ""), name, String(body.description ?? "").trim().slice(0, 400), voiceId);
+  // Optional: replace the pictures (links from /api/director/upload or earlier sheets).
+  const photos = Array.isArray(body.photos) ? body.photos.map((v) => resolveMediaUrl(String(v))).filter(isVendorMediaUrl).slice(0, REF_LIMITS.character) : undefined;
+  const c = await updateSavedCharacter(user.id, String(body.id ?? ""), name, String(body.description ?? "").trim().slice(0, 400), voiceId, photos);
   if (!c) return publicJson({ error: "Not found" }, { status: 404 });
   return publicJson({ character: toClient(c) });
 }
