@@ -303,7 +303,10 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       let lineAudio: string | null = null;
       if (voiceFirst) {
         if (!shot.video_request_id) {
-          const r = await voiceCall("/start", { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, seconds: Math.min(15, Math.max(4, d ?? 8)) }).catch(() => null);
+          const { planLineActing } = await import("./voiceActing");
+          const person = (film.refs.people ?? []).find((p) => p.name === voiceFirst.speaker);
+          const segments = await planLineActing({ speaker: voiceFirst.speaker, character: person?.description, line: voiceFirst.words, delivery: voiceFirst.delivery, context: `${plan.logline} ${plan.shots[shot.idx]?.action ?? ""}` }).catch(() => []);
+          const r = await voiceCall("/start", { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, segments, seconds: Math.min(15, Math.max(4, d ?? 8)) }).catch(() => null);
           if (r && typeof r.call_id === "string") return updateDirectorShot(shot.id, { video_request_id: `${TTS_PREFIX}${r.call_id}` });
         } else {
           const r = await voiceCall(`/result?call_id=${encodeURIComponent(shot.video_request_id.slice(TTS_PREFIX.length))}`).catch(() => null);
@@ -377,7 +380,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
 // is untouched. Any failure just keeps Veo's original audio.
 const VOICE_URL = process.env.MODAL_DIRECTOR_VOICE_URL || "https://mehta-siddharth09--director-voice-web.modal.run";
 
-async function voiceCall(path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function voiceCall(path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
   const res = await fetch(`${VOICE_URL}${path}`, {
     method: body ? "POST" : "GET",
     headers: { Authorization: `Bearer ${process.env.MODAL_SHARED_SECRET}`, "Content-Type": "application/json" },

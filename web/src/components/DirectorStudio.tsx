@@ -139,7 +139,7 @@ export function DirectorStudio({
     if (d.castIds?.length) {
       try {
         const all = ((await (await fetch("/api/director/characters")).json()).characters ?? []) as CastPick[];
-        setSelectedCast(d.castIds.map((id) => all.find((c) => c.id === id)).filter((c): c is CastPick => !!c).map((c) => ({ id: c.id, name: c.name, description: c.description })));
+        setSelectedCast(d.castIds.map((id) => all.find((c) => c.id === id)).filter((c): c is CastPick => !!c).map((c) => ({ id: c.id, name: c.name, description: c.description, voiceId: (c as CastPick).voiceId })));
       } catch {}
     }
   }
@@ -522,6 +522,34 @@ export function DirectorStudio({
     }
   }
 
+  const [lineAudio, setLineAudio] = useState<Record<number, string>>({});
+  async function hearLine(i: number, who: CastPick) {
+    if (!plan) return;
+    const s = plan.shots[i];
+    setBusy(`hear${i}`);
+    setError(null);
+    try {
+      const res = await fetch("/api/director/act-line", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voiceId: who.voiceId, line: s.dialogue, speaker: who.name, character: who.description, context: `${plan.logline} ${s.action}`, seconds: s.durationSeconds }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.job) throw new Error(data.error ?? "Couldn't make the line");
+      for (let t = 0; t < 40; t++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const r = await (await fetch(`/api/director/act-line?job=${encodeURIComponent(data.job)}`)).json();
+        if (r.status === "done" && r.url) return setLineAudio((m) => ({ ...m, [i]: String(r.url) }));
+        if (r.status === "failed") throw new Error("The voice couldn't be made - try again");
+      }
+      throw new Error("The voice is taking a while - try again in a minute");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't make the line");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function retake(i: number) {
     const data = await filmAction("retake", { shotIdx: i, note: reviseText[`take${i}`] ?? "" }, `take${i}`);
     if (data) {
@@ -852,6 +880,18 @@ export function DirectorStudio({
                           <span className="ml-1 rounded bg-coral/10 px-1 font-semibold normal-case text-coral-dark">⚠ long for one 8-second shot - split it across two shots</span>
                         )}
                         <input className={`${inputCls} mt-1 font-normal normal-case`} value={s.dialogue} placeholder="No dialogue in this shot" onChange={(e) => editShot(i, { dialogue: e.target.value })} />
+                        {(() => {
+                          const who = selectedCast.find((c) => c.voiceId && s.speaker && c.name.split(" ")[0].toLowerCase() === s.speaker.split(" ")[0].toLowerCase());
+                          if (!who || !s.dialogue.trim()) return null;
+                          return (
+                            <span className="mt-1 flex items-center gap-2 normal-case">
+                              <button type="button" disabled={busy === `hear${i}`} onClick={() => hearLine(i, who)} className="rounded-lg bg-purple/10 px-2 py-1 text-[11px] font-bold text-purple disabled:opacity-50">
+                                {busy === `hear${i}` ? "Acting it out…" : `🔊 Hear ${who.name} say it`}
+                              </button>
+                              {lineAudio[i] && <audio src={lineAudio[i]} controls className="h-7" />}
+                            </span>
+                          );
+                        })()}
                       </label>
                     </div>
                     <label className="mt-2 block text-[10px] font-bold uppercase tracking-wide text-muted">

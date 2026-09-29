@@ -32,7 +32,7 @@ export function photosFromLinks(links: Partial<Record<RefKind, string[]>>): RefP
 }
 
 type SavedCharacter = { id: string; name: string; description: string; photoUrl: string; photoUrls?: string[]; voiceId?: string };
-export type CastPick = { id: string; name: string; description: string };
+export type CastPick = { id: string; name: string; description: string; voiceId?: string };
 export const FREE_IMAGE_TOOLS = [
   { name: "ChatGPT", href: "https://chatgpt.com" },
   { name: "Gemini", href: "https://gemini.google.com" },
@@ -238,7 +238,7 @@ export function DirectorPhotos({
         onNotice(`Up to ${MAX_CAST} people from Your cast per film.`);
         return sel;
       }
-      return [...sel, { id: c.id, name: c.name, description: c.description }];
+      return [...sel, { id: c.id, name: c.name, description: c.description, voiceId: c.voiceId }];
     });
   }
 

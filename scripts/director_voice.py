@@ -241,6 +241,68 @@ def tts_line(voice_id, text, seconds, delivery=""):
         return _upload(out, "audio/wav", "line.wav", os.environ["FAL_KEY"])
 
 
+def _clamp(x, lo, hi, default):
+    try:
+        return max(lo, min(hi, float(x)))
+    except (TypeError, ValueError):
+        return default
+
+
+@app.function(image=image, secrets=[fal_key_secret], timeout=420)
+def tts_acted(voice_id, segments, seconds):
+    """2026-09-30: an ACTED line. `segments` = one entry per sentence/phrase
+    from Lucy's acting pass: {text, exaggeration, cfg_weight, speed,
+    pause_after_ms}. Each is generated with its own intensity/pace (a question
+    lifts, a threat drops and slows, an aside is quick and light), trimmed,
+    then joined with the planned pauses - so inflection follows the intent of
+    each sentence instead of one flat read of the whole line."""
+    tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
+    with tempfile.TemporaryDirectory() as tmp:
+        parts = []
+        for i, seg in enumerate(segments[:8]):
+            text = str(seg.get("text") or "").strip()[:300]
+            if not text:
+                continue
+            r = tts.run_generate_preset.remote(
+                text, voice_id,
+                _clamp(seg.get("exaggeration"), 0.25, 1.1, 0.6),
+                _clamp(seg.get("cfg_weight"), 0.2, 0.65, 0.4),
+                None,
+                _clamp(seg.get("speed"), 0.8, 1.2, 1.0),
+            )
+            if not isinstance(r, dict) or not r.get("audio_base64"):
+                raise RuntimeError((r or {}).get("error", "no audio"))
+            raw = os.path.join(tmp, f"raw{i}.wav")
+            with open(raw, "wb") as f:
+                f.write(base64.b64decode(r["audio_base64"]))
+            trimmed = os.path.join(tmp, f"seg{i}.wav")
+            _run(["ffmpeg", "-y", "-v", "error", "-i", raw, "-af",
+                  "silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse",
+                  "-ar", "48000", "-ac", "1", trimmed])
+            parts.append(trimmed)
+            pause = int(_clamp(seg.get("pause_after_ms"), 60, 900, 220))
+            if i < len(segments) - 1:
+                gap = os.path.join(tmp, f"gap{i}.wav")
+                _run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", f"{pause / 1000:.3f}", gap])
+                parts.append(gap)
+        if not parts:
+            raise RuntimeError("no text")
+        listing = os.path.join(tmp, "list.txt")
+        with open(listing, "w") as f:
+            for p in parts:
+                f.write(f"file '{p}'\n")
+        joined = os.path.join(tmp, "joined.wav")
+        _run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy", joined])
+        target = max(2.0, float(seconds) - 0.4)
+        speech = _duration(joined)
+        tempo = min(1.25, speech / target) if speech > target else 1.0
+        out = os.path.join(tmp, "line.wav")
+        _run(["ffmpeg", "-y", "-v", "error", "-i", joined, "-af",
+              f"atempo={tempo:.3f},adelay=200|200,apad=whole_dur={float(seconds):.2f}",
+              "-t", f"{float(seconds):.2f}", "-ar", "48000", "-ac", "1", out])
+        return _upload(out, "audio/wav", "line.wav", os.environ["FAL_KEY"])
+
+
 @app.function(image=image, secrets=[fal_key_secret], timeout=300)
 def preset_reference(voice_id, text):
     """A reference clip in a Lucy voice, made by the lucy-tts app."""
@@ -279,6 +341,8 @@ def web():
             call = Voice().extract.spawn(body["video_url"])
         elif mode == "convert" and _https(body.get("video_url")) and _https(body.get("reference_url")):
             call = Voice().convert.spawn(body["video_url"], body["reference_url"])
+        elif mode == "tts" and isinstance(body.get("voice_id"), str) and isinstance(body.get("segments"), list) and body["segments"]:
+            call = tts_acted.spawn(body["voice_id"], body["segments"], float(body.get("seconds") or 8))
         elif mode == "tts" and isinstance(body.get("voice_id"), str) and isinstance(body.get("text"), str):
             call = tts_line.spawn(body["voice_id"], body["text"][:400], float(body.get("seconds") or 8), str(body.get("delivery") or "")[:120])
         elif mode == "mix" and _https(body.get("video_url")) and _https(body.get("bed_video_url")):
