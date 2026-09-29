@@ -27,6 +27,9 @@ Rules:
 - At most 18 words of dialogue per shot (Veo shots are 8 seconds). Split longer lines across two shots.
 - If the camera shows one person while another talks, write "(off screen)" before the line.
 - Describe everything visually. No music cues, no text on screen.
+- One person speaks per shot. Nobody talks over anyone.
+- Give each person a real personality and their own way of talking - little reactions, pauses, "um"s, a joke, a habit - so they sound like people, not narrators. Short, natural sentences beat speeches.
+- Write numbers as words ("thirty percent", not "30%").
 
 My idea: [describe your scene, the people, the place and what they say]`;
 

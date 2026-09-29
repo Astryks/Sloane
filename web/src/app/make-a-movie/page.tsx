@@ -139,10 +139,13 @@ export default function Page() {
         </Step>
 
         <Step n={3} title="Write your scene" id="script">
-          <p>Two ways:</p>
+          <p>Three ways:</p>
           <ul className="list-disc space-y-1 pl-5">
             <li><strong className="text-foreground">One sentence</strong> - Lucy writes the rest.</li>
             <li><strong className="text-foreground">Your script</strong> - paste it. Lucy keeps every line word for word.</li>
+            <li>
+              <strong className="text-foreground">Copy a clip</strong> - tap <strong className="text-foreground">🎞 Copy a clip&apos;s camera work</strong>, paste a YouTube link or pick an MP4. Lucy watches it and writes every shot - framing, camera moves, who stands where - with new lines for your cast.
+            </li>
           </ul>
           <p>
             Write it like this - <strong className="text-foreground">NAME: line</strong>, with what they do in (brackets). Use the same names as Your cast.{" "}
@@ -164,7 +167,8 @@ export default function Page() {
           <ol className="list-decimal space-y-1 pl-5">
             <li>Paste your scene into <strong className="text-foreground">What&apos;s your film about?</strong> - tap the <strong className="text-foreground">?</strong> next to it for a copy-paste prompt that gets any free AI to write it in the right format. Lucy counts the shots for you.</li>
             <li>Tap the people in <strong className="text-foreground">Your cast</strong> (up to {MAX_CAST}) and the place in <strong className="text-foreground">Your sets</strong>.</li>
-            <li><strong className="text-foreground">Settings:</strong> Cinematic, 16:9, Veo (so they talk). Up to 8 shots per scene, about 18 spoken words per shot.</li>
+            <li><strong className="text-foreground">Settings:</strong> Cinematic, 16:9, and a model that talks (Veo 3.1 or Seedance). Up to 8 shots per scene, about 18 spoken words per shot, one person talking per shot.</li>
+            <li><strong className="text-foreground">Pick the camera</strong> in the plan&apos;s look: 35mm film, 16mm raw, cinema digital, or phone / selfie vlog. It&apos;s used for every shot, so the whole movie has the same texture.</li>
             <li>Tap <strong className="text-foreground">Or check each step first</strong>. Read the plan. Change anything in plain words.</li>
             <li><strong className="text-foreground">Draw my storyboard</strong> → check every picture → redraw any that look wrong.</li>
             <li><strong className="text-foreground">Approve &amp; film it</strong>. 🎬</li>
