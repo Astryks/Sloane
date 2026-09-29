@@ -630,13 +630,13 @@ export function DirectorStudio({
               {(idea.match(/^\s*SHOT\s*\d+/gim) ?? []).length > MAX_SHOTS ? ` (Only the first ${MAX_SHOTS} fit in one scene - put the rest in a second scene.)` : ""}
             </p>
           )}
-          <CopyClip castNames={selectedCast.map((c) => c.name)} notes={idea.length < 600 ? idea : ""} onScript={(script) => setIdea(script)} />
           <p className="mt-2 text-[11px] text-muted">
             ✨ Make it a proper script: tap <strong className="text-foreground">?</strong>, copy the prompt into{" "}
             <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">Claude</a>,{" "}
             <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">ChatGPT</a> or{" "}
             <a href="https://gemini.google.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">Gemini</a> with your idea, and paste the script it writes back here. Lucy keeps every line word for word.
           </p>
+          <CopyClip castNames={selectedCast.map((c) => c.name)} notes={idea.length < 600 ? idea : ""} onScript={(script) => setIdea(script)} />
         </div>
 
         <div>

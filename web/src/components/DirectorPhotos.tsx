@@ -7,7 +7,6 @@
 // browser and uploaded on its own (/api/director/upload), so big sets never
 // hit the request size limit and photos survive the checkout redirect.
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PRESET_VOICES } from "@/lib/presetVoices";
 import { LOCATION_ANGLES, MAX_CAST, REF_LIMITS, SHEET_ANGLES, type RefKind, type SheetAngleId } from "@/lib/director/refs";
@@ -385,23 +384,12 @@ export function DirectorPhotos({
   return (
     <details className="rounded-2xl border border-border bg-white/70 p-3" open={totalPhotos > 0 || cast.length > 0 || sets.length > 0 || undefined}>
       <summary className="cursor-pointer text-sm font-bold text-foreground">
-        2. 📸 Cast, product &amp; place <span className="font-normal text-muted">(optional)</span>
+        📸 Add photos: your cast, places &amp; products <span className="font-normal text-muted">(optional)</span>
       </summary>
       <ul className="mb-2 mt-2 flex flex-col gap-1 text-xs text-muted">
-        <li>🙂 <strong className="text-foreground">A person?</strong> One photo of just them - face clear, nothing in their hands. Crop out other people.</li>
-        <li>🧴 <strong className="text-foreground">Your product?</strong> Front + label. Plain background.</li>
         <li>🏠 <strong className="text-foreground">A place?</strong> A photo of it empty, or type what it looks like and tap <em>Draw this place</em>.</li>
+        <li>🧴 <strong className="text-foreground">A product?</strong> Front + label, plain background.</li>
         <li>🚫 Never use photos of real actors or stills from a film.</li>
-        <li>
-          🎨 No photo of your character? Make one free in{" "}
-          {FREE_IMAGE_TOOLS.map((t, i) => (
-            <span key={t.name}>
-              {i > 0 && " or "}
-              <a href={t.href} target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">{t.name}</a>
-            </span>
-          ))}{" "}
-          - <Link href="/make-a-movie#characters" className="font-semibold text-purple underline">copy our prompt</Link>.
-        </li>
       </ul>
 
       {cast.length > 0 && (
