@@ -42,6 +42,26 @@ const RECIPES: Recipe[] = [
     tips: ["Put their words in \"quotes\".", "Say one thing the product does."],
   },
   {
+    id: "vlog",
+    emoji: "📱",
+    title: "Selfie vlog",
+    blurb: "A character talks to camera on a phone, like a real creator.",
+    idea: "A selfie travel vlog: a bubbly young woman with freckles and a messy bun, in a denim jacket, films herself on a selfie stick walking through a crowded night market in Bangkok. SHOT 1 - selfie, handheld, walking. MIA: (excited, a bit breathless) Okay, it is so loud here, I love it - look at all this food! SHOT 2 - selfie, she stops at a stall and holds up mango sticky rice, takes a bite. MIA: (mouth half full, laughing) Oh my god. That is ridiculous. I am never leaving.",
+    style: "ugc",
+    aspect: "9:16",
+    video: "/examples/recipe-vlog.mp4",
+    uploads: {
+      character: `1 face photo of your character, or skip (up to ${REF_LIMITS.character})`,
+      product: "Skip",
+      location: "Skip - just say where she is",
+    },
+    tips: [
+      "Give them a personality - reactions, jokes, \"oh my god\" moments.",
+      "One short line per shot, said straight to the phone.",
+      "Use the same character photo in every video so it's always them.",
+    ],
+  },
+  {
     id: "product",
     emoji: "✨",
     title: "Product / brand ad",
