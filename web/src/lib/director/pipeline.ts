@@ -182,7 +182,18 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       const imageUrl = shot.keyframe_url ?? null;
       const endpoint = resolveVideoEndpoint(engine, !!imageUrl);
       const d = plan.shots[shot.idx]?.durationSeconds ?? null;
-      const input = buildVideoInferenceInput(engine, shot.prompt, imageUrl, VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio, null, d, plan.aspectRatio);
+      // Rebuild the prompt from the (possibly edited) plan with the current
+      // compiler, so fixes like naming the speaker apply to films that were
+      // planned earlier too. Falls back to the stored prompt.
+      const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio;
+      let prompt = shot.prompt;
+      try {
+        const { compileShotPrompt } = await import("./compile");
+        if (plan.shots[shot.idx]) prompt = compileShotPrompt(plan, shot.idx, refFlags(film), { nativeAudio });
+      } catch (err) {
+        console.error("[director] prompt rebuild failed - using the stored prompt", err);
+      }
+      const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
       const requestId = await submitVideoInferenceJob(endpoint, input);
       return updateDirectorShot(shot.id, { status: "video", video_endpoint: endpoint, video_request_id: requestId });
     }

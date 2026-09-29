@@ -77,6 +77,41 @@ function lookLine(plan: DirectorPlan, shot: DirectorShot): string {
     .join(" ");
 }
 
+// ---- Who says the line (2026-09-29) ----
+// Veo was only told the words, so with the camera on Liam it would move
+// Liam's lips to Jess's line. Name the speaker, say when they're off
+// screen, and keep everyone else's mouth closed. Stage directions in
+// (brackets) become the delivery instead of words to speak.
+const OFF_SCREEN = /\boff[- ]?screen\b|\(o\.?s\.?\)|\bv\.?o\.?\b|voice[- ]?over|\bunseen\b/i;
+
+function castNames(plan: DirectorPlan): string[] {
+  return plan.character
+    .split(";")
+    .map((part) => part.split(":")[0].trim())
+    .filter((n) => n && n.length <= 40 && /^[A-Z]/.test(n));
+}
+
+function dialogueLine(plan: DirectorPlan, shot: DirectorShot): string {
+  const directions = [...shot.dialogue.matchAll(/\(([^)]*)\)/g)].map((m) => m[1].trim());
+  const words = shot.dialogue.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim().replace(/"/g, "'");
+  if (!words) return "";
+  const names = castNames(plan);
+  const speaker = shot.speaker || "";
+  const first = (n: string) => n.split(/\s+/)[0];
+  const inAction = (n: string) => new RegExp(`\\b${first(n).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(shot.action);
+  const offScreen = OFF_SCREEN.test(`${shot.dialogue} ${shot.action} ${shot.expression}`) || (!!speaker && names.length > 1 && !inAction(speaker));
+  const others = names.filter((n) => first(n).toLowerCase() !== first(speaker).toLowerCase());
+  const delivery = directions.filter((d) => !OFF_SCREEN.test(d)).join(", ");
+  const how = delivery ? ` (${delivery})` : "";
+  if (!speaker) return sentence(`Dialogue, spoken clearly and naturally${how}: "${words}"`);
+  if (offScreen) {
+    const listeners = others.length ? ` ${others.join(" and ")} does not speak - mouth closed, just listening and reacting.` : "";
+    return `${speaker} is OFF SCREEN - heard but not seen - saying in their own voice and accent${how}: "${words}".${listeners}`;
+  }
+  const silent = others.length ? ` ${others.join(" and ")} stays silent, mouth closed.` : "";
+  return `Only ${speaker} speaks, lips in sync, in their own voice and accent${how}: "${words}".${silent}`;
+}
+
 /** Full video-model prompt for one shot. */
 export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: RefFlags, opts: { nativeAudio: boolean }): string {
   const shot = plan.shots[shotIndex];
@@ -94,9 +129,7 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
     productLine(plan, refs),
     sentence(shot.action),
     person && shot.expression ? sentence(`Performance: ${shot.expression}`) : "",
-    opts.nativeAudio && shot.dialogue
-      ? sentence(`Dialogue (spoken in the speaker's own voice and accent as described above), clearly and naturally: "${shot.dialogue.replace(/"/g, "'")}"`)
-      : "",
+    opts.nativeAudio && shot.dialogue ? dialogueLine(plan, shot) : "",
     opts.nativeAudio && shot.sound ? sentence(`Sound: ${shot.sound}`) : "",
     lookLine(plan, shot),
     (refs.character || plan.character) && (refs.location || plan.location || shot.setting)
