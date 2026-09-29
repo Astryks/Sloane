@@ -156,6 +156,27 @@ export function DirectorPhotos({
     if (kind === "location") setSetId(null);
   }
 
+  /** Rename a saved person or set so it matches the names in your script. */
+  async function rename(c: SavedCharacter, kind: "character" | "location") {
+    const name = window.prompt("New name (use the same name as in your script):", c.name)?.trim();
+    if (!name || name === c.name) return;
+    const description = window.prompt("Describe them (look, clothes, voice) - optional:", c.description) ?? c.description;
+    const res = await fetch("/api/director/characters", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, name, description }),
+    });
+    const data = await res.json();
+    if (!res.ok) return onError(data.error ?? "Couldn't rename");
+    const update = (list: SavedCharacter[]) => list.map((x) => (x.id === c.id ? { ...x, name, description } : x));
+    if (kind === "location") setSets(update);
+    else {
+      setCast(update);
+      setSelectedCast((sel) => sel.map((x) => (x.id === c.id ? { ...x, name, description } : x)));
+    }
+    onNotice(`Renamed to ${name}.`);
+  }
+
   /** Up to 3 people from Your cast in one film - Lucy keeps each face separate. */
   function pickCast(c: SavedCharacter) {
     setSelectedCast((sel) => {
@@ -345,6 +366,17 @@ export function DirectorPhotos({
                 <img src={c.photoUrl} alt={c.name} className="h-12 w-12 rounded-lg object-cover" />
                 <span className="mt-0.5 max-w-16 truncate text-[10px] font-bold">{c.name}</span>
                 <span className="text-[9px] text-muted">{(c.photoUrls?.length ?? 1)} photo{(c.photoUrls?.length ?? 1) === 1 ? "" : "s"}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    rename(c, "character");
+                  }}
+                  className="text-[9px] font-semibold text-purple underline"
+                >
+                  ✏️ rename
+                </span>
               </button>
             ))}
           </div>
@@ -397,6 +429,17 @@ export function DirectorPhotos({
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={c.photoUrl} alt={c.name} className="h-12 w-20 rounded-lg object-cover" />
                           <span className="mt-0.5 max-w-20 truncate text-[10px] font-bold">{c.name}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              rename(c, "location");
+                            }}
+                            className="text-[9px] font-semibold text-purple underline"
+                          >
+                            ✏️ rename
+                          </span>
                         </button>
                       ))}
                     </div>
