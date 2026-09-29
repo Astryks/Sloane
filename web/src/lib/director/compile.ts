@@ -90,7 +90,9 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
     productLine(plan, refs),
     sentence(shot.action),
     person && shot.expression ? sentence(`Performance: ${shot.expression}`) : "",
-    opts.nativeAudio && shot.dialogue ? sentence(`They say, clearly and naturally: "${shot.dialogue.replace(/"/g, "'")}"`) : "",
+    opts.nativeAudio && shot.dialogue
+      ? sentence(`Dialogue (spoken in the speaker's own voice and accent as described above), clearly and naturally: "${shot.dialogue.replace(/"/g, "'")}"`)
+      : "",
     opts.nativeAudio && shot.sound ? sentence(`Sound: ${shot.sound}`) : "",
     lookLine(plan, shot),
     (refs.character || plan.character) && (refs.location || plan.location || shot.setting)

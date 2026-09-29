@@ -80,8 +80,10 @@ export async function POST(req: NextRequest) {
       if (links.character.length) named.push({ name: "the person in the uploaded photos", description: "", photos: links.character });
       people = allocateCast(named);
       links.character = people.flatMap((p) => p.photos).slice(0, REF_LIMITS.character);
-      const everyoneNamed = people.every((p) => plan.character.includes(p.name));
-      if (!everyoneNamed) plan = { ...plan, character: people.map((p) => (p.description ? `${p.name}: ${p.description}` : p.name)).join("; ") };
+      // The customer's own words for each person (look, clothes, VOICE and
+      // accent) go into every shot verbatim - the planner's paraphrase could
+      // drop the voice, and Veo invents a new voice per clip without it.
+      plan = { ...plan, character: people.map((p) => (p.description ? `${p.name}: ${p.description}` : p.name)).join("; ") };
     }
     // Lucy makes the character sheet herself when there's a person and the
     // customer hasn't already given several angles.
