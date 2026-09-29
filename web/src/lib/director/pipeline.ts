@@ -182,10 +182,10 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
     if (!shot.video_request_id) {
       const imageUrl = shot.keyframe_url ?? null;
       let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
-      // Owner test (2026-09-29): with BYTEPLUS_OWNER_SEEDANCE_MODEL set (e.g.
+      // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
       // seedance-1-5-pro-251215, free tokens on our BytePlus account), the
       // owner's Seedance films run there directly; customers are unaffected.
-      const ownerModel = process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim();
+      const ownerModel = process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim() || "seedance-1-5-pro-251215";
       if (engine === "seedance" && ownerModel && getModelArkApiKey()) {
         const { getUserById } = await import("../db");
         const { isOwner } = await import("../owner");
