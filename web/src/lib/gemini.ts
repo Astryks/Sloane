@@ -54,3 +54,39 @@ export async function geminiJson<T>(system: string, user: string, opts: { temper
     clearTimeout(timer);
   }
 }
+
+/**
+ * Gemini watches a video (2026-09-29, "copy a clip"): a YouTube link or a
+ * public https MP4 goes in as fileData, plain text comes back. Null on failure.
+ */
+export async function geminiWatchVideo(system: string, prompt: string, fileUri: string, mimeType: string, timeoutMs = 55_000): Promise<string | null> {
+  if (!hasGeminiConfigured()) return null;
+  const host = PLANNER_LOCATION === "global" ? "aiplatform.googleapis.com" : `${PLANNER_LOCATION}-aiplatform.googleapis.com`;
+  const url = `https://${host}/v1/projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/${PLANNER_LOCATION}/publishers/google/models/${PLANNER_MODEL}:generateContent`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...(await vertexAuthHeaders()), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ fileData: { fileUri, mimeType } }, { text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 8192, mediaResolution: "MEDIA_RESOLUTION_LOW" },
+      }),
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      console.error(`[gemini] watch video failed (${res.status}): ${text.slice(0, 600)}`);
+      return null;
+    }
+    const data = JSON.parse(text) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    return data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("").trim() || null;
+  } catch (err) {
+    console.error("[gemini] watch video call failed", err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

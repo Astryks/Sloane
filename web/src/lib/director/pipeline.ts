@@ -183,9 +183,9 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       const imageUrl = shot.keyframe_url ?? null;
       let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
       // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
-      // seedance-1-5-pro-251215, free tokens on our BytePlus account), the
+      // seedance-1-0-pro-250528 - 1.5 pro is retired - free tokens on our BytePlus account), the
       // owner's Seedance films run there directly; customers are unaffected.
-      const ownerModel = process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim() || "seedance-1-5-pro-251215";
+      const ownerModel = process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim() || "seedance-1-0-pro-250528";
       if (engine === "seedance" && ownerModel && getModelArkApiKey()) {
         const { getUserById } = await import("../db");
         const { isOwner } = await import("../owner");
@@ -209,7 +209,15 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         input.duration = Math.min(12, Math.max(4, Math.round(d ?? 8)));
         input.generate_audio = true;
       }
-      const requestId = await submitVideoInferenceJob(endpoint, input);
+      let requestId: string;
+      try {
+        requestId = await submitVideoInferenceJob(endpoint, input);
+      } catch (err) {
+        // BytePlus lists some models with a vendor prefix - try that once.
+        if (!endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) || !/NotFound/.test(String(err)) || endpoint.includes("bytedance-")) throw err;
+        endpoint = `${MODELARK_ENDPOINT_PREFIX}bytedance-${endpoint.slice(MODELARK_ENDPOINT_PREFIX.length)}`;
+        requestId = await submitVideoInferenceJob(endpoint, input);
+      }
       return updateDirectorShot(shot.id, { status: "video", video_endpoint: endpoint, video_request_id: requestId });
     }
     const endpoint = shot.video_endpoint as string;
