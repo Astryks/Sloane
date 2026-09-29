@@ -1,5 +1,23 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-29 (night) - Realism fixes; cast and sets redrawn for review
+
+- **Realism (code):**
+  - Every shot now says "real-time, natural speed, never slow motion".
+  - Shot length fits its line (about 2.6 words/sec, 4-8s), so short lines no longer stretch into slow motion.
+  - The cinematic style's motion wording no longer says "slow".
+  - Diagnosis of the "fake" test: Veo Lite, slow camera wording, empty backgrounds, glossy stills.
+- **Reference scene studied** (`~/Downloads/gekko.mp4`, 22 shots in 2:44): handheld/Steadicam following, 2-15s shots, busy backgrounds, warm practical light, 35mm grain. Folded into Sid's paste-ready script (LOOK / LIFE lines).
+- **Sets can have background extras** (`extras: true`). The back view is literal: same outfit, closed back.
+- **Redrawn on support@:**
+  - Jess (ivory long-sleeved V-neck knit, black trousers, belt; voice Harper; correct back).
+  - Liam (full/back fixed to navy chinos).
+  - Astryks floor, Astryks office (clothed Kirsty-style portraits - one nude painting was rejected) and Classic corner office, all with people.
+  - Old versions renamed "(white shirt)", "(old trousers)", "(empty)".
+- **Local copies:** `~/Documents/Lucy Movie` (Cast/, Sets/, Astryks logo.png; Old versions/).
+- **Known limit:** with the room as a reference, the image model keeps redrawing the same view, so sets are saved as one strong view each.
+- The Director form on lucylabs.app is pre-filled for Sid (script, Liam + Jess, Astryks floor, Cinematic/7/Veo/16:9). Not filmed.
+
 ## Latest update, 2026-09-29 (evening) - Voice lock across shots, office redraw, art in sets
 
 - **Voice lock (LIVE, verified end to end):**
