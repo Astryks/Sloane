@@ -518,3 +518,12 @@ Not built / next:
 - Seedance 2.0 direct needs a BytePlus top-up above the reserve (2.0 fast is roughly US$0.7 per 8s at 720p, far cheaper than resellers). Then switch the owner test model to seedance-2-0-fast-260128 or seedance-2-0-260128.
 - Lip-sync dub (Lucy voice -> Kling lipsync) costs money on the backup provider, so it isn't wired; the Modal tts/mix modes are ready.
 - Model per shot (Veo close-ups, Kling two-shots), automatic bad-take detection, Soul-ID-style trained faces.
+
+## 2026-09-30 - coverage, continuous takes, voice-first
+- **Coverage** (on by default for 2+ people): a wide master + over-the-shoulder singles/two-shots on each person (partner = who they talk to), each drawn ONCE (singles as edits of the master) and reused by every shot from that camera; 85mm OTS framing, eyelines beside the lens, continuity wording. lib/director/coverage.ts. Tested on the Neilson plan -> 5 setups for 8 shots.
+- **Continuous takes**: a shot from the same setup as the one before (or every shot when "One continuous take" is on, default for vlogs) starts on the previous shot's exact last frame (Modal director-stitch /lastframe). Shots then film in order.
+- **Voice-first for Seedance 2.x** (owner BytePlus path, untested until 2.0 is activated): the line is recorded first in the speaker's Lucy voice and sent as reference_audio, so Seedance acts and lip-syncs to it; no voice swap afterwards. Takes up to 15s. To switch on: top up BytePlus, activate Seedance 2.0 (fast), set BYTEPLUS_OWNER_SEEDANCE_MODEL=seedance-2-0-fast-260128 (dreamina- prefix fallback built in).
+- **Acting in Lucy voices**: each line's (stage direction) now drives Chatterbox exaggeration/cfg_weight (whisper / firm / excited / warm).
+- **Keep model voices** option (skips the voice swap).
+- Seedance 2.0 won't take real-looking faces; BytePlus trusts its own outputs (Seedream 5.0 lite images, Seedance frames), so the cast should be re-made in Seedream on BytePlus.
+- Chloe vs History (confirmed by the creator): Claude for scripts; PAI 2 (Utopai), Nano Banana Pro and ChatGPT for images; Seedance 2.0 for video; an unnamed AI voice model for consistency (ElevenLabs is inferred); editing unconfirmed (probably CapCut).
