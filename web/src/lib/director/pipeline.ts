@@ -195,7 +195,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       // Rebuild the prompt from the (possibly edited) plan with the current
       // compiler, so fixes like naming the speaker apply to films that were
       // planned earlier too. Falls back to the stored prompt.
-      const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio;
+      const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio || endpoint.startsWith(MODELARK_ENDPOINT_PREFIX);
       let prompt = shot.prompt;
       try {
         const { compileShotPrompt } = await import("./compile");
