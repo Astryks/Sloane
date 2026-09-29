@@ -190,6 +190,14 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   );
 }
 
+// A spoken line sets the shot's length (~2.6 words a second + a beat), so a
+// short line isn't stretched over 8 seconds - that reads as slow motion.
+function fitToDialogue(dialogue: string, planned: number): number {
+  const words = dialogue.trim() ? dialogue.trim().split(/\s+/).length : 0;
+  if (!words) return planned;
+  return Math.min(8, Math.max(4, Math.ceil(words / 2.6 + 1.5)));
+}
+
 // ---- validation ------------------------------------------------------------
 
 export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): DirectorPlan {
@@ -222,7 +230,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       dialogue: clampText(s.dialogue, 240),
       speaker: clampText(s.speaker, 60),
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
-      durationSeconds: Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds,
+      durationSeconds: fitToDialogue(clampText(s.dialogue, 240), Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds),
     });
   }
   const aspect =

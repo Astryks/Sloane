@@ -86,6 +86,10 @@ export function compileShotPrompt(plan: DirectorPlan, shotIndex: number, refs: R
   const parts = [
     sentence(`${sizeText(plan, refs, shot.size)}, ${ANGLES[shot.angle]}, ${SHOT_SIZES[shot.size].lensHint}`),
     sentence(`Camera: ${moveText} - one continuous move only`),
+    // 2026-09-29: "slow" camera words + long clips read as slow motion - keep the action live.
+    shot.move === "slow_motion_hold"
+      ? ""
+      : "Real-time footage at natural speed: people walk, gesture, blink and talk at a normal everyday pace, like a real film shoot - never slow motion, never floaty or dreamlike.",
     subjectLine(plan, refs),
     productLine(plan, refs),
     sentence(shot.action),

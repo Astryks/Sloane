@@ -52,7 +52,7 @@ export const PRODUCTION_STYLES: Record<ProductionStyleId, ProductionStyle> = {
     filmLook: "Kodak Vision3 5219 500T film emulation (tungsten, night and interiors) or Vision3 5207 250D (daylight exteriors) - fine organic grain, rich deep shadows, gentle highlight roll-off, soft halation around bright practical lights",
     lighting: "low-key motivated lighting - Rembrandt or side light at roughly 3:1 to 4:1 contrast, deep negative fill, practical sources visible in frame, light haze catching the beams",
     grade: "filmic grade, restrained saturation, skin tones kept natural and warm against cooler shadows",
-    motionCharacter: "slow, deliberate, motivated camera - every move has a reason",
+    motionCharacter: "measured, motivated camera - every move has a reason - while the people move and speak at real, natural speed",
     aspectRatio: "16:9",
     preferredMoves: ["slow_push_in", "dolly_out_reveal", "rack_focus", "tracking_follow", "subject_swap_pan", "crane_up", "locked_off"],
     texture: "true optical depth of field, 24fps motion cadence with natural motion blur",
