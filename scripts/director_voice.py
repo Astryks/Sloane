@@ -263,12 +263,15 @@ def tts_acted(voice_id, segments, seconds):
             text = str(seg.get("text") or "").strip()[:300]
             if not text:
                 continue
+            # 2026-09-30, after a real listen: time-stretching (speed) and pushing
+            # far from the voice's tuned 0.6/0.4 distorted Brad. Stay close to
+            # each voice's own tuning; pacing comes from the pauses instead.
             r = tts.run_generate_preset.remote(
                 text, voice_id,
-                _clamp(seg.get("exaggeration"), 0.25, 1.1, 0.6),
-                _clamp(seg.get("cfg_weight"), 0.2, 0.65, 0.4),
+                _clamp(seg.get("exaggeration"), 0.48, 0.72, 0.6),
+                _clamp(seg.get("cfg_weight"), 0.36, 0.48, 0.4),
                 None,
-                _clamp(seg.get("speed"), 0.8, 1.2, 1.0),
+                None,
             )
             if not isinstance(r, dict) or not r.get("audio_base64"):
                 raise RuntimeError((r or {}).get("error", "no audio"))
@@ -298,7 +301,7 @@ def tts_acted(voice_id, segments, seconds):
         tempo = min(1.25, speech / target) if speech > target else 1.0
         out = os.path.join(tmp, "line.wav")
         _run(["ffmpeg", "-y", "-v", "error", "-i", joined, "-af",
-              f"atempo={tempo:.3f},adelay=200|200,apad=whole_dur={float(seconds):.2f}",
+              f"atempo={tempo:.3f},loudnorm=I=-18:TP=-2:LRA=9,alimiter=limit=0.89,adelay=200|200,apad=whole_dur={float(seconds):.2f}",
               "-t", f"{float(seconds):.2f}", "-ar", "48000", "-ac", "1", out])
         return _upload(out, "audio/wav", "line.wav", os.environ["FAL_KEY"])
 
