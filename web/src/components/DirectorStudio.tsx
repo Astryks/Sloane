@@ -240,6 +240,7 @@ export function DirectorStudio({
     if (!filmId) return;
     let stop = false;
     (async () => {
+      let wait = 4000;
       while (!stop) {
         try {
           const res = await fetch(`/api/director/status?filmId=${filmId}`);
@@ -252,8 +253,12 @@ export function DirectorStudio({
             });
           }
           if (DONE_STATES.includes(data.status)) return;
+          wait = data.status === "anchor" || data.status === "frames" ? 4000 : 10000;
         } catch {}
-        await new Promise((r) => setTimeout(r, 4000));
+        // 2026-09-29: each poll moves the film along on the server, so poll
+        // gently - every 10s while filming (shots take minutes) and every
+        // 30s when the tab is hidden - to save server time.
+        await new Promise((r) => setTimeout(r, typeof document !== "undefined" && document.hidden ? 30000 : wait));
       }
     })();
     return () => {
