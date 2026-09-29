@@ -239,6 +239,14 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       try {
         requestId = await submitVideoInferenceJob(endpoint, input);
       } catch (err) {
+        // Photo references refused (e.g. a safety check on real-looking faces)? Film from the drawn frame instead.
+        if (ingredients.length && shot.keyframe_url) {
+          console.error("[director] ingredients refused - using the storyboard frame", shot.id, err);
+          delete input.reference_image_urls;
+          input.image_url = shot.keyframe_url;
+          requestId = await submitVideoInferenceJob(endpoint, input);
+          return updateDirectorShot(shot.id, { status: "video", video_endpoint: endpoint, video_request_id: requestId });
+        }
         // BytePlus lists some models with a vendor prefix - try that once.
         if (!endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) || !/NotFound/.test(String(err)) || endpoint.includes("bytedance-")) throw err;
         endpoint = `${MODELARK_ENDPOINT_PREFIX}bytedance-${endpoint.slice(MODELARK_ENDPOINT_PREFIX.length)}`;
