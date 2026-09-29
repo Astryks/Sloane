@@ -482,3 +482,15 @@ Next:
 ## 2026-09-29 - Veo 3.1 best quality, BytePlus check
 - Veo 3.1 standard ("Veo 3.1 (best quality)") now films up to 8s (was 4s, which cut lines off). Own price $4.99 single / $5.99 per Director shot (cost ~$3.68 at 8s). Director picker shows full model names (Veo 3.1 Fast vs best quality).
 - BytePlus ModelArk: Seedance 2.0, 2.0-fast and 2.0-mini all refuse activation ("balance and coupons lower than the reserved amount") with the $10 balance + Free Credits Only Mode on. Seedance 1.5 pro is active with 2M free tokens (docs list it as retired). No BYTEPLUS_ARK_API_KEY set yet - owner must create it in the console and add it to Vercel.
+
+## 2026-09-29 (evening) - where we stand
+- Neilson office scene 1 filmed on Veo 3.1 best quality (8 shots, 56s): ~/Documents/Lucy Movie/Scenes/Neilson office - scene 1.mp4. Sid's verdict: looks fake. Known faults: extra man behind Lawrence in shot 3, black bar on shot 5's right edge, mobile->desk phone jump shots 2-3.
+- Lessons: saved movie notes carried the Astryks set into Neilson's classic office (fixed per film by editing the plan); shot text must be saved before a redraw or the redraw uses old text.
+- Spend: Google free trial shows A$37.69 used of A$417.14 (A$379.45 left); tonight's film (~A$37) not yet billed. Owner's Lucy credit is auto-refunded, so only vendor costs are real. Kling/Seedance through Lucy cost ~US$2/shot on the backup provider balance.
+- Vercel (Hobby, never billed - pauses at limits): deployment storage was 105% (10.5/10 GB), active CPU 68% of 4h. Retention for the sloane project set to 1 day (canceled/errored/preview) and 1 week (production). Director status polling slowed to 10s while filming, 30s in hidden tabs.
+- BytePlus: Seedance 2.0 / fast / mini all refuse activation (reserve > balance). 1.5 pro active with 2M free tokens. Next: Sid creates API key -> Vercel BYTEPLUS_ARK_API_KEY.
+- Next up, in order:
+  1. Model test: same shots (3 Lawrence, 8 Jess) on Seedance 2.0 (dreamina.capcut.com) and Kling (kling.ai) free tiers - needs Sid signed in. Frames + prompts in ~/Documents/Lucy Movie/Scenes/Model test/.
+  2. MP4 / YouTube upload in step 1 - Gemini watches the clip and writes the shot list (camera, staging; own dialogue).
+  3. Quality gap vs Higgsfield / Chloe vs History: try Veo reference-image mode (no drawn first frame), grittier stills, single-speaker takes, Kling 3.0.
+  4. Lip-sync dub (Lucy voice -> Kling lipsync -> room sound mix); Modal tts/mix modes already deployed.

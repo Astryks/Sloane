@@ -126,6 +126,36 @@ class Voice:
             return _upload(out, "audio/wav", "voice.wav", os.environ["FAL_KEY"])
 
     @modal.method()
+    def mix(self, video_url, bed_video_url):
+        """Lip-synced shot (new voice only) + the ORIGINAL shot's room sound
+        (speech removed), so the dubbed line sits in the scene."""
+        import numpy as np
+        import soundfile as sf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            v = os.path.join(tmp, "lip.mp4")
+            bed = os.path.join(tmp, "bed.mp4")
+            _download(video_url, v)
+            _download(bed_video_url, bed)
+            has_bed_audio = "Audio:" in subprocess.run(["ffmpeg", "-hide_banner", "-i", bed], capture_output=True, text=True).stderr
+            voice = os.path.join(tmp, "voice.wav")
+            _run(["ffmpeg", "-y", "-v", "error", "-i", v, "-vn", "-ac", "2", "-ar", str(SR), voice])
+            vv, _ = sf.read(voice, dtype="float32", always_2d=True)
+            vv = vv.T
+            if has_bed_audio:
+                _, rest, _ = self._separate(bed, tmp)
+                n = min(vv.shape[1], rest.shape[1])
+                mixed = np.clip(vv[:, :n] + rest[:, :n] * 0.9, -1.0, 1.0).T
+            else:
+                mixed = vv.T
+            audio = os.path.join(tmp, "mixed.wav")
+            sf.write(audio, mixed, SR)
+            out = os.path.join(tmp, "out.mp4")
+            _run(["ffmpeg", "-y", "-v", "error", "-i", v, "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+                  "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", out])
+            return _upload(out, "video/mp4", "shot.mp4", os.environ["FAL_KEY"])
+
+    @modal.method()
     def convert(self, video_url, reference_url):
         import numpy as np
         import soundfile as sf
@@ -158,6 +188,40 @@ class Voice:
                 "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", out,
             ])
             return _upload(out, "video/mp4", "shot.mp4", os.environ["FAL_KEY"])
+
+
+def _duration(path):
+    import re
+    info = subprocess.run(["ffmpeg", "-hide_banner", "-i", path], capture_output=True, text=True).stderr
+    d = re.search(r"Duration: (\d+):(\d+):([\d.]+)", info)
+    return int(d.group(1)) * 3600 + int(d.group(2)) * 60 + float(d.group(3)) if d else 0.0
+
+
+@app.function(image=image, secrets=[fal_key_secret], timeout=300)
+def tts_line(voice_id, text, seconds):
+    """A shot's line in a Lucy voice (lucy-tts app), fitted to the shot: trimmed
+    of dead air, sped up (max 1.3x) if it's too long, and padded to the shot's
+    length with a short lead-in so the lip-sync model has room."""
+    tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
+    r = tts.run_generate_preset.remote(text, voice_id)
+    if not isinstance(r, dict) or not r.get("audio_base64"):
+        raise RuntimeError((r or {}).get("error", "no audio"))
+    with tempfile.TemporaryDirectory() as tmp:
+        raw = os.path.join(tmp, "raw.wav")
+        with open(raw, "wb") as f:
+            f.write(base64.b64decode(r["audio_base64"]))
+        trimmed = os.path.join(tmp, "trim.wav")
+        _run(["ffmpeg", "-y", "-v", "error", "-i", raw, "-af",
+              "silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse",
+              "-ar", "48000", "-ac", "1", trimmed])
+        target = max(2.0, float(seconds) - 0.5)  # leave a beat at the end
+        speech = _duration(trimmed)
+        tempo = min(1.3, speech / target) if speech > target else 1.0
+        out = os.path.join(tmp, "line.wav")
+        _run(["ffmpeg", "-y", "-v", "error", "-i", trimmed, "-af",
+              f"atempo={tempo:.3f},adelay=250|250,apad=whole_dur={float(seconds):.2f}",
+              "-t", f"{float(seconds):.2f}", "-ar", "48000", "-ac", "1", out])
+        return _upload(out, "audio/wav", "line.wav", os.environ["FAL_KEY"])
 
 
 @app.function(image=image, secrets=[fal_key_secret], timeout=300)
@@ -198,6 +262,10 @@ def web():
             call = Voice().extract.spawn(body["video_url"])
         elif mode == "convert" and _https(body.get("video_url")) and _https(body.get("reference_url")):
             call = Voice().convert.spawn(body["video_url"], body["reference_url"])
+        elif mode == "tts" and isinstance(body.get("voice_id"), str) and isinstance(body.get("text"), str):
+            call = tts_line.spawn(body["voice_id"], body["text"][:400], float(body.get("seconds") or 8))
+        elif mode == "mix" and _https(body.get("video_url")) and _https(body.get("bed_video_url")):
+            call = Voice().mix.spawn(body["video_url"], body["bed_video_url"])
         elif mode == "preset" and isinstance(body.get("voice_id"), str):
             text = str(body.get("text") or "Hello there. This is how I sound when I talk, nice and natural, every single time.")[:300]
             call = preset_reference.spawn(body["voice_id"], text)
