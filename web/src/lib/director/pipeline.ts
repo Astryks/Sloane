@@ -229,6 +229,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       if (ingredients.length) {
         delete input.image_url;
         input.reference_image_urls = ingredients;
+        input.duration = "8s"; // Veo's reference-to-video only makes 8s clips
       }
       // The reseller path caps Seedance at 4s; direct 1.5 pro takes 4-12s with sound.
       if (endpoint.startsWith(MODELARK_ENDPOINT_PREFIX)) {
