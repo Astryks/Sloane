@@ -17,6 +17,7 @@
 - **Local copies:** `~/Documents/Lucy Movie` (Cast/, Sets/, Astryks logo.png; Old versions/).
 - **Known limit:** with the room as a reference, the image model keeps redrawing the same view, so sets are saved as one strong view each.
 - **Update:** Astryks office now has Rothko-style colour-field abstracts (Kirsty art version renamed "(Kirsty art)") and modern multi-screen trading desks. Astryks floor now has modern trading pods; the logo was fixed (the mark first, then the word) on the second draw; the old version was renamed "(80s terminals)". The Mac folder is updated.
+- **Update:** Astryks office paintings are now green/purple Rothko-style, made with the new set **edit mode** (`edit` + one photo: change one thing, keep the rest). Text prompts kept producing classic red/orange Rothko colours. The saved card was updated in place (PATCH now accepts `photos`); the red version was renamed "(red Rothko)". All three characters are on the Veo voice, locked, with voice descriptions in their profiles.
 - The Director form on lucylabs.app is pre-filled for Sid (script, Liam + Jess, Astryks floor, Cinematic/7/Veo/16:9). Not filmed.
 
 ## Latest update, 2026-09-29 (evening) - Voice lock across shots, office redraw, art in sets
