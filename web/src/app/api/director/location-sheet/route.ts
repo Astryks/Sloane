@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
       logoPlacement?: unknown;
       art?: unknown;
       artPlacement?: unknown;
+      extras?: unknown;
     };
     const angle = String(body.angle ?? "") as LocationAngleId;
     if (!LOCATION_ANGLES.some((a) => a.id === angle)) return publicJson({ error: "Unknown angle" }, { status: 400 });
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
       photos.length > 0,
       withLogo ? { placement: String(body.logoPlacement ?? "") } : undefined,
       withArt ? { placement: String(body.artPlacement ?? "") } : undefined,
+      body.extras === true,
     );
     const url = await generateImageOnVertex(prompt, refs, aspect);
     if (!url) return publicJson({ error: "Lucy couldn't draw that view right now - try again in a minute." }, { status: 503 });

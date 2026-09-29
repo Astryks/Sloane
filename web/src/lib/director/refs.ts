@@ -104,7 +104,8 @@ export const SHEET_ANGLES = [
   { id: "right34", label: "3/4 right", instruction: "a head-and-shoulders shot with the head and body turned three-quarters to their right" },
   { id: "profile", label: "Side profile", instruction: "a head-and-shoulders side profile, facing left, the whole side of the face visible" },
   { id: "full", label: "Full body", instruction: "a full-body shot, head to toe, standing naturally and facing the camera, arms relaxed" },
-  { id: "back", label: "Back view", instruction: "a full-body shot from behind, head to toe, showing the back of the hair and clothes" },
+  // 2026-09-29: backs came out with invented cut-outs/open backs - be literal.
+  { id: "back", label: "Back view", instruction: "a full-body shot from directly behind, head to toe, arms relaxed at the sides: the back of the same hairstyle and the back of exactly the same outfit - an ordinary closed back where the garment continues naturally around the body, no cut-outs, no open back, same colours and fabric" },
 ] as const;
 
 export type SheetAngleId = (typeof SHEET_ANGLES)[number]["id"];
@@ -169,6 +170,7 @@ export function locationAnglePrompt(
   fromReference: boolean,
   logo?: { placement: string },
   art?: { placement: string },
+  extras = false,
 ): string {
   const angle = LOCATION_ANGLES.find((a) => a.id === angleId) ?? LOCATION_ANGLES[0];
   // Reference order: [room (if any), logo (if any), artwork (if any)].
@@ -189,7 +191,10 @@ export function locationAnglePrompt(
     art
       ? `${artImage[0].toUpperCase()}${artImage.slice(1)} is an artwork. Hang it as large framed canvases - ${art.placement.trim().slice(0, 200) || "on the main walls"} - the same painting and others in exactly the same hand, style, brushwork and palette, lit by the room's light.`
       : "",
-    "Completely EMPTY - no people, no hands, no faces (except faces inside paintings).",
+    // 2026-09-29: optional background life - extras only, never a lead character.
+    extras
+      ? "A few ordinary background extras going about their work far behind (on phones, walking past, at desks) - small in frame, softly out of focus, nobody posing, nobody looking at the camera, and nobody in the foreground."
+      : "Completely EMPTY - no people, no hands, no faces (except faces inside paintings).",
     "Cinematic, physically real light and materials, natural depth of field, 35mm film look. ONE single photo filling the frame - never a collage or grid. No text, no watermark.",
   ].join(" ");
 }
