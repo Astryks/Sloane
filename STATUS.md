@@ -16,7 +16,16 @@ Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open is
   - `DIRECTOR_OWNER_SEEDANCE_2` (needs Seedance 2.x activated on BytePlus)
 
   Turning any of these on costs money, so it's Sid's call.
-- **Older unmerged branches (23-24 Sep, not part of this work, left alone):** `feat/seedance-modelark-direct` (superseded; ModelArk routing is already on main), `rewrite-prompt-guide-stepwise`, `fix/paygo-prompt-font-size`, `fix/paygo-prompt-font-sm`, `fix/trim-ai-models-review-copy`, `chore/readme-lucy-labs-visibility`.
+- **Branch clean-up (2026-09-30):**
+  - Merged `fix/trim-ai-models-review-copy`, which shortens the AI models review under More tools.
+  - Deleted 16 remote branches that were fully merged into main, so nothing was lost: realism-consolidation, cinematic-engine, coverage-grammar, lucy-realism-v1, the fastapi pin, the stitch large-files fix, prompt-guide expansions, technique pack, homepage-generator-first, serverless-migration, stills-paygo, the stills credit tracker, ads inline generate and the codex/local-mac-mps pair.
+  - **Five superseded branches kept, not merged:**
+    - `feat/seedance-modelark-direct` (933af52): already on main as PR #39 and extended since.
+    - `rewrite-prompt-guide-stepwise` (8f296ee): the guide was rebuilt differently on main afterwards (accordion steps, technique pack, Higgsfield case study).
+    - `fix/paygo-prompt-font-size` (3fa4102) and `fix/paygo-prompt-font-sm` (321c059): the prompt box already uses `text-sm`.
+    - `chore/readme-lucy-labs-visibility` (19b7875): the README already opens with a newer Lucy Labs introduction.
+
+    Deleting these would lose their commits, so they're left for Sid to delete.
 - **Sid to do (from the other agent's list, still open):**
   - Record a 60-120s acted reference voice per character, so the voice lock and Turbo speak can run.
   - Check Veo 1080p pricing before turning on Final for customers.
