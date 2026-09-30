@@ -20,10 +20,10 @@ reference any more (the old "preset" TTS references are retired).
 
 | | |
 |---|---|
-| Length | **60-120 seconds** of speech (the upload accepts 10s-5min; Turbo needs more than 5s, but 60s+ holds the voice far better). |
+| Length | **60-120 seconds** of speech. Turbo needs more than 5 seconds, but 60s or more holds the voice far better. |
 | Content | **Acted**, not read: tell a short story, argue a point, react to good and bad news. Include a laugh, a sigh, a question, a quiet line and a louder one. Keep your natural "um"s and restarts - they are part of the voice. |
 | One speaker | Only the person being cloned. No music, no TV, no second voice. |
-| Format | **48 kHz**, 24-bit WAV (or the phone's highest-quality setting; lossless if it offers it). Avoid heavy MP3/AAC compression and Bluetooth mics. |
+| Format | Record at **48 kHz**, 24-bit WAV (or the phone's highest-quality setting). Avoid Bluetooth mics. **For the upload** (4 MB limit, set by the web host's request size), export as mono M4A/AAC or MP3 at **192-256 kbps**. 120s at 256 kbps is about 3.8 MB. Don't upload low-bitrate voice memos. |
 | Room | A **quiet, soft room** (bedroom with curtains, a wardrobe full of clothes). No echoey kitchens or bathrooms. Turn off fans and air-con. |
 | Mic | 15-25 cm from the mouth, slightly off-axis to avoid pops. Same distance throughout. Phone mics are fine at this distance. |
 | Levels | Peaks around -12 to -6 dBFS; never clipping. No noise suppression, auto-gain, or "voice enhance" filters - they strip the breath and texture that make a voice sound human. |

@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const audio = form.get("audio");
     if (!(audio instanceof Blob) || !audio.type.startsWith("audio/")) return publicJson({ error: "That file isn't an audio recording" }, { status: 400 });
-    if (audio.size > MAX_BYTES) return publicJson({ error: "Keep the recording under 4MB (about a minute of speech is plenty)" }, { status: 400 });
+    if (audio.size > MAX_BYTES) return publicJson({ error: "Keep the recording under 4MB - 60-120 seconds exported as M4A or MP3 at 192-256 kbps fits" }, { status: 400 });
     if (norm(String(form.get("consent") ?? "")) !== norm(VOICE_SAMPLE_CONSENT)) {
       return publicJson({ error: "Please confirm you have permission to use this voice." }, { status: 400 });
     }
