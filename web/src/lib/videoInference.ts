@@ -63,7 +63,26 @@ export async function submitVideoInferenceJob(
   return submitFalJob(endpoint, falInput);
 }
 
-function adaptFalShapedInputToModelArk(model: string, input: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Director shots (2026-09-30) adjust duration, audio and references after the
+ * input is built, but a direct-Seedance input arrives as a pre-built ModelArk
+ * body those edits never reached (so voice-first reference audio was silently
+ * dropped). This turns it back into the fal-shaped form the adapter below
+ * reads, keeping the body's resolution / ratio / audio / duration.
+ */
+export function editableModelArkInput(input: Record<string, unknown>, prompt: string, imageUrl: string | null): Record<string, unknown> {
+  const body = input.__modelArkBody as Record<string, unknown> | undefined;
+  if (!body || typeof body !== "object") return input;
+  const out: Record<string, unknown> = { prompt };
+  if (imageUrl) out.image_url = imageUrl;
+  if (typeof body.duration === "number") out.duration = body.duration;
+  if (typeof body.resolution === "string") out.resolution = body.resolution;
+  if (typeof body.ratio === "string") out.aspect_ratio = body.ratio;
+  if (typeof body.generate_audio === "boolean") out.generate_audio = body.generate_audio;
+  return out;
+}
+
+export function adaptFalShapedInputToModelArk(model: string, input: Record<string, unknown>): Record<string, unknown> {
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const imageUrl =
     (typeof input.image_url === "string" && input.image_url) ||
@@ -89,6 +108,8 @@ function adaptFalShapedInputToModelArk(model: string, input: Record<string, unkn
     model,
     prompt,
     imageUrl,
+    // Seedance 2.x multimodal refs (2026-09-30): every image is a reference, none is the first frame.
+    imageRole: input.image_role === "reference_image" ? "reference_image" : "first_frame",
     referenceImageUrls: extraRefs,
     referenceAudioUrls: audioRefs,
     durationSeconds,

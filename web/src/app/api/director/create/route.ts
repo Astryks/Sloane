@@ -4,25 +4,35 @@ import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, sav
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
-import { sanitizePlan } from "@/lib/director/plan";
-import { PRESET_VOICES } from "@/lib/presetVoices";
+import { sanitizePlan, withShotSeeds } from "@/lib/director/plan";
+import { withContinuity } from "@/lib/director/shotSchema";
+import { finalAllowedFor } from "@/lib/director/videoQuality";
 import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
-import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
+import { compileKeyframePrompt, compileShotPrompt, promptModelFor } from "@/lib/director/compile";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
 import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
 
 export const maxDuration = 60;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
-/** A Lucy voice for someone who didn't pick one: their namesake voice, else one matching their gender. */
-function autoVoiceFor(name: string, description: string): string {
-  const first = name.trim().split(/\s+/)[0].toLowerCase();
-  const namesake = PRESET_VOICES.find((v) => v.label.toLowerCase() === first);
-  if (namesake) return namesake.id;
-  const d = `${description} ${name}`.toLowerCase();
-  if (/\b(woman|women|girl|she|her|female|lady|mother|mum|mom)\b/.test(d)) return "harper";
-  return /\b(old|older|grey|gray|silver|senior|elderly|50s|60s|fifties|sixties)\b/.test(d) ? "voice_tech" : "liam";
+/**
+ * Real voice recordings per saved-character id, from /api/director/voice-sample
+ * (2026-09-30). Only our own media links are accepted.
+ */
+function parseVoiceSamples(raw: FormDataEntryValue | null): Record<string, string> {
+  try {
+    const parsed = JSON.parse(String(raw ?? "{}")) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [id, url] of Object.entries(parsed as Record<string, unknown>).slice(0, 3)) {
+      const resolved = resolveMediaUrl(String(url ?? ""));
+      if (isVendorMediaUrl(resolved)) out[String(id).slice(0, 80)] = resolved;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 const FREE_BOARDS_PER_DAY = 3;
 const STORYBOARD_FEE_CENTS = 100;
@@ -89,10 +99,19 @@ export async function POST(req: NextRequest) {
     const links = parseRefLinks(form.get("refs"));
     let people: CastPerson[] | undefined;
     if (savedCast.length) {
-      // Everyone who talks gets a fixed Lucy voice (2026-09-30) - without one,
-      // a person's voice came from their first shot, so one shot where the
-      // model used the wrong voice spread to all their lines.
-      const named: CastPerson[] = savedCast.map((c) => ({ name: c!.name, description: c!.description, photos: savedCharacterPhotos(c!), voiceId: c!.voice_id || autoVoiceFor(c!.name, c!.description) }));
+      // Realism pass (2026-09-30): nobody is auto-assigned a Lucy preset voice
+      // any more - the video model's own voice (steered by the voice words in
+      // the cast description) is the default. A Lucy voice is only used if the
+      // customer picked one, and the voice lock only converts to a real
+      // recording they uploaded.
+      const samples = parseVoiceSamples(form.get("voiceSamples"));
+      const named: CastPerson[] = savedCast.map((c) => ({
+        name: c!.name,
+        description: c!.description,
+        photos: savedCharacterPhotos(c!),
+        ...(c!.voice_id ? { voiceId: c!.voice_id } : {}),
+        ...(samples[c!.id] ? { voiceSampleUrl: samples[c!.id] } : {}),
+      }));
       // Anyone uploaded alongside the cast becomes one more (unnamed) person.
       if (links.character.length) named.push({ name: "the person in the uploaded photos", description: "", photos: links.character });
       people = allocateCast(named);
@@ -108,6 +127,13 @@ export async function POST(req: NextRequest) {
     // Selfie vlogs play as one continuous take (each shot starts on the last frame of the one before).
     if (plan.chain === undefined) plan = { ...plan, chain: plan.style === "ugc" || plan.look.format === "phone" };
     plan = assignSetups(plan);
+    // Per-shot seeds (stored, so a retake can reproduce a take) and the
+    // Draft/Final choice - Final only where allowed (see videoQuality.ts).
+    plan = withShotSeeds(plan);
+    // Continuity (2026-09-30): every visible cast member on every shot, their
+    // wardrobe held in `keep`, props/light carried from the shot before.
+    plan = withContinuity(plan);
+    if (plan.quality === "final" && !finalAllowedFor(engine, user)) plan = { ...plan, quality: undefined };
     // Lucy makes the character sheet herself when there's a person and the
     // customer hasn't already given several angles.
     const characterPhotos = links.character.length + (files.character ? 1 : 0);
@@ -166,7 +192,7 @@ export async function POST(req: NextRequest) {
         castStatus: autoCast ? "pending" : "done",
         paidCents,
         shots: plan.shots.map((_, i) => ({
-          prompt: compileShotPrompt(plan, i, refFlags, { nativeAudio }),
+          prompt: compileShotPrompt(plan, i, refFlags, { nativeAudio, model: promptModelFor(engine) }),
           keyframePrompt: compileKeyframePrompt(plan, i, { ...refFlags, character: refFlags.character || autoCast }),
           priceCents: perShot,
         })),

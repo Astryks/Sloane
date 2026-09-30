@@ -17,14 +17,32 @@ Modes (POST /start, Bearer MODAL_SHARED_SECRET):
   {"mode": "extract", "video_url": ...}
       -> the separated speech of a shot, uploaded as a WAV. The first shot a
          character speaks in becomes their locked voice this way.
-  {"mode": "preset", "voice_id": "voice_tech", "text": "..."}
-      -> a reference WAV spoken by a Lucy voice (calls the lucy-tts app).
   {"mode": "convert", "video_url": ..., "reference_url": ...}
-      -> the shot re-voiced to the reference, as an MP4.
-GET /result?call_id=... -> {status: running|done|failed, url?, error?}
+      -> the shot re-voiced to the reference, as an MP4. Since the
+         2026-09-30 realism pass the reference is always a REAL recording
+         the customer uploaded (with consent). The old "preset" mode (a
+         Chatterbox TTS render of a fixed sentence used as the conversion
+         target) is refused: converting natural speech onto a synthetic
+         target was the main reason voices sounded robotic.
+  {"mode": "speak", "reference_url": ..., "segments": [...], "seconds": 8, "engine": "turbo"|"standard"}
+      -> (2026-09-30) the line spoken zero-shot from the customer's own
+         recording with Chatterbox-Turbo (paralinguistic tags such as
+         [chuckle]/[sigh] from the acting pass) or standard Chatterbox with
+         expressive exaggeration/cfg. Used for voice-first engines (Seedance
+         2.x reference audio) and as the audio for the optional lip-sync step.
+  {"mode": "sync_check", "video_url": ...}
+      -> (2026-09-30) a free lip-sync score: faster-whisper word timings vs a
+         MediaPipe mouth-open signal -> {ok, score, lag_s, text} (text = what
+         was actually said, so the caller can spot gibberish).
+  {"mode": "mix", "video_url": ..., "bed_video_url": ...}
+      -> the (lip-synced) video with its speech over the original room sound.
+GET /result?call_id=... -> {status: running|done|failed, url?, result?, error?}
 
-Deploy:  python3 -m modal deploy scripts/director_voice.py
-Then set MODAL_DIRECTOR_VOICE_URL in Vercel to the printed web URL.
+Deploy (never run automatically; Sid runs it by hand):
+    python3 -m modal deploy scripts/director_voice.py
+Then set MODAL_DIRECTOR_VOICE_URL in Vercel to the printed web URL (unchanged
+if it was deployed before). The first build takes ~10 minutes (bakes the
+Turbo, VC, Demucs and Whisper weights into the image).
 """
 import base64
 import hmac
@@ -42,11 +60,19 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg", "libsndfile1", "git")
     .pip_install("torch==2.6.0", "torchaudio==2.6.0", extra_index_url="https://download.pytorch.org/whl/cu124")
-    .pip_install("chatterbox-tts==0.1.2", "demucs==4.0.1", "soundfile", "numpy<2", "fastapi[standard]")
-    # Bake both models into the image so a cold start doesn't re-download them.
+    # 2026-09-30: chatterbox-tts 0.1.2 -> 0.1.7 (adds Chatterbox-Turbo with
+    # paralinguistic tags; same torch 2.6 pin). faster-whisper + MediaPipe
+    # power the free lip-sync check.
+    .pip_install(
+        "chatterbox-tts==0.1.7", "demucs==4.0.1", "soundfile", "numpy<2", "fastapi[standard]",
+        "faster-whisper==1.2.1", "mediapipe==0.10.14", "opencv-python-headless<4.11",
+    )
+    # Bake the models into the image so a cold start doesn't re-download them.
     .run_commands(
         "python -c \"from demucs.pretrained import get_model; get_model('htdemucs')\"",
         "python -c \"from chatterbox.vc import ChatterboxVC; ChatterboxVC.from_pretrained(device='cpu')\"",
+        "python -c \"from chatterbox.tts_turbo import ChatterboxTurboTTS; ChatterboxTurboTTS.from_pretrained(device='cpu')\"",
+        "python -c \"from faster_whisper import WhisperModel; WhisperModel('tiny.en', device='cpu', compute_type='int8')\"",
     )
 )
 auth_secret = modal.Secret.from_name("lucy-inference-auth")
@@ -220,48 +246,43 @@ def _duration(path):
     return int(d.group(1)) * 3600 + int(d.group(2)) * 60 + float(d.group(3)) if d else 0.0
 
 
+# ---- acting controls (2026-09-30 realism pass) ------------------------------
+#
+# Chatterbox's two acting knobs: exaggeration (emotional intensity) and
+# cfg_weight (how tightly it follows the reference's pace; lower = looser,
+# livelier timing). Resemble's own guidance for expressive speech is cfg ~0.3
+# with exaggeration >= 0.7; the old ranges (0.48-0.72 / 0.36-0.48) kept every
+# line close to neutral, which is part of why reads sounded flat. Defaults are
+# env-tunable so Sid can A/B them against the Brad distortion he heard at the
+# extremes (2026-09-30) without a code change.
+EXAG_RANGE = (0.35, 0.95)
+CFG_RANGE = (0.25, 0.5)
+EXPRESSIVE_EXAGGERATION = float(os.environ.get("DIRECTOR_TTS_EXAGGERATION", "0.7"))
+EXPRESSIVE_CFG = float(os.environ.get("DIRECTOR_TTS_CFG", "0.3"))
+MAX_ATEMPO = 1.1  # beyond ~1.1x time-stretching audibly smears a voice
+
+# Paralinguistic tags Chatterbox-Turbo speaks as sounds. Only Turbo knows them;
+# every other engine gets them stripped (it would read "[laugh]" as words).
+TURBO_TAGS = ("laugh", "chuckle", "sigh", "gasp", "cough", "clear throat", "sniff", "groan", "shush")
+
+# intent / stage-direction keywords -> (exaggeration, cfg_weight)
+_INTENT_ACTING = (
+    (("whisper", "quiet", "soft", "gentle", "tender", "sad", "hushed", "intimate", "resigned", "tired"), (0.4, 0.5)),
+    (("excited", "angry", "shout", "boom", "roar", "laugh", "breathless", "furious", "thrilled", "yell", "punchline", "brag"), (0.92, 0.28)),
+    (("firm", "authorit", "confident", "stern", "cold", "commanding", "harsh", "threat", "testing", "clipped"), (0.62, 0.42)),
+    (("warm", "friendly", "curious", "smile", "playful", "bubbly", "reassur", "amused", "teasing"), (0.78, 0.32)),
+    (("question", "sharp question", "asks"), (0.72, 0.32)),
+    (("thinking", "hesitant", "unsure", "trailing", "nervous"), (0.6, 0.3)),
+)
+
+
 def _acting(delivery):
-    """2026-09-30: the line's stage direction -> Chatterbox acting controls
-    (exaggeration = emotional intensity, cfg_weight = how tightly it sticks to
-    the reference's pace; lower = looser, more natural timing)."""
+    """A line's intent or stage direction -> (exaggeration, cfg_weight), or (None, None)."""
     d = (delivery or "").lower()
-    if any(w in d for w in ("whisper", "quiet", "soft", "gentle", "tender", "sad", "hushed")):
-        return 0.35, 0.5
-    if any(w in d for w in ("excited", "angry", "shout", "boom", "roar", "laugh", "breathless", "furious", "thrilled", "yell")):
-        return 0.95, 0.3
-    if any(w in d for w in ("firm", "authorit", "confident", "stern", "cold", "commanding", "harsh")):
-        return 0.6, 0.45
-    if any(w in d for w in ("warm", "friendly", "curious", "smile", "playful", "bubbly")):
-        return 0.7, 0.38
+    for words, values in _INTENT_ACTING:
+        if any(w in d for w in words):
+            return values
     return None, None
-
-
-@app.function(image=image, secrets=[fal_key_secret], timeout=300)
-def tts_line(voice_id, text, seconds, delivery=""):
-    """A shot's line in a Lucy voice (lucy-tts app), fitted to the shot: trimmed
-    of dead air, sped up (max 1.3x) if it's too long, and padded to the shot's
-    length with a short lead-in so the lip-sync model has room."""
-    tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
-    exaggeration, cfg_weight = _acting(delivery)
-    r = tts.run_generate_preset.remote(text, voice_id, exaggeration, cfg_weight)
-    if not isinstance(r, dict) or not r.get("audio_base64"):
-        raise RuntimeError((r or {}).get("error", "no audio"))
-    with tempfile.TemporaryDirectory() as tmp:
-        raw = os.path.join(tmp, "raw.wav")
-        with open(raw, "wb") as f:
-            f.write(base64.b64decode(r["audio_base64"]))
-        trimmed = os.path.join(tmp, "trim.wav")
-        _run(["ffmpeg", "-y", "-v", "error", "-i", raw, "-af",
-              "silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse",
-              "-ar", "48000", "-ac", "1", trimmed])
-        target = max(2.0, float(seconds) - 0.5)  # leave a beat at the end
-        speech = _duration(trimmed)
-        tempo = min(1.3, speech / target) if speech > target else 1.0
-        out = os.path.join(tmp, "line.wav")
-        _run(["ffmpeg", "-y", "-v", "error", "-i", trimmed, "-af",
-              f"atempo={tempo:.3f},adelay=250|250,apad=whole_dur={float(seconds):.2f}",
-              "-t", f"{float(seconds):.2f}", "-ar", "48000", "-ac", "1", out])
-        return _upload(out, "audio/wav", "line.wav", os.environ["FAL_KEY"])
 
 
 def _clamp(x, lo, hi, default):
@@ -271,76 +292,292 @@ def _clamp(x, lo, hi, default):
         return default
 
 
-@app.function(image=image, secrets=[fal_key_secret], timeout=420)
-def tts_acted(voice_id, segments, seconds):
-    """2026-09-30: an ACTED line. `segments` = one entry per sentence/phrase
-    from Lucy's acting pass: {text, exaggeration, cfg_weight, speed,
-    pause_after_ms}. Each is generated with its own intensity/pace (a question
-    lifts, a threat drops and slows, an aside is quick and light), trimmed,
-    then joined with the planned pauses - so inflection follows the intent of
-    each sentence instead of one flat read of the whole line."""
-    tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
-    with tempfile.TemporaryDirectory() as tmp:
-        parts = []
-        for i, seg in enumerate(segments[:8]):
-            text = str(seg.get("text") or "").strip()[:300]
-            if not text:
-                continue
-            # 2026-09-30, after a real listen: time-stretching (speed) and pushing
-            # far from the voice's tuned 0.6/0.4 distorted Brad. Stay close to
-            # each voice's own tuning; pacing comes from the pauses instead.
-            r = tts.run_generate_preset.remote(
-                text, voice_id,
-                _clamp(seg.get("exaggeration"), 0.48, 0.72, 0.6),
-                _clamp(seg.get("cfg_weight"), 0.36, 0.48, 0.4),
-                None,
-                None,
-            )
-            if not isinstance(r, dict) or not r.get("audio_base64"):
-                raise RuntimeError((r or {}).get("error", "no audio"))
-            raw = os.path.join(tmp, f"raw{i}.wav")
-            with open(raw, "wb") as f:
-                f.write(base64.b64decode(r["audio_base64"]))
-            trimmed = os.path.join(tmp, f"seg{i}.wav")
-            _run(["ffmpeg", "-y", "-v", "error", "-i", raw, "-af",
-                  "silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse",
-                  "-ar", "48000", "-ac", "1", trimmed])
-            parts.append(trimmed)
-            pause = int(_clamp(seg.get("pause_after_ms"), 60, 900, 220))
-            if i < len(segments) - 1:
-                gap = os.path.join(tmp, f"gap{i}.wav")
-                _run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", f"{pause / 1000:.3f}", gap])
-                parts.append(gap)
-        if not parts:
-            raise RuntimeError("no text")
-        listing = os.path.join(tmp, "list.txt")
-        with open(listing, "w") as f:
-            for p in parts:
-                f.write(f"file '{p}'\n")
-        joined = os.path.join(tmp, "joined.wav")
-        _run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy", joined])
-        target = max(2.0, float(seconds) - 0.4)
-        speech = _duration(joined)
-        tempo = min(1.25, speech / target) if speech > target else 1.0
-        out = os.path.join(tmp, "line.wav")
-        _run(["ffmpeg", "-y", "-v", "error", "-i", joined, "-af",
-              f"atempo={tempo:.3f},loudnorm=I=-18:TP=-2:LRA=9,alimiter=limit=0.89,adelay=200|200,apad=whole_dur={float(seconds):.2f}",
-              "-t", f"{float(seconds):.2f}", "-ar", "48000", "-ac", "1", out])
-        return _upload(out, "audio/wav", "line.wav", os.environ["FAL_KEY"])
+def _segment_acting(seg):
+    """Explicit values win; else the segment's intent; else expressive defaults."""
+    ie, ic = _acting(seg.get("intent"))
+    exag = _clamp(seg.get("exaggeration"), *EXAG_RANGE, ie if ie is not None else EXPRESSIVE_EXAGGERATION)
+    cfg = _clamp(seg.get("cfg_weight"), *CFG_RANGE, ic if ic is not None else EXPRESSIVE_CFG)
+    return exag, cfg
+
+
+def _strip_tags(text):
+    import re
+    return re.sub(r"\s*\[(?:%s)\]\s*" % "|".join(TURBO_TAGS), " ", text).strip()
+
+
+def _with_tag(text, tag):
+    """Places one Turbo tag: sighs and gasps lead the phrase, laughs follow it."""
+    tag = (tag or "").strip().lower().strip("[]")
+    if tag not in TURBO_TAGS:
+        return text
+    return f"[{tag}] {text}" if tag in ("sigh", "gasp", "clear throat", "sniff", "shush") else f"{text} [{tag}]"
+
+
+def _group_runs(segments):
+    """Neighbouring phrases with similar acting are generated as ONE take (a
+    paragraph read keeps its natural flow and breaths); a new take starts only
+    where the delivery really changes or a long beat is planned."""
+    runs = []
+    for seg in segments[:8]:
+        text = str(seg.get("text") or "").strip()[:300]
+        if not text:
+            continue
+        exag, cfg = _segment_acting(seg)
+        pause = int(_clamp(seg.get("pause_after_ms"), 60, 900, 220))
+        tag = seg.get("tag")
+        if runs and abs(runs[-1]["exag"] - exag) <= 0.12 and abs(runs[-1]["cfg"] - cfg) <= 0.08 and runs[-1]["pause"] < 450 and not tag:
+            r = runs[-1]
+            r["texts"].append(text)
+            r["exag"] = (r["exag"] + exag) / 2
+            r["cfg"] = (r["cfg"] + cfg) / 2
+            r["pause"] = pause
+        else:
+            runs.append({"texts": [_with_tag(text, tag) if tag else text], "exag": exag, "cfg": cfg, "pause": pause, "intent": seg.get("intent") or ""})
+    return runs
+
+
+def _room_tone(seconds, path):
+    """A very quiet, darkened noise bed - a pause that sounds like a room, never digital zero."""
+    _run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+          f"anoisesrc=d={max(0.05, seconds):.3f}:c=pink:r=48000:a=0.0012",
+          "-af", "lowpass=f=2200,highpass=f=60", "-ac", "1", path])
+
+
+def _trim_ends(raw, out):
+    """Trims leading/trailing dead air only - breaths inside the take stay."""
+    _run(["ffmpeg", "-y", "-v", "error", "-i", raw, "-af",
+          "silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse",
+          "-ar", "48000", "-ac", "1", out])
+
+
+def _join(parts, pauses, tmp):
+    """Joins takes with room-tone gaps and 30ms crossfades at every seam
+    (was: anullsrc digital-zero gaps and hard concat)."""
+    if len(parts) == 1:
+        return parts[0]
+    inputs, chain = [], []
+    for i, p in enumerate(parts):
+        inputs.append(p)
+        if i < len(parts) - 1:
+            gap = os.path.join(tmp, f"gap{i}.wav")
+            _room_tone(max(0.08, pauses[i] / 1000), gap)
+            inputs.append(gap)
+    args = ["ffmpeg", "-y", "-v", "error"]
+    for p in inputs:
+        args += ["-i", p]
+    prev = "[0:a]"
+    for k in range(1, len(inputs)):
+        label = f"[x{k}]"
+        chain.append(f"{prev}[{k}:a]acrossfade=d=0.03:c1=tri:c2=tri{label}")
+        prev = label
+    out = os.path.join(tmp, "joined.wav")
+    _run(args + ["-filter_complex", ";".join(chain), "-map", prev, "-ar", "48000", "-ac", "1", out])
+    return out
+
+
+def _fit_to_shot(joined, seconds, tmp, loudnorm=True):
+    """Pads the line to the shot with a room-tone bed (a short lead-in for
+    lip-sync), speeding up by at most 1.1x. Words are never cut: if the line
+    is still longer than the shot, the audio runs long and the caller decides."""
+    target = max(2.0, float(seconds) - 0.4)
+    speech = _duration(joined)
+    tempo = min(MAX_ATEMPO, speech / target) if speech > target else 1.0
+    total = max(float(seconds), speech / tempo + 0.45)
+    bed = os.path.join(tmp, "bed.wav")
+    _room_tone(total, bed)
+    norm = "loudnorm=I=-18:TP=-2:LRA=11," if loudnorm else ""
+    out = os.path.join(tmp, "line.wav")
+    _run(["ffmpeg", "-y", "-v", "error", "-i", joined, "-i", bed, "-filter_complex",
+          f"[0:a]atempo={tempo:.3f},{norm}alimiter=limit=0.89,adelay=200|200,apad=whole_dur={total:.2f}[v];"
+          f"[v][1:a]amix=inputs=2:duration=first:dropout_transition=0,volume=2[o]",
+          "-map", "[o]", "-t", f"{total:.2f}", "-ar", "48000", "-ac", "1", out])
+    return out
+
+
+def _lucy_take(tts, text, voice_id, exag, cfg, path):
+    r = tts.run_generate_preset.remote(_strip_tags(text), voice_id, exag, cfg, None, None)
+    if not isinstance(r, dict) or not r.get("audio_base64"):
+        raise RuntimeError((r or {}).get("error", "no audio"))
+    with open(path, "wb") as f:
+        f.write(base64.b64decode(r["audio_base64"]))
 
 
 @app.function(image=image, secrets=[fal_key_secret], timeout=300)
-def preset_reference(voice_id, text):
-    """A reference clip in a Lucy voice, made by the lucy-tts app."""
+def tts_line(voice_id, text, seconds, delivery=""):
+    """A shot's line in a Lucy voice (lucy-tts app), as one take, fitted to the
+    shot: dead air trimmed at the ends, sped up at most 1.1x, laid on a room-
+    tone bed with a short lead-in so the lip-sync model has room."""
     tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
-    r = tts.run_generate_preset.remote(text, voice_id)
-    if not isinstance(r, dict) or not r.get("audio_base64"):
-        raise RuntimeError((r or {}).get("error", "no audio"))
+    ae, ac = _acting(delivery)
     with tempfile.TemporaryDirectory() as tmp:
-        p = os.path.join(tmp, "ref.wav")
-        with open(p, "wb") as f:
-            f.write(base64.b64decode(r["audio_base64"]))
-        return _upload(p, "audio/wav", "ref.wav", os.environ["FAL_KEY"])
+        raw = os.path.join(tmp, "raw.wav")
+        _lucy_take(tts, text, voice_id, ae if ae is not None else EXPRESSIVE_EXAGGERATION, ac if ac is not None else EXPRESSIVE_CFG, raw)
+        trimmed = os.path.join(tmp, "trim.wav")
+        _trim_ends(raw, trimmed)
+        return _upload(_fit_to_shot(trimmed, seconds, tmp, loudnorm=False), "audio/wav", "line.wav", os.environ["FAL_KEY"])
+
+
+@app.function(image=image, secrets=[fal_key_secret], timeout=420)
+def tts_acted(voice_id, segments, seconds):
+    """An ACTED line in a Lucy voice. `segments` = Lucy's acting pass
+    ({text, intent, exaggeration, cfg_weight, pause_after_ms, tag?}).
+    Neighbouring phrases with similar delivery are read as one take (natural
+    flow and breaths); takes are joined with room tone and crossfades."""
+    tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
+    with tempfile.TemporaryDirectory() as tmp:
+        parts, pauses = [], []
+        for i, run in enumerate(_group_runs(segments)):
+            raw = os.path.join(tmp, f"raw{i}.wav")
+            _lucy_take(tts, " ".join(run["texts"]), voice_id, run["exag"], run["cfg"], raw)
+            trimmed = os.path.join(tmp, f"take{i}.wav")
+            _trim_ends(raw, trimmed)
+            parts.append(trimmed)
+            pauses.append(run["pause"])
+        if not parts:
+            raise RuntimeError("no text")
+        return _upload(_fit_to_shot(_join(parts, pauses, tmp), seconds, tmp), "audio/wav", "line.wav", os.environ["FAL_KEY"])
+
+
+# ---- Chatterbox-Turbo from a REAL recording (2026-09-30) ---------------------
+#
+# Voice-first for a cast member who uploaded their own voice (consented
+# /api/director/voice-sample): the line is spoken zero-shot from that
+# recording. Turbo (350M, one-step decoder) speaks paralinguistic tags
+# ([chuckle], [sigh]...) mapped from the acting intent; it ignores
+# exaggeration/cfg. The standard Chatterbox model (engine="standard") takes
+# the expressive exaggeration/cfg settings instead. Nothing here calls a
+# paid API; it runs on our own Modal GPU only when the customer opted in.
+@app.cls(image=image, gpu="L4", secrets=[fal_key_secret], timeout=600, scaledown_window=120)
+class Speaker:
+    @modal.enter()
+    def load(self):
+        import torch
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._turbo = None
+        self._standard = None
+
+    def _model(self, engine):
+        if engine == "standard":
+            if self._standard is None:
+                from chatterbox.tts import ChatterboxTTS
+                self._standard = ChatterboxTTS.from_pretrained(device=self.device)
+            return self._standard
+        if self._turbo is None:
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
+            self._turbo = ChatterboxTurboTTS.from_pretrained(device=self.device)
+        return self._turbo
+
+    @modal.method()
+    def speak(self, reference_url, segments, seconds, engine="turbo"):
+        import soundfile as sf
+        import torch
+
+        model = self._model(engine)
+        with tempfile.TemporaryDirectory() as tmp:
+            ref = os.path.join(tmp, "ref.wav")
+            _download(reference_url, ref)
+            if _duration(ref) < 5.5:
+                raise RuntimeError("voice recording too short (Turbo needs more than 5 seconds)")
+            if engine != "standard":
+                model.prepare_conditionals(ref)  # once per line, not once per take
+            parts, pauses = [], []
+            for i, run in enumerate(_group_runs(segments)):
+                text = " ".join(run["texts"])
+                with torch.no_grad():
+                    if engine == "standard":
+                        wav = model.generate(_strip_tags(text), audio_prompt_path=ref, exaggeration=run["exag"], cfg_weight=run["cfg"])
+                    else:
+                        wav = model.generate(text)
+                raw = os.path.join(tmp, f"raw{i}.wav")
+                sf.write(raw, wav.squeeze(0).cpu().numpy(), model.sr)
+                trimmed = os.path.join(tmp, f"take{i}.wav")
+                _trim_ends(raw, trimmed)
+                parts.append(trimmed)
+                pauses.append(run["pause"])
+            if not parts:
+                raise RuntimeError("no text")
+            return _upload(_fit_to_shot(_join(parts, pauses, tmp), seconds, tmp), "audio/wav", "line.wav", os.environ["FAL_KEY"])
+
+
+# ---- free lip-sync check (2026-09-30) ---------------------------------------
+#
+# Does the mouth move when the words are spoken? faster-whisper word timings
+# (CPU, tiny model) give when speech happens; MediaPipe Face Mesh gives how
+# open the largest face's mouth is on each sampled frame. The score is the
+# correlation between the two, at the best lag within +/-0.3s. No paid API.
+SYNC_FPS = 12.5
+
+
+@app.function(image=image, timeout=300, cpu=2.0)
+def sync_check(video_url):
+    import numpy as np
+
+    with tempfile.TemporaryDirectory() as tmp:
+        v = os.path.join(tmp, "in.mp4")
+        _download(video_url, v)
+        wav = os.path.join(tmp, "a.wav")
+        _run(["ffmpeg", "-y", "-v", "error", "-i", v, "-vn", "-ac", "1", "-ar", "16000", wav])
+        duration = _duration(v)
+        n = max(1, int(duration * SYNC_FPS))
+        speech = np.zeros(n, dtype=np.float32)
+        from faster_whisper import WhisperModel
+
+        model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+        segs, _ = model.transcribe(wav, word_timestamps=True, vad_filter=True)
+        words = 0
+        heard = []
+        for seg in segs:
+            heard.append(seg.text.strip())
+            for w in seg.words or []:
+                words += 1
+                speech[int(w.start * SYNC_FPS): max(int(w.start * SYNC_FPS) + 1, int(w.end * SYNC_FPS))] = 1.0
+        mouth = _mouth_openness(v, n, tmp)
+        valid = ~np.isnan(mouth)
+        if words == 0 or valid.sum() < n * 0.5:
+            return {"ok": None, "reason": "no speech or no face", "words": words, "face_frames": int(valid.sum()), "frames": n, "text": " ".join(heard)[:600]}
+        m = np.where(valid, mouth, np.nanmean(mouth))
+        best, best_lag = -1.0, 0
+        max_lag = int(0.3 * SYNC_FPS)
+        for lag in range(-max_lag, max_lag + 1):
+            a = speech[max(0, lag): n + min(0, lag)]
+            b = m[max(0, -lag): n - max(0, lag)]
+            if len(a) < 5 or a.std() == 0 or b.std() == 0:
+                continue
+            c = float(np.corrcoef(a, b)[0, 1])
+            if c > best:
+                best, best_lag = c, lag
+        lag_s = best_lag / SYNC_FPS
+        ok = best >= float(os.environ.get("DIRECTOR_SYNC_MIN_SCORE", "0.2")) and abs(lag_s) <= 0.17
+        return {"ok": ok, "score": round(best, 3), "lag_s": round(lag_s, 3), "words": words, "frames": n, "text": " ".join(heard)[:600]}
+
+
+def _mouth_openness(video_path, n, tmp):
+    """Inner-lip gap / face height per sampled frame for the largest face (NaN = no face)."""
+    import cv2
+    import mediapipe as mp
+    import numpy as np
+
+    frames_dir = os.path.join(tmp, "f")
+    os.makedirs(frames_dir, exist_ok=True)
+    _run(["ffmpeg", "-y", "-v", "error", "-i", video_path, "-vf", f"fps={SYNC_FPS},scale=480:-2", os.path.join(frames_dir, "%05d.jpg")])
+    files = sorted(os.listdir(frames_dir))[:n]
+    out = np.full(n, np.nan, dtype=np.float32)
+    with mp.solutions.face_mesh.FaceMesh(static_image_mode=False, max_num_faces=3, refine_landmarks=False) as mesh:
+        for i, name in enumerate(files):
+            img = cv2.cvtColor(cv2.imread(os.path.join(frames_dir, name)), cv2.COLOR_BGR2RGB)
+            res = mesh.process(img)
+            if not res.multi_face_landmarks:
+                continue
+            best = None
+            for face in res.multi_face_landmarks:
+                lm = face.landmark
+                height = abs(lm[152].y - lm[10].y)  # chin - forehead
+                if best is None or height > best[0]:
+                    best = (height, abs(lm[14].y - lm[13].y))  # lower inner lip - upper inner lip
+            if best and best[0] > 0:
+                out[i] = best[1] / best[0]
+    return out
 
 
 @app.function(image=image, secrets=[auth_secret])
@@ -371,11 +608,16 @@ def web():
             call = tts_acted.spawn(body["voice_id"], body["segments"], float(body.get("seconds") or 8))
         elif mode == "tts" and isinstance(body.get("voice_id"), str) and isinstance(body.get("text"), str):
             call = tts_line.spawn(body["voice_id"], body["text"][:400], float(body.get("seconds") or 8), str(body.get("delivery") or "")[:120])
+        elif mode == "speak" and _https(body.get("reference_url")) and isinstance(body.get("segments"), list) and body["segments"]:
+            engine = "standard" if body.get("engine") == "standard" else "turbo"
+            call = Speaker().speak.spawn(body["reference_url"], body["segments"], float(body.get("seconds") or 8), engine)
+        elif mode == "sync_check" and _https(body.get("video_url")):
+            call = sync_check.spawn(body["video_url"])
         elif mode == "mix" and _https(body.get("video_url")) and _https(body.get("bed_video_url")):
             call = Voice().mix.spawn(body["video_url"], body["bed_video_url"])
-        elif mode == "preset" and isinstance(body.get("voice_id"), str):
-            text = str(body.get("text") or "Hello there. This is how I sound when I talk, nice and natural, every single time.")[:300]
-            call = preset_reference.spawn(body["voice_id"], text)
+        elif mode == "preset":
+            # 2026-09-30: synthetic (TTS) conversion targets are no longer allowed.
+            raise fastapi.HTTPException(status_code=410, detail="Preset voice references are retired - upload a real recording")
         else:
             raise fastapi.HTTPException(status_code=400, detail="Bad request")
         return {"call_id": call.object_id}
@@ -385,7 +627,9 @@ def web():
         _auth(request)
         call = modal.FunctionCall.from_id(call_id)
         try:
-            return {"status": "done", "url": call.get(timeout=0)}
+            value = call.get(timeout=0)
+            # sync_check returns a dict (score, lag); everything else a media URL.
+            return {"status": "done", "result": value} if isinstance(value, dict) else {"status": "done", "url": value}
         except TimeoutError:
             return {"status": "running"}
         except Exception as err:  # noqa: BLE001

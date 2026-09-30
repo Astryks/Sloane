@@ -1185,6 +1185,31 @@ def _align_words_to_whisper(input_words: list[str], whisper_words: list) -> list
 
 COMMA_PAUSE_SECONDS = 0.18  # a breath/beat, shorter than DEFAULT_PAUSE_SECONDS' between-sentence 0.22
 
+# 2026-09-30 realism pass: pauses were digital zero (np.zeros), which reads as
+# a dropout between phrases - a real recording never goes to true silence.
+# Gaps are now a very quiet, softened noise floor ("room tone", about -66 dBFS
+# RMS) so the join sounds like the same room, and edges are faded as before.
+ROOM_TONE_DBFS = float(os.environ.get("LUCY_ROOM_TONE_DBFS", "-66"))
+
+
+def room_tone(num_samples: int, sr: int, rng=None, level_dbfs: float = ROOM_TONE_DBFS) -> np.ndarray:
+    """Quiet, slightly darkened noise to fill a pause instead of digital zero."""
+    n = max(0, int(num_samples))
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    gen = rng if rng is not None else np.random.default_rng()
+    white = gen.standard_normal(n + 32).astype(np.float32)
+    # a short moving average darkens the hiss toward a room-like rumble
+    kernel = np.ones(12, dtype=np.float32) / 12.0
+    tone = np.convolve(white, kernel, mode="same")[16:16 + n]
+    rms = float(np.sqrt(np.mean(tone ** 2))) or 1.0
+    tone *= (10 ** (level_dbfs / 20.0)) / rms
+    fade = min(n // 2, int(sr * 0.01))
+    if fade > 0:
+        tone[:fade] *= np.linspace(0.0, 1.0, fade, dtype=np.float32)
+        tone[-fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
+    return tone.astype(np.float32)
+
 
 def apply_comma_pauses(audio: np.ndarray, sr: int, chunk_text: str, whisper_words: list) -> np.ndarray:
     """Real gap reported live 2026-09-14: "she goes straight past... there
@@ -1236,7 +1261,7 @@ def apply_comma_pauses(audio: np.ndarray, sr: int, chunk_text: str, whisper_word
     if not insert_points:
         return audio
 
-    silence = np.zeros(int(sr * COMMA_PAUSE_SECONDS), dtype=np.float32)
+    silence = room_tone(int(sr * COMMA_PAUSE_SECONDS), sr)
     fade_n = min(int(sr * SPLICE_CROSSFADE_MS / 1000), int(sr * COMMA_PAUSE_SECONDS) // 2)
 
     def _fade(segment: np.ndarray, fade_in: bool, fade_out: bool) -> np.ndarray:
@@ -1555,15 +1580,25 @@ LEADING_FILLER_WORDS = {"so", "um", "uh", "well", "okay", "ok", "like", "and", "
 HESITATION_MARKERS = {"um", "umm", "uh", "uhh", "uhm", "erm", "hm", "hmm"}
 
 
-def has_spurious_hesitation(transcribed_text: str) -> bool:
+def has_spurious_hesitation(transcribed_text: str, input_text: str = "") -> bool:
+    """A hesitation the script did NOT ask for. 2026-09-30: scripted fillers
+    ("um, I mean...") are part of natural dialogue - only flag hesitation
+    sounds beyond the ones written in the input."""
     words = [w.strip(string.punctuation).lower() for w in transcribed_text.split()]
-    return any(w in HESITATION_MARKERS for w in words)
+    written = [w.strip(string.punctuation).lower() for w in input_text.split()]
+    for marker in HESITATION_MARKERS:
+        if words.count(marker) > written.count(marker):
+            return True
+    return False
 
 
 def _normalize_words(text: str) -> list[str]:
     # Keep order and repeated words. A set-based check can report 100% even
     # when a repeated or middle phrase was skipped entirely.
-    return re.findall(r"[a-z0-9]+(?:['][a-z0-9]+)?", text.lower())
+    # 2026-09-30: hesitation sounds are left out of the word match - Whisper
+    # often drops a scripted "um", and an unscripted one is caught separately
+    # by has_spurious_hesitation - so scripted fillers no longer fail a take.
+    return [w for w in re.findall(r"[a-z0-9]+(?:['][a-z0-9]+)?", text.lower()) if w not in HESITATION_MARKERS]
 
 
 def word_overlap_ratio(input_text: str, transcribed_text: str) -> float:
@@ -1760,7 +1795,7 @@ def generate_sentence_with_retry(engine: ChatterboxTTS, sentence: str, reference
         if has_spurious_leading_filler(sentence, transcribed_text):
             print(f"[engine] spurious leading filler, retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             continue
-        if has_spurious_hesitation(transcribed_text):
+        if has_spurious_hesitation(transcribed_text, sentence):
             print(f"[engine] spurious hesitation marker, retrying ({attempt + 1}/{MAX_GENERATION_ATTEMPTS})...")
             continue
 
@@ -1907,7 +1942,7 @@ def synthesize(
             # every time - real pause length between phrases isn't perfectly
             # uniform even from the same speaker
             jittered_pause = max(0.08, base_pause * pause_mult * rng.uniform(0.92, 1.08))
-            all_chunks.append(np.zeros(int(sr * jittered_pause), dtype=np.float32))
+            all_chunks.append(room_tone(int(sr * jittered_pause), sr, rng))
     if not all_chunks:
         return None, None
     audio = np.concatenate(all_chunks)

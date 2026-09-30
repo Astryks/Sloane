@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getDirectorShots, initSchema, resetDirectorShotFrame, setDirectorFilmPlan, setDirectorShotPrompts, takeDirectorRevision, transitionDirectorFilm } from "@/lib/db";
 import { publicJson } from "@/lib/mediaProxy";
-import { compileRedrawPrompt, compileShotPrompt } from "@/lib/director/compile";
+import { compileRedrawPrompt, compileShotPrompt, promptModelFor } from "@/lib/director/compile";
 import { loadOwnedFilm, MAX_REDRAWS, refFlags } from "@/lib/director/filmAccess";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
 
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     await setDirectorFilmPlan(film.id, nextPlan);
     const refs = refFlags(film);
     const nativeAudio = VIDEO_PAYGO_ENGINES[film.engine as VideoEngine]?.supportsNativeAudio ?? false;
-    await setDirectorShotPrompts(shot.id, compileShotPrompt(nextPlan, idx, refs, { nativeAudio }), shot.keyframe_prompt);
+    await setDirectorShotPrompts(shot.id, compileShotPrompt(nextPlan, idx, refs, { nativeAudio, model: promptModelFor(film.engine) }), shot.keyframe_prompt);
     // Redraw from the current frame when there is one, so only the requested change moves.
     const redrawPrompt = compileRedrawPrompt(nextPlan, idx, refs, instruction, !!shot.keyframe_url);
     await resetDirectorShotFrame(shot.id, redrawPrompt, shot.keyframe_url);

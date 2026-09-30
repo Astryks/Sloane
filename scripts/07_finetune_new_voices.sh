@@ -17,6 +17,19 @@
 # original curated clips, so expect more clips and proportionally more time.
 set -euo pipefail
 
+# PAUSED 2026-09-30 (realism pass, see docs/voice-lora-recipe.md). This recipe
+# resized the text vocab to 2454 and retrained text_emb/text_head
+# (lora_modules_to_save) for 10 epochs on podcast audio whose transcripts had
+# the "um"s and restarts removed. That teaches the model to read clean text in
+# a flattened voice and is a likely cause of the "robotic" Lucy voices.
+# Use scripts/12_finetune_expressive_lora.py instead. To re-run this legacy
+# recipe anyway (e.g. to reproduce an old voice), set LUCY_ALLOW_LEGACY_LORA=1.
+if [ "${LUCY_ALLOW_LEGACY_LORA:-0}" != "1" ]; then
+  echo "07_finetune_new_voices.sh is paused - use scripts/12_finetune_expressive_lora.py (see docs/voice-lora-recipe.md)." >&2
+  echo "Set LUCY_ALLOW_LEGACY_LORA=1 to run the legacy recipe anyway." >&2
+  exit 2
+fi
+
 BASE_TOOLKIT=/workspace/sloane/chatterbox-finetuning
 PROJECT_ROOT=/workspace/sloane
 VOICES=(voice_mia voice_dave)

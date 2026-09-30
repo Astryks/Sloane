@@ -50,7 +50,32 @@ export type DirectorShot = {
   durationSeconds: number;
   /** Coverage (2026-09-30): which camera setup films this shot, e.g. "master", "single:Liam", "two:Jess+Liam". */
   setup?: string;
+  // ---- Director JSON (2026-09-30 realism pass; all optional, older plans fall back) ----
+  /** EVERY cast member visible in frame (exact names), so nobody vanishes or changes between cuts. */
+  visible?: string[];
+  /** Physical blocking: who stands where, what the hands do, one prop interaction. */
+  blocking?: string;
+  /** Where the speaker looks ("at Liam, camera-left of lens", "straight into the lens"). */
+  eyeline?: string;
+  /** How the line is said: a subtext verb + pace/volume ("testing him, slow then clipped, low"). */
+  delivery?: string;
+  /** How each silent person in frame reacts. */
+  listeners?: Array<{ name: string; reaction: string }>;
+  /** Room tone for this shot's location ("HVAC hum, distant traffic 40 floors down"). */
+  ambience?: string;
+  /** Motivated sound effects (1-2). */
+  sfx?: string[];
+  /** Continuity to hold from the previous shot: wardrobe, props, positions, light. */
+  keep?: string[];
+  /** Vertex seed for this shot, stored so a retake can reproduce or vary it. */
+  seed?: number;
+  /** Index of the earlier shot this one continues (same place and people) - its keep list carries over. */
+  continuityFrom?: number;
+  /** A hero shot (the moment the film hangs on) - eligible for multi-take sampling on Final. */
+  hero?: boolean;
 };
+
+export type FilmQuality = "draft" | "final";
 
 export type DirectorLook = {
   timeOfDay: string;
@@ -97,10 +122,21 @@ export type DirectorPlan = {
   fromPhotos?: boolean;
   /** Coverage (2026-09-30): film like a real crew - a few camera setups, each drawn once and reused. */
   coverage?: boolean;
-  /** 2026-09-30: skip the voice swap and keep the video model's own (more natural) voices. */
+  /**
+   * Keep the video model's own voices (2026-09-30). Default TRUE since the
+   * realism pass: the old voice lock converted Veo's natural speech onto a
+   * synthetic target (a TTS render or a looped Veo clip) and was the main
+   * reason voices sounded robotic. `false` = the customer opted into the
+   * voice lock, which now only runs for cast members with a real uploaded
+   * voice recording (see voiceLockRequested / CastPerson.voiceSampleUrl).
+   */
   modelVoices?: boolean;
   /** 2026-09-30: one continuous take - every shot starts on the previous shot's last frame (vlogs, walk-and-talks). */
   chain?: boolean;
+  /** Draft = 720p on the chosen tier (today's behaviour); Final = 1080p on the GA model (see videoQuality.ts for who may use it). */
+  quality?: FilmQuality;
+  /** The scene's room tone, used when a shot has no ambience of its own. */
+  roomTone?: string;
   title: string;
   logline: string;
   goal: DirectorGoal; // what the user is really trying to do - drives the structure
@@ -114,6 +150,21 @@ export type DirectorPlan = {
   product: string; // "" if no product
   shots: DirectorShot[];
 };
+
+/** A fresh Vertex seed (uint32) - stored per shot so retakes can reproduce or vary a take. */
+export function newShotSeed(): number {
+  return Math.floor(Math.random() * 4294967296);
+}
+
+/** Gives every shot without a seed a fresh one. */
+export function withShotSeeds(plan: DirectorPlan): DirectorPlan {
+  return { ...plan, shots: plan.shots.map((s) => (s.seed === undefined ? { ...s, seed: newShotSeed() } : s)) };
+}
+
+/** True only when the customer explicitly opted into the voice lock (older plans without the field keep the model's voices). */
+export function voiceLockRequested(plan: Pick<DirectorPlan, "modelVoices">): boolean {
+  return plan.modelVoices === false;
+}
 
 export type PlanInputs = {
   idea: string;
@@ -218,6 +269,67 @@ export function parseScriptShots(idea: string): Array<{ action: string; dialogue
   });
 }
 
+// ---- fallback people, lines and blocking (2026-09-30) ----
+// The rules planner used to copy the idea into every shot with no speaker,
+// no line and no blocking, and an empty character bible - so the compiler
+// decided there were no people and wrote "No people, no hands, no faces" for
+// a two-man office scene. Now it finds who is in the idea, gives each person
+// shot physical blocking and gives the film at least one short line.
+
+const NOT_NAMES = new Set(
+  "A An The This That These Those It Its I We You He She They My Our Your His Her Their In On At By For From With Without Into Over Under After Before When While Then And But Or So If As Of To Make Create Show Film Video Ad Advert Commercial Scene Shot Short Story Reel TikTok Instagram YouTube Shorts UGC CEO CFO CTO Mr Mrs Ms Dr Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September October November December New York London Paris Tokyo Sydney Manhattan Brooklyn Google Microsoft Amazon Apple".split(
+    " ",
+  ),
+);
+
+/** Named people in the idea: saved cast first, then capitalised names ("Lawrence Neilson", "Liam"). */
+export function peopleInIdea(idea: string, cast: PlanInputs["cast"] = []): string[] {
+  const out: string[] = cast.map((c) => c.name.trim()).filter(Boolean);
+  const quoted = idea.replace(/"[^"]*"|“[^”]*”/g, " ");
+  for (const m of quoted.matchAll(/\b([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\b/g)) {
+    const [firstName, lastName] = [m[1], m[2]];
+    if (NOT_NAMES.has(firstName)) continue;
+    const full = lastName && !NOT_NAMES.has(lastName) ? `${firstName} ${lastName}` : firstName;
+    if (!out.some((n) => n.split(" ")[0] === firstName)) out.push(full);
+    if (out.length >= 3) break;
+  }
+  return out.slice(0, 3);
+}
+
+/** Lines written in the idea: "quoted words" or NAME: line. */
+function linesInIdea(idea: string): Array<{ speaker: string; words: string }> {
+  const out: Array<{ speaker: string; words: string }> = [];
+  for (const m of idea.matchAll(/^\s*([A-Z][A-Za-z]{1,20}):\s*(.{3,240})$/gm)) out.push({ speaker: m[1][0] + m[1].slice(1).toLowerCase(), words: m[2].trim() });
+  if (!out.length) for (const m of idea.matchAll(/"([^"]{3,240})"|“([^”]{3,240})”/g)) out.push({ speaker: "", words: (m[1] ?? m[2]).trim() });
+  return out;
+}
+
+const FALLBACK_LINE: Record<ProductionStyleId, string> = {
+  cinematic: "We need to talk.",
+  commercial: "Okay, you have to see this.",
+  ugc: "Okay, so I have to tell you about this.",
+  documentary: "Let me show you how this works.",
+  music_video: "",
+};
+
+function fallbackBlocking(who: string, other: string | undefined, i: number, style: ProductionStyleId): string {
+  if (style === "ugc") {
+    return [
+      `${who} holds the phone at arm's length, talking straight into the lens, free hand gesturing`,
+      `${who} points the phone at the thing, one hand showing it up close`,
+      `${who} turns the phone back to their face, leans in, a small honest shrug`,
+    ][i % 3];
+  }
+  const target = other ? `at ${other}` : "just past the camera";
+  return [
+    `${who} walks into the room and stops, looking ${target}, hands relaxed at their sides`,
+    `${who} leans in slightly, one hand resting on the table, eyes ${target}`,
+    `${who} pauses, glances down, then back up ${target}`,
+    `${who} shifts their weight and folds their arms, holding the look`,
+    `${who} turns away toward the window, hands in pockets`,
+  ][i % 5];
+}
+
 export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   const idea = inputs.idea.trim();
   const scripted = parseScriptShots(idea);
@@ -227,19 +339,31 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   const dir = EMOTIONS[emotion];
   const seconds = secondsFor(style, emotion);
   const tmpl = TEMPLATES[style];
+  const people = peopleInIdea(idea, inputs.cast);
+  const lines = scripted.length ? [] : linesInIdea(idea);
+  const hasPeople = people.length > 0 || !!inputs.hasCharacterPhoto || /\b(man|woman|guy|girl|person|people|he|she|they|ceo|broker|founder|host|presenter|customer|couple|friends?)\b/i.test(idea);
+  if (hasPeople && !scripted.length && !lines.length && FALLBACK_LINE[style]) lines.push({ speaker: "", words: FALLBACK_LINE[style] });
+  const shortIdea = idea.split(/\s+/).slice(0, 24).join(" ");
   const shots: DirectorShot[] = Array.from({ length: count }, (_, i) => {
     const t = tmpl[i % tmpl.length];
     const sc = scripted[i];
+    const line = lines[i];
+    const who = people.length ? (line?.speaker && people.find((p) => p.split(" ")[0].toLowerCase() === line.speaker.toLowerCase())) || people[i % people.length] : hasPeople ? (style === "ugc" ? "The creator" : "The lead") : "";
+    const other = people.find((p) => p !== who);
+    const speaker = sc?.speaker ?? (line ? line.speaker || who : "");
+    const blocking = !sc && who && t.size !== "insert" ? fallbackBlocking(who, other, i, style) : "";
     return {
       ...t,
       setting: "",
       lighting: "",
-      action: sc ? sc.action || t.beat : i === 0 ? idea : `${idea} - ${t.beat}`,
+      action: sc ? sc.action || t.beat : i === 0 ? idea : `${shortIdea} - ${t.beat}`,
       expression: sc?.speaker ? dir.expression : scripted.length ? "" : dir.expression,
-      dialogue: sc?.dialogue ?? "",
-      speaker: sc?.speaker ?? "",
+      dialogue: sc?.dialogue ?? line?.words ?? "",
+      speaker,
       sound: soundFor(style, emotion),
       durationSeconds: seconds,
+      ...(blocking ? { blocking } : {}),
+      ...(people.length && t.size !== "insert" ? { visible: [who, ...(other && t.size !== "close_up" && t.size !== "extreme_close_up" ? [other] : [])].filter(Boolean) } : {}),
     };
   });
   return sanitizePlan(
@@ -251,7 +375,11 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
       emotion,
       aspectRatio: inputs.aspectRatio && inputs.aspectRatio !== "auto" ? inputs.aspectRatio : PRODUCTION_STYLES[style].aspectRatio,
       look: { ...DEFAULT_LOOK[style], palette: `${DEFAULT_LOOK[style].palette}; ${dir.colour}` },
-      character: inputs.hasCharacterPhoto ? "the exact person from the character reference photo" : "",
+      character: people.length
+        ? people.map((n) => `${n}: ${inputs.cast?.find((c) => c.name === n)?.description ?? ""}`.replace(/:\s*$/, "")).join("; ")
+        : inputs.hasCharacterPhoto
+          ? "the exact person from the character reference photo"
+          : "",
       wardrobe: "",
       location: inputs.hasLocationPhoto ? "the exact location from the location reference photo" : "",
       product: inputs.hasProductPhoto ? "the exact product from the product reference photo" : "",
@@ -261,15 +389,55 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   );
 }
 
-// A spoken line sets the shot's length (~2.6 words a second + a beat), so a
-// short line isn't stretched over 8 seconds - that reads as slow motion.
-function fitToDialogue(dialogue: string, planned: number): number {
-  const words = dialogue.trim() ? dialogue.trim().split(/\s+/).length : 0;
+// A spoken line sets the shot's length: the time to say it (~2.5 words a
+// second) plus a beat before and after (2026-09-30). A short line isn't
+// stretched over 8 seconds (reads as slow motion), and a longer planned shot
+// keeps up to ~2.5s of extra room for a reaction. The old formula clamped
+// every shot to 4-8s, which squeezed long lines; engines snap to their own
+// allowed lengths later (Veo 4/6/8s, Seedance 2.x up to 15s).
+export function durationForLine(dialogue: string, planned: number): number {
+  const words = dialogue.replace(/\([^)]*\)/g, " ").trim() ? dialogue.replace(/\([^)]*\)/g, " ").trim().split(/\s+/).length : 0;
   if (!words) return planned;
-  return Math.min(8, Math.max(4, Math.ceil(words / 2.6 + 1.5)));
+  const beat = words <= 6 ? 1.5 : words <= 14 ? 2 : 2.5;
+  const needed = Math.ceil(words / 2.5 + beat);
+  return Math.min(15, Math.max(3, needed, Math.min(planned, needed + 2)));
 }
 
 // ---- validation ------------------------------------------------------------
+
+const textList = (v: unknown, maxItems: number, maxLen: number): string[] =>
+  (Array.isArray(v) ? v : []).map((x) => clampText(x, maxLen)).filter(Boolean).slice(0, maxItems);
+
+/** The optional director-JSON fields of one shot, validated (2026-09-30). */
+function directorFields(s: Record<string, unknown>): Partial<DirectorShot> {
+  const out: Partial<DirectorShot> = {};
+  const visible = textList(s.visible, 4, 60);
+  if (visible.length) out.visible = visible;
+  const blocking = clampText(s.blocking, 300);
+  if (blocking) out.blocking = blocking;
+  const eyeline = clampText(s.eyeline, 120);
+  if (eyeline) out.eyeline = eyeline;
+  const delivery = clampText(s.delivery, 120);
+  if (delivery) out.delivery = delivery;
+  const listeners = (Array.isArray(s.listeners) ? s.listeners : [])
+    .map((l) => (l && typeof l === "object" ? (l as Record<string, unknown>) : {}))
+    .map((l) => ({ name: clampText(l.name, 60), reaction: clampText(l.reaction, 120) }))
+    .filter((l) => l.name && l.reaction)
+    .slice(0, 3);
+  if (listeners.length) out.listeners = listeners;
+  const ambience = clampText(s.ambience, 160);
+  if (ambience) out.ambience = ambience;
+  const sfx = textList(s.sfx, 3, 60);
+  if (sfx.length) out.sfx = sfx;
+  const keep = textList(s.keep, 6, 100);
+  if (keep.length) out.keep = keep;
+  const seed = Number(s.seed);
+  if (Number.isInteger(seed) && seed >= 0 && seed <= 4294967295) out.seed = seed;
+  const from = Number(s.continuityFrom ?? (s.continuity as Record<string, unknown> | undefined)?.from_shot);
+  if (Number.isInteger(from) && from >= 0 && from < 12) out.continuityFrom = from;
+  if (s.hero === true) out.hero = true;
+  return out;
+}
 
 export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): DirectorPlan {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -283,7 +451,11 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
   const want = Math.min(MAX_SHOTS, Math.max(MIN_SHOTS, inputs.shotCount ?? (shotsRaw.length || DEFAULT_SHOTS)));
   // No person in the film (e.g. a pure product ad): never invent a human
   // micro-expression - the video model would add a person to perform it.
-  const hasPerson = !!clampText(r.character, 400) || !!inputs.hasCharacterPhoto;
+  const hasPerson =
+    !!clampText(r.character, 400) ||
+    !!inputs.hasCharacterPhoto ||
+    !!inputs.cast?.length ||
+    shotsRaw.some((x) => !!x && typeof x === "object" && (!!clampText((x as Record<string, unknown>).dialogue, 240) || !!clampText((x as Record<string, unknown>).speaker, 60)));
   const shots: DirectorShot[] = [];
   for (let i = 0; i < want; i++) {
     const s = (shotsRaw[i] && typeof shotsRaw[i] === "object" ? shotsRaw[i] : {}) as Record<string, unknown>;
@@ -301,8 +473,9 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       dialogue: clampText(s.dialogue, 240),
       speaker: clampText(s.speaker, 60),
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
-      durationSeconds: fitToDialogue(clampText(s.dialogue, 240), Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds),
+      durationSeconds: durationForLine(clampText(s.dialogue, 240), Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds),
       ...(typeof s.setup === "string" && s.setup.trim() ? { setup: clampText(s.setup, 120) } : {}),
+      ...directorFields(s),
     });
   }
   const aspect =
@@ -327,8 +500,10 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
     },
     ...(r.fromPhotos === true ? { fromPhotos: true } : {}),
     ...(typeof r.coverage === "boolean" ? { coverage: r.coverage } : {}),
-    ...(r.modelVoices === true ? { modelVoices: true } : {}),
+    modelVoices: r.modelVoices !== false,
     ...(typeof r.chain === "boolean" ? { chain: r.chain } : {}),
+    ...(r.quality === "final" ? { quality: "final" as const } : {}),
+    ...(clampText(r.roomTone, 200) ? { roomTone: clampText(r.roomTone, 200) } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),
     location: clampText(r.location, 300),
@@ -350,7 +525,10 @@ function menu(): string {
   ].join("\n");
 }
 
-export const PLANNER_SYSTEM = `You are Lucy, a film director and cinematographer. Turn a short idea into a shot-by-shot plan for AI video models.
+// 2026-09-30 realism pass: a director + script-supervisor prompt that returns
+// the per-shot director JSON (who is visible, blocking, eyeline, delivery,
+// listeners, room tone, SFX, continuity) the per-model formatters need.
+export const PLANNER_SYSTEM = `You are Lucy, a film director and script supervisor. You break an idea into shots a real crew could shoot, for AI video models that film one shot at a time.
 
 First work out what the person is really trying to achieve and plan the film to achieve it for them - set "goal":
 - "sell": they have a product/service/app to sell. Structure: scroll-stopping hook -> the problem or desire -> the product solving it (product clearly visible) -> proof or payoff -> clear call to action.
@@ -359,24 +537,40 @@ First work out what the person is really trying to achieve and plan the film to 
 - "promote": an event, launch, place or brand vibe. Structure: intrigue -> the highlights -> when/where or the brand moment.
 - "entertain": comedy, music, pure vibe. Structure: set up -> escalate -> punchline or peak.
 
-Then decide the production style even from a simple prompt: a product "review", "unboxing", "testimonial", "TikTok" or talking to camera is "ugc" (vertical 9:16, phone, handheld, real person, casual spoken lines); an "ad"/"commercial"/brand spot is "commercial" (glossy, fast, product hero); a story, mood or scene is "cinematic"; singing/dancing/performance is "music_video"; real-life observation is "documentary".
+Then decide the production style even from a simple prompt: a product "review", "unboxing", "testimonial", "TikTok", "vlog" or talking to camera is "ugc" (vertical 9:16, look.format "phone", handheld, real person, casual spoken lines); an "ad"/"commercial"/brand spot is "commercial"; a story, mood or scene is "cinematic"; singing/dancing/performance is "music_video"; real-life observation is "documentary".
 
-Rules:
+Shot rules:
 - Use ONLY ids from the menu for style, emotion, size, angle and move.
-- Exactly ONE camera move per shot, chosen for what the shot needs: dolly in (slow_push_in) to focus on what a character is saying or realising; dolly out (dolly_out_reveal) ONLY when the background is worth revealing; tracking_follow / side_tracking / leading_shot when the character is moving; over_the_shoulder for conversations; locked_off to let a performance land. Vary shot sizes and angles so the edit has coverage (wide -> medium -> close-up, a side profile, an insert).
-- It must feel like ONE film, not random clips: one "look" (grade/film stock, palette family, camera character) for the whole film. Lighting MAY change between scenes when the setting changes (indoor vs outdoor, day vs night) - put that in each shot's "setting" and "lighting" - but it must stay motivated and inside the same grade and palette family, and shots in the same place keep the same lighting.
-- Describe the character once, specifically (age, build, 2-3 distinguishing features, hair) in "character"; clothing in "wardrobe". Never name real people, celebrities or famous fictional characters - describe an original person instead. No brand names unless the user gave them.
-- "action": what physically happens, in plain visual language. "expression": a physical micro-expression (a swallow, a glance down), never just the feeling's name.
-- "dialogue": short spoken lines only where they fit (UGC and ads usually speak; cinematic often silent). Max ~20 words per shot. Original lines only - unless the user gives a script.
-- SCRIPTS: if the idea contains a script or dialogue (lines in quotes, or "NAME: line"), keep EVERY line word for word, in the same order, spread across the shots (one or two lines per shot, each shot long enough to say them), with the right speaker named in "action" (e.g. "Victor, leaning back, says:"). Never invent, cut, reorder or reword lines. Put stage directions into action, camera and expression.
-- "speaker": the exact name of whoever says that shot's dialogue (even if they're off screen), "" if nobody speaks.
-- CAST: if named cast members are given, use their exact names in "character" (one short description each, separated by "; ") and name who is in frame in every shot's "action". Never rename them.
-- durationSeconds per shot: commercial 2-4, ugc 4-6, cinematic 5-8, music_video 2-4, documentary 5-8.
-- If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression" and every "dialogue" empty, never describe faces, hands or people in "action", and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
+- ONE camera instruction per shot: static (locked_off), one move, or handheld. Never two moves. Dolly in (slow_push_in) to land a line or a realisation; over_the_shoulder for conversations; tracking/leading moves only when someone walks. Stay on one side of the action (180-degree rule) so eyelines match across cuts.
+- Dialogue: at most ONE spoken line per shot, about 20 words or fewer (people speak ~2.5 words a second and the shot needs a beat before and after). A long speech becomes several shots. Write natural speech: contractions, and a filler ("um", "look,", "I mean") or a false start where a real person would use one. Numbers as words.
+- "speaker": exact name of whoever says the line, even off screen; "" if nobody speaks.
+- "delivery": HOW the line is said - a subtext verb plus pace/volume ("testing him, slow then clipped, low"), never just an adjective.
+- "blocking": physical and specific - who stands or sits where, what the hands do, one prop interaction. Hands rest apart on something or hold a prop; avoid clasped, interlocked or steepled fingers (video models melt them).
+- "eyeline": where the speaker looks ("at Liam, just left of the lens"; "straight into the lens" only for selfie/UGC).
+- "visible": the exact names of EVERY cast member in frame, including a foreground shoulder in an over-the-shoulder shot. Nobody appears or vanishes between shots unless they walk in or out on screen.
+- "listeners": for each silent person in frame, a small physical reaction ("swallows, holds the stare").
+- "keep": continuity to hold from the previous shot - each visible person's wardrobe item that is easy to lose (tie pattern, blazer colour, glasses), props, positions, the light.
+- "continuityFrom": the index (0-based) of the earlier shot this one continues in the same place, if any - its props, positions and light carry over.
+- Speaking shots: frame the speaker so the face is clearly readable (medium close-up or closer, frontal to three-quarter, face at least a fifth of the frame) - wides, backs and profiles are for listening and silent beats.
+- "hero": true on the ONE shot the film hangs on (the reveal, the punchline); omit it everywhere else.
+- "expression": one physical tell (a swallow, a glance down), never the feeling's name.
+- Sound: "roomTone" once for the scene (the real sound of the place, e.g. "air-conditioning hum, distant traffic far below"); per shot "ambience" if the place changes, and "sfx" = 1-2 motivated sounds (a chair creak, a door latch). No music unless the idea asks for it or it is diegetic; leave "sound" for anything else.
+- durationSeconds: the time to say the line (words / 2.5) plus a 1.5-2.5 second beat; shots without a line: commercial 2-4, ugc 3-6, cinematic 4-8, music_video 2-4, documentary 5-8.
+
+UGC / selfie vlog pattern: phone at arm's length (handheld_selfie), the person talks straight into the lens, shots of 3-10 seconds, a walk-and-talk, and a location change every few shots (car -> street -> kitchen) with the same outfit.
+
+People:
+- Describe each person once in "character" ("Name: age, build, 2-3 distinguishing features, hair, and a short voice description - e.g. low husky British voice"), separated by "; ". Clothing in "wardrobe" as "Name: items; Name: items" - it is repeated in every shot, so be specific (colour, pattern).
+- CAST: if named cast members are given, they have reference photos - use their exact names and never rename them. Do not re-describe their faces; add voice and wardrobe only.
+- Never name real people, celebrities or famous fictional characters. No camera, lens or film-stock brand names, no "cinematic 8K", no brand names unless the user gave them, no on-screen text.
+- SCRIPTS: if the idea contains a script or dialogue (lines in quotes, or "NAME: line"), keep EVERY line word for word, in the same order, one line per shot (split a long line at a sentence break across two shots), with the right "speaker". Never invent, cut, reorder or reword scripted lines. Put stage directions into blocking, delivery and expression.
+- If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression", "visible" and every "dialogue" empty, never describe faces, hands or people, and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
 - If a character/product/location photo is provided, refer to it as "the exact person/product/location from the reference photo" and only add details that don't contradict it.
 
+Before answering, check: every line fits its duration, one move per shot, every speaker has a voice description, every person in frame is in "visible", wardrobe is specific.
+
 Reply with JSON only:
-{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":""},"character":"","wardrobe":"","location":"","product":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","action":"","expression":"","dialogue":"","speaker":"","sound":"","durationSeconds":6}]}
+{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","visible":[""],"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"continuityFrom":0,"hero":false,"sound":"","durationSeconds":6}]}
 
 Menu:
 ${menu()}`;

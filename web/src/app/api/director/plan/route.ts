@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { initSchema } from "@/lib/db";
 import { publicJson } from "@/lib/mediaProxy";
 import { planFilm } from "@/lib/director/planner.server";
+import { ALL_CAMERA_FORMATS, type CameraFormatId } from "@/lib/director/plan";
 import { ALL_STYLE_IDS, type ProductionStyleId } from "@/lib/director/filmScience";
 import { underPlanCap } from "../_shared";
 
@@ -39,6 +40,12 @@ export async function POST(req: NextRequest) {
         keyLight: String(lk.keyLight ?? plan.look.keyLight).slice(0, 200),
         palette: String(lk.palette ?? plan.look.palette).slice(0, 200),
         grade: String(lk.grade).slice(0, 200),
+        // Keep the camera format (phone / 16mm / 35mm...) - dropping it turned UGC films into 35mm film (2026-09-30).
+        ...(ALL_CAMERA_FORMATS.includes(lk.format as CameraFormatId)
+          ? { format: lk.format as CameraFormatId }
+          : plan.look.format
+            ? { format: plan.look.format }
+            : {}),
       };
     }
     return publicJson({ plan, source });

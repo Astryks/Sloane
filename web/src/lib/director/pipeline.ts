@@ -28,6 +28,7 @@ import {
   releaseDirectorFilm,
   setDirectorFilmCast,
   setDirectorFilmRefs,
+  setDirectorShotTakes,
   setDirectorShotVoice,
   updateDirectorFilm,
   updateDirectorShot,
@@ -35,11 +36,12 @@ import {
   type DirectorShotRow,
 } from "../db";
 import { getFalJobResult, getFalJobStatus, submitFalJob, IMAGE_EDIT_ENDPOINT, TEXT_TO_IMAGE_ENDPOINT } from "../fal";
-import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
+import { editableModelArkInput, getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
-import type { DirectorPlan } from "./plan";
+import { voiceLockRequested, type DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
-import { MODELARK_ENDPOINT_PREFIX, getModelArkApiKey } from "../modelArk";
+import { isVertexEndpoint } from "../vertexVeo";
+import { MODELARK_ENDPOINT_PREFIX, getModelArkApiKey, getSeedanceModelId } from "../modelArk";
 import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt, type CastPerson } from "./refs";
 import type { DirectorShot } from "./plan";
 import { refFlags } from "./filmAccess";
@@ -195,33 +197,20 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
 }
 
 /** The people in this shot (speaker first) and the set: one photo each, max 3. */
-function shotIngredients(film: DirectorFilmRow, plan: DirectorPlan, idx: number): string[] {
-  const shot = plan.shots[idx];
-  if (!shot) return [];
-  const people = film.refs.people ?? [];
-  const text = `${shot.action} ${shot.expression}`.toLowerCase();
-  const inShot = people.filter((p) => {
-    const first = p.name.split(/\s+/)[0].toLowerCase();
-    const speaks = (shot.speaker || "").toLowerCase().startsWith(first) && !/off[- ]?screen/i.test(shot.dialogue);
-    return speaks || text.includes(first);
-  });
-  inShot.sort((a, b) => Number((b.name.split(/\s+/)[0].toLowerCase() === (shot.speaker || "").split(/\s+/)[0].toLowerCase())) - Number((a.name.split(/\s+/)[0].toLowerCase() === (shot.speaker || "").split(/\s+/)[0].toLowerCase())));
-  const location = refList(film.refs, "location")[0];
-  const out = [...inShot.slice(0, location ? 2 : 3).map((p) => p.photos[0]).filter(Boolean), ...(location ? [location] : [])];
-  return out.length ? out : [];
-}
-
 /** Films one approved shot from its frame (or from text if the frame failed). */
 const TTS_PREFIX = "tts:";
 
 /** The spoken words + the speaker's Lucy voice, if this shot's speaker has one. */
-function voiceFirstLine(film: DirectorFilmRow, plan: DirectorPlan, idx: number): { speaker: string; voiceId: string; words: string; delivery: string } | null {
+function voiceFirstLine(film: DirectorFilmRow, plan: DirectorPlan, idx: number): { speaker: string; voiceId?: string; sampleUrl?: string; words: string; delivery: string } | null {
   const shot = plan.shots[idx];
   const words = shot?.dialogue.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
   if (!shot || !words) return null;
   const who = speakerOf(shot, film.refs.people ?? []);
   const person = who >= 0 ? film.refs.people?.[who] : undefined;
   const delivery = [...shot.dialogue.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(", ") || shot.expression;
+  // 2026-09-30: the customer's own consented recording (Chatterbox-Turbo,
+  // zero-shot) wins over a Lucy preset voice.
+  if (person?.voiceSampleUrl) return { speaker: person.name, sampleUrl: person.voiceSampleUrl, words, delivery };
   return person?.voiceId ? { speaker: person.name, voiceId: person.voiceId, words, delivery } : null;
 }
 
@@ -267,61 +256,139 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   const engine = film.engine as VideoEngine;
   try {
     if (!shot.video_request_id || shot.video_request_id.startsWith(TTS_PREFIX)) {
-      // Veo 3.1 "ingredients" (2026-09-29): straight from the real cast and set
-      // photos (who's in this shot + the set, max 3) instead of a drawn first
-      // frame - Google's recommended way to keep dialogue scenes consistent,
-      // and it skips the too-clean drawn still.
-      const ingredients = plan.fromPhotos && !plan.coverage && !chainFrame && engine === "veo31" ? shotIngredients(film, plan, shot.idx) : [];
+      // Draft / Final is decided first: Final moves Veo onto the GA model, which
+      // also takes reference images.
+      let final = false;
+      let owner = false;
+      if (plan.quality === "final") {
+        const { finalAllowed } = await import("./videoQuality");
+        const { getUserById } = await import("../db");
+        const { isOwner } = await import("../owner");
+        owner = isOwner(await getUserById(film.user_id));
+        final = finalAllowed(engine, owner);
+      }
+      // Veo 3.1 "ingredients" (2026-09-29, automatic since 2026-09-30): dialogue
+      // shots in scenes with 2+ cast members who have photos film from the
+      // faces of the people in the shot + the set (max 3, 8s) instead of only
+      // a drawn first frame - Google's recommended way to hold identity and
+      // wardrobe across cuts. GA Veo 3.1 only (veo31, or Final), never Lite,
+      // never on a continuous take. Falls back to the still if refused.
+      const { pickIngredients, wantsIngredients, INGREDIENT_SECONDS } = await import("./ingredients");
+      const supportsRefs = engine === "veo31" || final;
+      const ingredients = wantsIngredients({ plan, idx: shot.idx, people: film.refs.people, chained: !!chainFrame, supportsRefs })
+        ? pickIngredients(plan, shot.idx, film.refs.people, { keyframe: shot.keyframe_url, location: refList(film.refs, "location")[0] })
+        : [];
       const imageUrl = chainFrame ?? (ingredients.length ? null : (shot.keyframe_url ?? null));
       let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
       // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
       // seedance-1-0-pro-250528 - 1.5 pro is retired - free tokens on our BytePlus account), the
       // owner's Seedance films run there directly; customers are unaffected.
-      const ownerModel = process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim() || "seedance-1-0-pro-250528";
+      // 2026-09-30: Seedance 1.0 makes no sound and takes no reference audio, so
+      // it is wrong for dialogue. DIRECTOR_OWNER_SEEDANCE_2=1 moves the owner's
+      // Seedance films onto the configured 2.x model (BYTEPLUS_SEEDANCE_20_MODEL)
+      // - off by default because 1.0 runs on free tokens and 2.x is billed.
+      const ownerModel =
+        process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim() ||
+        (process.env.DIRECTOR_OWNER_SEEDANCE_2 === "1" ? getSeedanceModelId("seedance") : "seedance-1-0-pro-250528");
       if (engine === "seedance" && ownerModel && getModelArkApiKey()) {
         const { getUserById } = await import("../db");
         const { isOwner } = await import("../owner");
         if (isOwner(await getUserById(film.user_id))) endpoint = `${MODELARK_ENDPOINT_PREFIX}${ownerModel}`;
       }
+      // Draft / Final (2026-09-30): Final = 1080p on the GA Veo 3.1 model,
+      // only where allowed (owner, or veo31 with DIRECTOR_FINAL_FOR_VEO31=1).
+      if (final) endpoint = (await import("./videoQuality")).FINAL_ENDPOINT;
+      // Seedance 2.x multimodal references (off unless DIRECTOR_SEEDANCE_REFS=1):
+      // cast photos + set as Image 1..n instead of a drawn first frame.
+      const { pickLabelledRefs, wantsSeedanceRefs, SEEDANCE_REF_MAX } = await import("./ingredients");
+      const seedanceRefs = wantsSeedanceRefs(endpoint, !!chainFrame)
+        ? pickLabelledRefs(plan, shot.idx, film.refs.people, { keyframe: shot.keyframe_url, location: refList(film.refs, "location")[0] }, SEEDANCE_REF_MAX)
+        : [];
       const d = plan.shots[shot.idx]?.durationSeconds ?? null;
-      // Rebuild the prompt from the (possibly edited) plan with the current
-      // compiler, so fixes like naming the speaker apply to films that were
-      // planned earlier too. Falls back to the stored prompt.
       const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio || endpoint.startsWith(MODELARK_ENDPOINT_PREFIX);
       let prompt = shot.prompt;
-      try {
-        const { compileShotPrompt } = await import("./compile");
-        if (plan.shots[shot.idx]) prompt = compileShotPrompt(plan, shot.idx, refFlags(film), { nativeAudio });
-      } catch (err) {
-        console.error("[director] prompt rebuild failed - using the stored prompt", err);
-      }
       // Voice first (2026-09-30), Seedance 2.x only: record the line in the
       // speaker's Lucy voice, then Seedance acts and lip-syncs to that audio
       // (its reference_audio input) - natural lips AND the same voice every
       // shot, no voice swap afterwards.
-      const voiceFirst = endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) && /seedance-2/.test(endpoint) && !plan.modelVoices ? voiceFirstLine(film, plan, shot.idx) : null;
+      // Opt-in only (the customer turned the voice lock on and picked a Lucy voice for the speaker).
+      const voiceFirst = endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) && /seedance-2/.test(endpoint) && voiceLockRequested(plan) ? voiceFirstLine(film, plan, shot.idx) : null;
       let lineAudio: string | null = null;
       if (voiceFirst) {
         if (!shot.video_request_id) {
-          const { planLineActing } = await import("./voiceActing");
+          const { planLineActing, heuristicActing } = await import("./voiceActing");
           const person = (film.refs.people ?? []).find((p) => p.name === voiceFirst.speaker);
-          const segments = await planLineActing({ speaker: voiceFirst.speaker, character: person?.description, line: voiceFirst.words, delivery: voiceFirst.delivery, context: `${plan.logline} ${plan.shots[shot.idx]?.action ?? ""}` }).catch(() => []);
-          const r = await voiceCall("/start", { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, segments, seconds: Math.min(15, Math.max(4, d ?? 8)) }).catch(() => null);
+          const acted = await planLineActing({ speaker: voiceFirst.speaker, character: person?.description, line: voiceFirst.words, delivery: voiceFirst.delivery, context: `${plan.logline} ${plan.shots[shot.idx]?.action ?? ""}` }).catch(() => []);
+          const segments = acted.length ? acted : heuristicActing(voiceFirst.words, voiceFirst.delivery);
+          const seconds = Math.min(15, Math.max(4, d ?? 8));
+          const r = await voiceCall(
+            "/start",
+            voiceFirst.sampleUrl
+              ? { mode: "speak", reference_url: voiceFirst.sampleUrl, segments, seconds, engine: process.env.DIRECTOR_TTS_ENGINE === "standard" ? "standard" : "turbo" }
+              : { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, segments, seconds },
+          ).catch(() => null);
           if (r && typeof r.call_id === "string") return updateDirectorShot(shot.id, { video_request_id: `${TTS_PREFIX}${r.call_id}` });
         } else {
           const r = await voiceCall(`/result?call_id=${encodeURIComponent(shot.video_request_id.slice(TTS_PREFIX.length))}`).catch(() => null);
           if (r?.status === "running") return updateDirectorShot(shot.id, {});
           if (r?.status === "done" && typeof r.url === "string") lineAudio = r.url;
         }
-        if (lineAudio) prompt = `${voiceFirst.speaker} says: "${voiceFirst.words}" - the voice, timing, pauses and delivery follow Audio 1 exactly, lips perfectly in sync with Audio 1. ${prompt}`;
       }
-      if (chainFrame) prompt = `ONE CONTINUOUS TAKE: this shot starts exactly on the given first frame, which is the last frame of the previous shot - same camera, same moment, same people in the same places; carry straight on with no cut and no reset. ${prompt}`;
-      const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
+      // Rebuild the prompt from the (possibly edited) plan with the current
+      // formatter for the model actually being called (Veo / Seedance 2.x /
+      // Kling 3), so fixes apply to films planned earlier too. The continuous-
+      // take and Audio 1 notes are clauses inside the budget now, not prefixes
+      // stacked on top. Falls back to the stored prompt.
+      try {
+        if (plan.shots[shot.idx]) {
+          const { formatShotPrompt, promptModelFor, visibleCast } = await import("./formatters");
+          const { shortenIfNeeded } = await import("./shortenPrompt.server");
+          const { withContinuity } = await import("./shotSchema");
+          const formatted = formatShotPrompt(withContinuity(plan), shot.idx, refFlags(film), {
+            nativeAudio,
+            model: promptModelFor(engine, endpoint),
+            continuousTake: !!chainFrame,
+            firstFrame: !!imageUrl,
+            audioRef: !!lineAudio,
+            ingredients: ingredients.length > 0,
+            referenceNames: seedanceRefs.length ? seedanceRefs.map((r) => r.label) : undefined,
+          });
+          prompt = await shortenIfNeeded(formatted, visibleCast(plan, plan.shots[shot.idx]));
+        }
+      } catch (err) {
+        console.error("[director] prompt rebuild failed - using the stored prompt", err);
+      }
+      // Editable form for direct Seedance too, so the reference audio / images / duration set below reach ModelArk.
+      const input = editableModelArkInput(buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio), prompt, imageUrl);
       if (lineAudio) input.reference_audio_urls = [lineAudio];
+      // Director Vertex jobs (2026-09-30): ask Veo to use our prompt as written,
+      // keep captions/watermarks/score out via negativePrompt, and pin the
+      // shot's stored seed so a retake can reproduce it. sampleCount stays 1.
+      const draftResolution = typeof input.resolution === "string" ? input.resolution : null;
+      if (isVertexEndpoint(endpoint)) {
+        const { veoNegativePrompt } = await import("./formatters");
+        input.enhance_prompt = false;
+        input.negative_prompt = veoNegativePrompt(plan);
+        const seed = plan.shots[shot.idx]?.seed;
+        if (typeof seed === "number") input.seed = seed;
+        if (final) {
+          input.resolution = "1080p";
+          // Hero takes + lossless master: owner-only / opt-in (see videoQuality.ts).
+          const { heroSamples, losslessMaster } = await import("./videoQuality");
+          const samples = heroSamples(plan, shot.idx, { final, owner });
+          if (samples > 1) input.sample_count = samples;
+          if (losslessMaster(final)) input.compression_quality = "lossless";
+        }
+      }
+      if (seedanceRefs.length) {
+        delete input.image_url;
+        input.image_urls = seedanceRefs.map((r) => r.url);
+        input.image_role = "reference_image";
+      }
       if (ingredients.length) {
         delete input.image_url;
         input.reference_image_urls = ingredients;
-        input.duration = "8s"; // Veo's reference-to-video only makes 8s clips
+        input.duration = INGREDIENT_SECONDS; // Veo's reference-to-video only makes 8s clips
       }
       // The reseller path caps Seedance at 4s; direct 1.5 pro takes 4-12s with sound.
       if (endpoint.startsWith(MODELARK_ENDPOINT_PREFIX)) {
@@ -330,7 +397,26 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       }
       let requestId: string;
       try {
-        requestId = await submitVideoInferenceJob(endpoint, input);
+        try {
+          requestId = await submitVideoInferenceJob(endpoint, input);
+        } catch (err) {
+          // Final refused (e.g. 1080p not allowed for this length/input)? Film the draft instead of failing the shot.
+          if (!final) throw err;
+          console.error("[director] final quality refused - filming at draft settings", shot.id, err);
+          final = false;
+          endpoint = resolveVideoEndpoint(engine, !!imageUrl);
+          if (ingredients.length && engine !== "veo31") {
+            // Reference images only run on the GA model - film from the still instead.
+            delete input.reference_image_urls;
+            if (shot.keyframe_url) input.image_url = shot.keyframe_url;
+            endpoint = resolveVideoEndpoint(engine, !!shot.keyframe_url);
+          }
+          if (draftResolution) input.resolution = draftResolution;
+          else delete input.resolution;
+          delete input.sample_count;
+          delete input.compression_quality;
+          requestId = await submitVideoInferenceJob(endpoint, input);
+        }
       } catch (err) {
         // Photo references refused (e.g. a safety check on real-looking faces)? Film from the drawn frame instead.
         if (ingredients.length && shot.keyframe_url) {
@@ -353,7 +439,10 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
     const endpoint = shot.video_endpoint as string;
     const status = await getVideoInferenceStatus(endpoint, shot.video_request_id);
     if (status === "COMPLETED") {
-      const url = getVideoInferenceUrl(await getVideoInferenceResult(endpoint, shot.video_request_id));
+      const result = await getVideoInferenceResult(endpoint, shot.video_request_id);
+      const url = getVideoInferenceUrl(result);
+      const takes = (result as { takes?: unknown }).takes;
+      if (url && Array.isArray(takes) && takes.length > 1) await setDirectorShotTakes(shot.id, takes.filter((t): t is string => typeof t === "string"));
       if (url) return updateDirectorShot(shot.id, { status: "completed", video_url: url });
       if (await failDirectorShot(shot.id, "Model returned no video")) await refundVideoCredit(film.user_id, shot.price_cents);
       return;
@@ -372,12 +461,14 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   }
 }
 
-// ---- Voice lock (2026-09-29) ----
-// scripts/director_voice.py on Modal: one voice per character across every
-// shot. Each person's reference is a Lucy voice they picked, or else the
-// speech from the first shot they talk in (that shot keeps its audio); every
-// other shot they speak in is re-voiced to it with timing kept, so lip-sync
-// is untouched. Any failure just keeps Veo's original audio.
+// ---- Voice lock (2026-09-29, opt-in since the 2026-09-30 realism pass) ----
+// scripts/director_voice.py on Modal: re-voices each shot a person speaks in
+// to ONE reference with timing kept. The reference must be a real recording
+// the customer uploaded (CastPerson.voiceSampleUrl). It used to be a Lucy
+// preset TTS render or the Veo speech of the person's first shot; converting
+// natural speech onto a synthetic target stripped breath and texture and was
+// the main "robotic voice" cause, so both are gone. Off by default
+// (plan.modelVoices); any failure keeps the model's original audio.
 const VOICE_URL = process.env.MODAL_DIRECTOR_VOICE_URL || "https://mehta-siddharth09--director-voice-web.modal.run";
 
 export async function voiceCall(path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -422,9 +513,14 @@ export function speakerOf(shot: DirectorShot | undefined, people: CastPerson[]):
   return people.length === 1 ? 0 : -1;
 }
 
+/** Whether this film runs the voice lock at all: opted in, and someone has a real voice recording. */
+export function voiceLockActive(plan: DirectorPlan, people: CastPerson[] | undefined): boolean {
+  return voiceLockRequested(plan) && !!people?.some((p) => !!p.voiceSampleUrl);
+}
+
 async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
   const people = film.refs.people ?? [];
-  if (!people.length || plan.modelVoices || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
+  if (!voiceLockActive(plan, people) || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
   if (!(await claimDirectorFilm(film.id))) return;
   try {
     const refs = JSON.parse(JSON.stringify(film.refs)) as typeof film.refs;
@@ -436,60 +532,150 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
       .filter((x) => x.who >= 0)
       .sort((a, b) => a.s.idx - b.s.idx);
 
-    // 1. Everyone who speaks gets a locked reference voice.
+    // 1. The reference is the person's own uploaded recording - nobody else is re-voiced.
     for (const i of new Set(speaking.map((x) => x.who))) {
       const p = cast[i];
-      if (p.voiceRef) continue;
-      if (!p.voiceJob) {
-        const firstShot = speaking.find((x) => x.who === i)!.s;
-        const body = p.voiceId ? { mode: "preset", voice_id: p.voiceId } : { mode: "extract", video_url: firstShot.video_url };
-        const r = await voiceCall("/start", body);
-        if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
-        p.voiceJob = r.call_id;
-        if (!p.voiceId) p.voiceShot = firstShot.idx;
-      } else {
-        const r = await voiceCall(`/result?call_id=${encodeURIComponent(p.voiceJob)}`);
-        if (r.status === "done" && typeof r.url === "string") p.voiceRef = r.url;
-        else if (r.status === "failed") {
-          console.error("[director] voice reference failed", p.name, r.error);
-          p.voiceRef = "none";
-        }
-      }
+      const want = p.voiceSampleUrl || "none";
+      if (p.voiceRef === want) continue;
+      p.voiceRef = want;
+      delete p.voiceJob;
+      delete p.voiceShot;
       refsChanged = true;
     }
     if (refsChanged) await setDirectorFilmRefs(film.id, refs);
 
-    // 2. Re-voice every other shot each person speaks in.
-    let pending = cast.some((p, i) => speaking.some((x) => x.who === i) && !p.voiceRef);
+    // 2. Re-voice every other shot each person speaks in. Optional (off by
+    //    default): a free sync check first, and a lip-synced "dub" from the
+    //    person's real recording when the take is out of sync or the words
+    //    are wrong - see lipsync.ts.
+    const { LIPSYNC_ENDPOINTS, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, takeIsGood, voiceState } = await import("./lipsync");
+    const lip = lipsyncProvider();
+    const check = syncCheckEnabled();
+    let pending = false;
     for (const { s, who } of speaking) {
       const p = cast[who];
-      if (!p.voiceRef) continue;
-      if (p.voiceRef === "none" || p.voiceShot === s.idx || s.voice_request_id === "done" || s.voice_request_id === "failed") continue;
-      // 2026-09-30: a failed swap is retried once (the retry is marked "r:"),
-      // and the voice service now rejects a result whose pitch doesn't match
-      // the speaker (e.g. a woman's voice left on Lawrence's line).
-      if (!s.voice_request_id || s.voice_request_id === "retry") {
-        const r = await voiceCall("/start", { mode: "convert", video_url: s.raw_video_url ?? s.video_url, reference_url: p.voiceRef });
+      if (!p.voiceRef || p.voiceRef === "none") continue;
+      const st = parseVoiceState(s.voice_request_id);
+      if (st.kind === "done" || st.kind === "failed") continue;
+      const original = s.raw_video_url ?? s.video_url ?? "";
+      const script = voiceFirstLine(film, plan, s.idx)?.words ?? plan.shots[s.idx]?.dialogue ?? "";
+      const startConvert = async (retry: boolean) => {
+        const r = await voiceCall("/start", { mode: "convert", video_url: original, reference_url: p.voiceRef });
         if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
-        await setDirectorShotVoice(s.id, { voice_request_id: `${s.voice_request_id === "retry" ? "r:" : ""}${r.call_id}` });
+        await setDirectorShotVoice(s.id, { voice_request_id: `${retry ? "r:" : ""}${r.call_id}` });
+      };
+      const startDub = async () => {
+        const { planLineActing, heuristicActing } = await import("./voiceActing");
+        const shot = plan.shots[s.idx];
+        const delivery = shot?.delivery || shot?.expression || "";
+        const acted = await planLineActing({ speaker: p.name, character: p.description, line: script, delivery, context: `${plan.logline} ${shot?.action ?? ""}` }).catch(() => []);
+        const r = await voiceCall("/start", {
+          mode: "speak",
+          reference_url: p.voiceSampleUrl,
+          segments: acted.length ? acted : heuristicActing(script, delivery),
+          seconds: shot?.durationSeconds ?? 8,
+          engine: process.env.DIRECTOR_TTS_ENGINE === "standard" ? "standard" : "turbo",
+        });
+        if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
+        await setDirectorShotVoice(s.id, { voice_request_id: voiceState.dub(r.call_id) });
+      };
+      const keepOriginal = async (why: string, detail?: unknown) => {
+        console.error(`[director] ${why} - keeping the take as filmed`, s.id, detail ?? "");
+        await setDirectorShotVoice(s.id, { voice_request_id: "done" });
+      };
+      const canDub = !!lip && !!p.voiceSampleUrl && !!script.trim();
+
+      if (st.kind === "new" || st.kind === "retry") {
+        if (st.kind === "new" && check) {
+          const r = await voiceCall("/start", { mode: "sync_check", video_url: original });
+          if (typeof r.call_id === "string") {
+            await setDirectorShotVoice(s.id, { voice_request_id: voiceState.check(r.call_id) });
+            pending = true;
+            continue;
+          }
+        }
+        // 2026-09-30: a failed swap is retried once (the retry is marked "r:"),
+        // and the voice service rejects a result whose pitch doesn't match
+        // the speaker (e.g. a woman's voice left on Lawrence's line).
+        await startConvert(st.kind === "retry");
         pending = true;
         continue;
       }
-      const job = s.voice_request_id.replace(/^r:/, "");
-      const r = await voiceCall(`/result?call_id=${encodeURIComponent(job)}`);
-      if (r.status === "done" && typeof r.url === "string") {
-        await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: s.raw_video_url ?? s.video_url ?? undefined, video_url: r.url });
-      } else if (r.status === "failed") {
-        if (!s.voice_request_id.startsWith("r:")) {
-          console.error("[director] re-voice failed - retrying once", s.id, r.error);
-          await setDirectorShotVoice(s.id, { voice_request_id: "retry" });
+      if (st.kind === "lipsync") {
+        // fal job, not a Modal call.
+        const endpoint = LIPSYNC_ENDPOINTS[st.provider];
+        const status = await getFalJobStatus(endpoint, st.id);
+        if (status === "COMPLETED") {
+          const url = getVideoInferenceUrl(await getFalJobResult(endpoint, st.id));
+          if (!url) await keepOriginal("lip-sync returned no video");
+          else {
+            const m = await voiceCall("/start", { mode: "mix", video_url: url, bed_video_url: original });
+            if (typeof m.call_id !== "string") await keepOriginal("mix gave no job");
+            else await setDirectorShotVoice(s.id, { voice_request_id: voiceState.mix(m.call_id) });
+          }
+        } else if (status === "FAILED") await keepOriginal("lip-sync failed");
+        pending = true;
+        continue;
+      }
+      const r = await voiceCall(`/result?call_id=${encodeURIComponent(st.id)}`).catch((err) => ({ status: "failed", error: String(err) }) as Record<string, unknown>);
+      if (r.status !== "done" && r.status !== "failed") {
+        pending = true;
+        continue;
+      }
+      switch (st.kind) {
+        case "check": {
+          const good = r.status === "failed" || takeIsGood(r.result as Record<string, unknown> | undefined, script);
+          if (!good && canDub) await startDub();
+          else await startConvert(false);
           pending = true;
-        } else {
-          console.error("[director] re-voice failed twice - flagging the shot", s.id, r.error);
-          await setDirectorShotVoice(s.id, { voice_request_id: "failed" });
-          await updateDirectorShot(s.id, { error: "voice" });
+          break;
         }
-      } else pending = true;
+        case "dub": {
+          if (r.status === "done" && typeof r.url === "string" && lip) {
+            const job = await submitFalJob(LIPSYNC_ENDPOINTS[lip], lipsyncInput(lip, original, r.url));
+            await setDirectorShotVoice(s.id, { voice_request_id: voiceState.lipsync(lip, job) });
+            pending = true;
+          } else await keepOriginal("dub line failed", r.error);
+          break;
+        }
+        case "mix": {
+          if (r.status === "done" && typeof r.url === "string") {
+            if (check) {
+              const v = await voiceCall("/start", { mode: "sync_check", video_url: r.url });
+              // Park the dubbed take in video_url; verify decides whether it stays.
+              await setDirectorShotVoice(s.id, { voice_request_id: typeof v.call_id === "string" ? voiceState.verify(v.call_id) : "done", raw_video_url: original, video_url: r.url });
+              pending = typeof v.call_id === "string";
+            } else await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: original, video_url: r.url });
+          } else await keepOriginal("mix failed", r.error);
+          break;
+        }
+        case "verify": {
+          const result = r.result as Record<string, unknown> | undefined;
+          if (r.status === "done" && result?.ok === false) {
+            await setDirectorShotVoice(s.id, { voice_request_id: "done", video_url: original });
+            console.error("[director] dubbed take still out of sync - restored the take as filmed", s.id, result);
+          } else await setDirectorShotVoice(s.id, { voice_request_id: "done" });
+          break;
+        }
+        case "convert": {
+          if (r.status === "done" && typeof r.url === "string") {
+            await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: original || undefined, video_url: r.url });
+          } else if (!st.retry) {
+            console.error("[director] re-voice failed - retrying once", s.id, r.error);
+            await setDirectorShotVoice(s.id, { voice_request_id: "retry" });
+            pending = true;
+          } else if (canDub) {
+            console.error("[director] re-voice failed twice - dubbing from the real recording instead", s.id, r.error);
+            await startDub();
+            pending = true;
+          } else {
+            console.error("[director] re-voice failed twice - flagging the shot", s.id, r.error);
+            await setDirectorShotVoice(s.id, { voice_request_id: "failed" });
+            await updateDirectorShot(s.id, { error: "voice" });
+          }
+          break;
+        }
+      }
     }
     if (pending) return releaseDirectorFilm(film.id);
     return updateDirectorFilm(film.id, { status: "stitching" });
@@ -500,16 +686,29 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
   }
 }
 
-async function advanceStitch(film: DirectorFilmRow, shots: DirectorShotRow[]) {
+/**
+ * What the stitcher needs to edit the sound (2026-09-30): each finished shot's
+ * planned length (8s reference-to-video clips for a short line get trimmed)
+ * and its location (one room-tone bed per location, crossfaded on a change).
+ */
+export function stitchShots(plan: DirectorPlan, done: DirectorShotRow[]): Array<{ seconds: number; location: string }> {
+  return done.map((s) => {
+    const shot = plan.shots[s.idx];
+    return { seconds: shot?.durationSeconds ?? 0, location: (shot?.setting || plan.location || "main").slice(0, 80) };
+  });
+}
+
+async function advanceStitch(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
   if (!(await claimDirectorFilm(film.id))) return;
-  const done = shots.filter((s) => s.status === "completed" && s.video_url).map((s) => s.video_url as string);
+  const doneRows = shots.filter((s) => s.status === "completed" && s.video_url).sort((a, b) => a.idx - b.idx);
+  const done = doneRows.map((s) => s.video_url as string);
   try {
     if (done.length === 0) return updateDirectorFilm(film.id, { status: "failed", error: "No shots could be rendered - you have been refunded." });
     if (done.length === 1) return updateDirectorFilm(film.id, { status: "completed", final_video_url: done[0] });
     if (!film.stitch_request_id) {
       if (MODAL_STITCH && process.env.MODAL_SHARED_SECRET) {
         try {
-          const { call_id } = await modalStitch("/start", { method: "POST", body: JSON.stringify({ video_urls: done }) });
+          const { call_id } = await modalStitch("/start", { method: "POST", body: JSON.stringify({ video_urls: done, shots: stitchShots(plan, doneRows) }) });
           if (typeof call_id === "string") return updateDirectorFilm(film.id, { stitch_request_id: `${MODAL_PREFIX}${call_id}` });
         } catch (err) {
           console.error("[director] colour-match stitcher unavailable, using plain merge", err);
@@ -565,8 +764,8 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await Promise.all(shots.map((s) => advanceVideo(film, plan, s, shots)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.status === "completed" || s.status === "failed")) {
-      // Named cast -> lock each person's voice before joining the shots.
-      await updateDirectorFilm(film.id, { status: film.refs.people?.length ? "voicing" : "stitching" });
+      // Voice lock (opt-in, real recordings only) before joining the shots.
+      await updateDirectorFilm(film.id, { status: voiceLockActive(plan, film.refs.people) ? "voicing" : "stitching" });
     }
     return shots;
   }
@@ -574,6 +773,6 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await advanceVoicing(film, plan, shots);
     return getDirectorShots(film.id);
   }
-  if (film.status === "stitching") await advanceStitch(film, shots);
+  if (film.status === "stitching") await advanceStitch(film, plan, shots);
   return getDirectorShots(film.id);
 }

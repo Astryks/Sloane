@@ -29,6 +29,7 @@ import {
 import type { DirectorRecipe } from "./DirectorRecipes";
 import { ScriptHelp } from "./ScriptHelp";
 import { coverageByDefault } from "@/lib/director/coverage";
+import { VOICE_SAMPLE_CONSENT } from "@/lib/director/voiceSample";
 import { CopyClip } from "./CopyClip";
 import { CharacterGuide } from "./CharacterGuide";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
@@ -42,7 +43,7 @@ const GOAL_LABEL: Record<string, string> = {
   entertain: "Entertaining",
 };
 
-type ShotStatus = { idx: number; status: string; keyframeUrl: string | null; videoUrl: string | null; error: string | null };
+type ShotStatus = { idx: number; status: string; keyframeUrl: string | null; videoUrl: string | null; error: string | null; takes?: string[]; takeUrl?: string | null };
 type FilmStatus = {
   status: string;
   error: string | null;
@@ -124,6 +125,21 @@ export function DirectorStudio({
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedCast, setSelectedCast] = useState<CastPick[]>([]);
+  // Real voice recordings per cast id, for the opt-in voice lock (2026-09-30).
+  const [voiceSamples, setVoiceSamples] = useState<Record<string, string>>({});
+  const [voiceConsent, setVoiceConsent] = useState(false);
+  // Draft / Final (2026-09-30): Final (1080p, GA Veo 3.1) only shows where the server allows it.
+  const [finalOk, setFinalOk] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/director/quality?engine=${encodeURIComponent(engine)}`)
+      .then((r) => r.json())
+      .then((j: { final?: boolean }) => live && setFinalOk(!!j.final))
+      .catch(() => live && setFinalOk(false));
+    return () => {
+      live = false;
+    };
+  }, [engine]);
   const [presets, setPresets] = useState<MoviePreset[]>([]);
   const [presetId, setPresetId] = useState<string | null>(null);
   const [movieNotes, setMovieNotes] = useState("");
@@ -402,6 +418,7 @@ export function DirectorStudio({
       form.append("idea", idea);
       form.append("plan", JSON.stringify(plan));
       if (selectedCast.length) form.append("savedCharacterIds", JSON.stringify(selectedCast.map((c) => c.id)));
+      if (plan.modelVoices === false && Object.keys(voiceSamples).length) form.append("voiceSamples", JSON.stringify(voiceSamples));
       form.append("refs", JSON.stringify(refLinks));
       if (opts.auto) form.append("autoApprove", "1");
       const res = await fetch("/api/director/create", { method: "POST", body: form });
@@ -564,6 +581,15 @@ export function DirectorStudio({
       setReviseText((r) => ({ ...r, [`take${i}`]: "" }));
       setFilm((f) => (f ? { ...f, status: "shots", finalVideoUrl: null, shots: f.shots.map((s) => (s.idx === i ? { ...s, status: "keyframe", videoUrl: null, error: null } : s)) } : f));
       setNotice(`Retaking shot ${i + 1} - Lucy will re-join the film when it's done.`);
+      restartPolling();
+    }
+  }
+
+  async function pickTake(i: number, take: number) {
+    const data = await filmAction("use-take", { shotIdx: i, take }, `usetake${i}`);
+    if (data) {
+      setFilm((f) => (f ? { ...f, status: "shots", finalVideoUrl: null } : f));
+      setNotice(`Using take ${take + 1} for shot ${i + 1} - Lucy will re-join the film.`);
       restartPolling();
     }
   }
@@ -813,16 +839,34 @@ export function DirectorStudio({
                   </span>
                 </label>
                 <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
-                  <input type="checkbox" className="mt-0.5" checked={!!plan.modelVoices} onChange={(e) => editPlan({ modelVoices: e.target.checked || undefined })} />
+                  <input type="checkbox" className="mt-0.5" checked={plan.modelVoices !== false} onChange={(e) => editPlan({ modelVoices: e.target.checked })} />
                   <span>
-                    🗣 Keep the video model&apos;s own voices (most natural - describe each voice in the cast, e.g. &quot;deep, calm, husky&quot;). Off = Lucy swaps in each person&apos;s chosen Lucy voice so it never changes between shots.
+                    🗣 Keep the video model&apos;s own voices (recommended - most natural; describe each voice in the cast, e.g. &quot;deep, calm, husky, British&quot;). Off = lock each person to a real recording of their voice that you upload below.
                   </span>
                 </label>
-                {engine === "veo31" && !(plan.coverage ?? coverageByDefault(plan)) && (
+                {finalOk && (
+                  <label className="text-[11px] font-semibold text-muted sm:col-span-2">
+                    Quality
+                    <select className={inputCls} value={plan.quality ?? "draft"} onChange={(e) => editPlan({ quality: e.target.value === "final" ? "final" : undefined })}>
+                      <option value="draft">Draft - 720p, quickest</option>
+                      <option value="final">Final - 1080p on Veo 3.1 (slower)</option>
+                    </select>
+                  </label>
+                )}
+                {plan.modelVoices === false && (
+                  <VoiceSamplePicker
+                    cast={selectedCast}
+                    samples={voiceSamples}
+                    setSamples={setVoiceSamples}
+                    consent={voiceConsent}
+                    setConsent={setVoiceConsent}
+                  />
+                )}
+                {engine === "veo31" && (
                   <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
                     <input type="checkbox" className="mt-0.5" checked={!!plan.fromPhotos} onChange={(e) => editPlan({ fromPhotos: e.target.checked || undefined })} />
                     <span>
-                      🧩 Film straight from my cast &amp; set photos (no drawn first frame) - Veo builds each shot from the real photos, which often looks more natural. The storyboard is still drawn so you can check the plan.
+                      🧩 Film every shot straight from my cast &amp; set photos (no drawn first frame) - Veo builds each shot from the real photos, which holds faces and clothes steady. Dialogue shots with two or more cast members already do this automatically. The storyboard is still drawn so you can check the plan.
                     </span>
                   </label>
                 )}
@@ -939,6 +983,22 @@ export function DirectorStudio({
                       </div>
                     )}
                     {st?.videoUrl && <video src={st.videoUrl} controls playsInline className="mt-2 w-full rounded-lg" />}
+                    {film && (film.status === "completed" || film.status === "failed") && (st?.takes?.length ?? 0) > 1 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className="font-semibold text-muted">Takes:</span>
+                        {st!.takes!.map((t, k) => (
+                          <button
+                            key={t}
+                            type="button"
+                            disabled={!!busy || t === st?.takeUrl}
+                            onClick={() => pickTake(i, k)}
+                            className={`rounded-full border px-2 py-0.5 font-bold ${t === st?.takeUrl ? "border-purple bg-purple text-white" : "border-purple text-purple"} disabled:opacity-70`}
+                          >
+                            {busy === `usetake${i}` ? "…" : `Take ${k + 1}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {film && (film.status === "completed" || film.status === "failed") && (
                       <div className="mt-2 flex gap-2">
                         <input
@@ -1071,12 +1131,82 @@ export function DirectorStudio({
   );
 }
 
+/**
+ * Opt-in voice lock (2026-09-30): one real recording per cast member, with
+ * consent. Nobody without a recording is re-voiced - their shots keep the
+ * video model's own voice.
+ */
+function VoiceSamplePicker({
+  cast,
+  samples,
+  setSamples,
+  consent,
+  setConsent,
+}: {
+  cast: CastPick[];
+  samples: Record<string, string>;
+  setSamples: (fn: (prev: Record<string, string>) => Record<string, string>) => void;
+  consent: boolean;
+  setConsent: (v: boolean) => void;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  async function upload(c: CastPick, file: File) {
+    setErr(null);
+    setBusyId(c.id);
+    try {
+      const form = new FormData();
+      form.append("audio", file);
+      form.append("speaker", c.name);
+      form.append("consent", VOICE_SAMPLE_CONSENT);
+      const res = await fetch("/api/director/voice-sample", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok || typeof data.url !== "string") throw new Error(data.error || "Upload failed");
+      setSamples((prev) => ({ ...prev, [c.id]: data.url }));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+  if (!cast.length) {
+    return <p className="text-[11px] text-muted sm:col-span-2">Add people from Your cast first - the voice lock needs a named person and a recording of their voice.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-cream p-3 text-[11px] text-muted sm:col-span-2">
+      <p>
+        Upload 30-120 seconds of each person talking naturally (a quiet room, expressive, not read in a flat voice). Only people with a recording are re-voiced; everyone else keeps the model&apos;s voice.
+      </p>
+      <label className="flex items-start gap-2 font-semibold">
+        <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+        <span>{VOICE_SAMPLE_CONSENT}</span>
+      </label>
+      {cast.map((c) => (
+        <label key={c.id} className="flex flex-wrap items-center gap-2 font-semibold">
+          <span className="min-w-24">{c.name}</span>
+          <input
+            type="file"
+            accept="audio/*"
+            disabled={!consent || busyId === c.id}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void upload(c, f);
+            }}
+          />
+          {busyId === c.id ? <span>Uploading…</span> : samples[c.id] ? <span>✓ recording added</span> : null}
+        </label>
+      ))}
+      {err && <p className="text-coral-dark">{err}</p>}
+    </div>
+  );
+}
+
 function PromptPreview({ plan, engine, photos, castCount }: { plan: DirectorPlan; engine: VideoEngine; photos: RefPhotos; castCount: number }) {
   const [prompts, setPrompts] = useState<string[]>([]);
   useEffect(() => {
-    import("@/lib/director/compile").then(({ compileShotPrompt }) => {
+    import("@/lib/director/formatters").then(({ compileShotPrompt, promptModelFor }) => {
       const refs = { character: photos.character.length > 0 || castCount > 0, product: photos.product.length > 0, location: photos.location.length > 0 };
-      setPrompts(plan.shots.map((_, i) => compileShotPrompt(plan, i, refs, { nativeAudio: VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio })));
+      setPrompts(plan.shots.map((_, i) => compileShotPrompt(plan, i, refs, { nativeAudio: VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio, model: promptModelFor(engine) })));
     });
   }, [plan, engine, photos, castCount]);
   return (
