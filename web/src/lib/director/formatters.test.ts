@@ -1,7 +1,7 @@
 // Unit tests for the per-model shot formatters (2026-09-30). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CAMERA_FAMILIES, WORD_BUDGET, countWords, fitClauses, formatShotPrompt, hasPerson, promptModelFor, steadyHands, visibleCast, type PromptModel } from "./formatters";
+import { CAMERA_FAMILIES, WORD_BUDGET, castLookOf, countWords, fitClauses, formatShotPrompt, hasPerson, promptModelFor, steadyHands, visibleCast, type PromptModel } from "./formatters";
 import { compileAnchorPrompt, compileKeyframePrompt, compileSetupKeyframePrompt } from "./compile";
 import { assignSetups } from "./coverage";
 import type { DirectorPlan } from "./plan";
@@ -23,7 +23,7 @@ const each = (fn: (name: string, plan: DirectorPlan, i: number, model: PromptMod
 test("every prompt fits its model's word budget", () => {
   each((name, plan, i, model) => {
     const f = formatShotPrompt(plan, i, REFS, { nativeAudio: true, model });
-    assert.ok(f.words <= WORD_BUDGET[model].max, `${name} ${model} shot ${i + 1}: ${f.words} words`);
+    assert.ok(f.words <= f.budget && f.budget <= WORD_BUDGET[model].max + 20, `${name} ${model} shot ${i + 1}: ${f.words} words`);
     assert.ok(f.words >= 40, `${name} ${model} shot ${i + 1}: suspiciously short (${f.words})`);
     assert.equal(f.words, countWords(f.prompt));
   });
@@ -94,7 +94,8 @@ test("every visible cast member is named, with wardrobe, in every shot (Neilson 
         for (const person of vis) {
           assert.ok(f.prompt.includes(person.split(" ")[0]), `${name} ${model} shot ${i + 1}: ${person} missing`);
         }
-        assert.match(f.prompt, /[Ww]ardrobe/, `${name} ${model} shot ${i + 1}: wardrobe missing`);
+        // 2026-09-30: each person's fixed look + wardrobe string, verbatim.
+        for (const person of vis) assert.ok(f.prompt.includes(castLookOf(plan, person)), `${name} ${model} shot ${i + 1}: ${person}'s look string missing`);
         if (vis.some((v) => v.startsWith("Liam"))) assert.match(f.prompt, /polka dots/, `${name} ${model} shot ${i + 1}: Liam's tie pattern missing`);
         if (vis.includes("Dawn")) assert.match(f.prompt, /grey tailored blazer/, `${name} ${model} shot ${i + 1}: Dawn's blazer missing`);
       }
@@ -106,7 +107,7 @@ test("every visible cast member is named, with wardrobe, in every shot (Neilson 
 
 test("silent listeners keep their mouths closed; shots with no line say nobody speaks", () => {
   const plan = assignSetups(neilsonDirectedPlan);
-  assert.match(formatShotPrompt(plan, 0, REFS, { nativeAudio: true, model: "veo" }).prompt, /Liam and Dawn listen without speaking, mouths closed/);
+  assert.match(formatShotPrompt(plan, 0, REFS, { nativeAudio: true, model: "veo" }).prompt, /Liam and Dawn stay silent, mouths closed/);
   assert.match(formatShotPrompt(plan, 7, REFS, { nativeAudio: true, model: "veo" }).prompt, /Nobody speaks/);
   assert.doesNotMatch(formatShotPrompt(plan, 7, REFS, { nativeAudio: false, model: "veo" }).prompt, /Nobody speaks|Ambient noise/);
 });

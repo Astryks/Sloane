@@ -18,10 +18,17 @@ Joins a film's shots in order into one MP4 and makes them read as ONE film:
         next 0.25s fading out under the next shot) wherever a clip was trimmed;
       - clips that run >1.5s past their planned length (8s reference-to-
         video clips for a short line) are trimmed to planned + 0.75s;
+      - coverage grammar (2026-09-30): each shot has a role (speaker /
+        reaction / silent). A reaction shot filmed silent gets the off-screen
+        speaker's recorded line (line_audio_url, in their voice) laid over
+        the listener, with the clip's own sound ducked under it and up to
+        0.75s of the line allowed to spill into the next shot; and when the
+        same person keeps talking over a reaction cutaway, the L-cut tail of
+        their shot runs 1s into it instead of 0.25s;
   * hard picture cuts between shots, like an edit.
 
 Async API so the caller never waits on a serverless timeout:
-  POST /start   {video_urls: [...], shots?: [{seconds, location}]} -> {call_id}
+  POST /start   {video_urls: [...], shots?: [{seconds, location, role, speaker, line_audio_url, line_offset}]} -> {call_id}
   GET  /result?call_id=...               -> {status: "running"} | {status: "done", video_url} | {status: "failed", error}
 Both require `Authorization: Bearer <MODAL_SHARED_SECRET>`.
 
@@ -105,6 +112,26 @@ BED_XFADE_S = 0.4  # location beds crossfade across a change of location
 BED_GAIN = 0.5  # the looped room tone sits ~6 dB under the model's own ambience
 TRIM_SLACK_S = 1.5  # only trim a clip that runs this much past its planned length
 TRIM_KEEP_S = 0.75  # ...and keep this much after the planned length
+L_CUT_REACTION_S = 1.0  # the same speaker carrying on over a reaction cutaway: a longer L-cut
+REACTION_DUCK = 0.35  # a reaction clip's own sound under a laid-in line (~-9 dB)
+LINE_SPILL_S = 0.75  # a laid-in line may run this far into the next shot
+LINE_OFFSET_S = 0.2  # default start of a laid-in line inside the reaction shot
+
+
+def _read_line(url, tmp, i):
+    """A recorded line (any audio/video URL) as float32 [n, 2] at 48k, or None."""
+    import numpy as np
+
+    try:
+        p = os.path.join(tmp, f"line{i}")
+        urllib.request.urlretrieve(url, p)
+        proc = subprocess.run(["ffmpeg", "-v", "error", "-i", p, "-vn", "-f", "f32le", "-ac", "2", "-ar", str(SR), "-"], capture_output=True)
+        if proc.returncode != 0 or not proc.stdout:
+            return None
+        return np.frombuffer(proc.stdout, dtype=np.float32).reshape(-1, 2).copy()
+    except Exception as err:  # noqa: BLE001 - a missing line never fails the film
+        print(f"[stitch] line audio for shot {i} unavailable: {err}")
+        return None
 
 
 def _read_audio(path, seconds):
@@ -198,7 +225,7 @@ def stitch(video_urls, shots=None):
 
         w, h, _, _ = _probe(paths[0])
         ref = _mean_rgb(paths[0])
-        normalized, lengths, audio, tails, tones = [], [], [], [], []
+        normalized, lengths, audio, tails, tones, lines = [], [], [], [], [], []
         for i, p in enumerate(paths):
             _, _, has_audio, dur = _probe(p)
             m = _mean_rgb(p)
@@ -222,15 +249,27 @@ def stitch(video_urls, shots=None):
             # 2026-09-30: NO per-shot loudnorm any more (it pumped each shot's
             # room tone up or down independently); one film-level pass below.
             a, full = _read_audio(p, vlen) if has_audio else (np.zeros((int(round(vlen * SR)), 2), np.float32), np.zeros((0, 2), np.float32))
+            # Reaction shot filmed silent: the off-screen line, in the speaker's
+            # voice, over the listener; the clip's own sound ducked under it.
+            line = None
+            if shots[i].get("role") == "reaction" and shots[i].get("line_audio_url"):
+                line = _read_line(shots[i]["line_audio_url"], tmp, i)
+                if line is not None and len(line):
+                    a = a * REACTION_DUCK
+                    full = full * REACTION_DUCK
+            lines.append(line)
             audio.append(a)
             n0 = len(a)
-            tails.append(full[n0:n0 + int(L_CUT_S * SR)].copy() if keep and len(full) > n0 else None)
+            nxt = shots[i + 1] if i + 1 < len(shots) else {}
+            same_voice = nxt.get("role") == "reaction" and shots[i].get("role") == "speaker" and nxt.get("speaker") and nxt.get("speaker") == shots[i].get("speaker")
+            tail_s = L_CUT_REACTION_S if same_voice else L_CUT_S
+            tails.append(full[n0:n0 + int(tail_s * SR)].copy() if keep and len(full) > n0 else None)
             tones.append(_room_tone_of(full, rng) if has_audio else None)
 
         offsets = [0]
         for L in lengths[:-1]:
             offsets.append(offsets[-1] + int(round(L * SR)))
-        total = offsets[-1] + len(audio[-1]) + int(L_CUT_S * SR)
+        total = offsets[-1] + len(audio[-1]) + int(max(L_CUT_REACTION_S, LINE_SPILL_S) * SR)
         mix = np.zeros((total, 2), np.float32)
         fn = int(FADE_S * SR)
         for i, a in enumerate(audio):
@@ -246,6 +285,16 @@ def stitch(video_urls, shots=None):
                 else:
                     a[-fn:] *= _fade(fn, False)
             mix[offsets[i]: offsets[i] + len(a)] += a[: total - offsets[i]]
+        # Laid-in lines go on top, allowed to spill a little past the cut.
+        for i, line in enumerate(lines):
+            if line is None or not len(line):
+                continue
+            start = offsets[i] + int(round(max(0.0, float(shots[i].get("line_offset") or LINE_OFFSET_S)) * SR))
+            room = max(0, min(total, offsets[i] + len(audio[i]) + int(LINE_SPILL_S * SR)) - start)
+            seg = line[:room].copy()
+            if len(seg) < len(line) and len(seg) > fn:
+                seg[-fn:] *= _fade(fn, False)
+            mix[start: start + len(seg)] += seg
 
         # Per-location room-tone beds from the model's OWN ambience (the
         # quietest seconds of that location's shots), crossfaded where the
@@ -327,11 +376,24 @@ def web():
         if not (isinstance(shots, list) and len(shots) == len(raw) and len(urls) == len(raw)):
             shots = None
         else:
-            shots = [
-                {"seconds": float(x.get("seconds") or 0) if isinstance(x, dict) else 0,
-                 "location": str(x.get("location") or "")[:80] if isinstance(x, dict) else ""}
-                for x in shots[:12]
-            ]
+            def _shot(x):
+                if not isinstance(x, dict):
+                    return {"seconds": 0, "location": ""}
+                out = {"seconds": float(x.get("seconds") or 0), "location": str(x.get("location") or "")[:80]}
+                if x.get("role") in ("speaker", "reaction", "silent"):
+                    out["role"] = x["role"]
+                if isinstance(x.get("speaker"), str):
+                    out["speaker"] = x["speaker"][:40]
+                line = x.get("line_audio_url")
+                if out.get("role") == "reaction" and isinstance(line, str) and line.startswith("https://"):
+                    out["line_audio_url"] = line[:1000]
+                    try:
+                        out["line_offset"] = max(0.0, min(3.0, float(x.get("line_offset") or LINE_OFFSET_S)))
+                    except (TypeError, ValueError):
+                        out["line_offset"] = LINE_OFFSET_S
+                return out
+
+            shots = [_shot(x) for x in shots[:12]]
         call = stitch.spawn(urls, shots)
         return {"call_id": call.object_id}
 

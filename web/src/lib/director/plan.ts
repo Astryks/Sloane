@@ -73,7 +73,21 @@ export type DirectorShot = {
   continuityFrom?: number;
   /** A hero shot (the moment the film hangs on) - eligible for multi-take sampling on Final. */
   hero?: boolean;
+  // ---- Coverage grammar (2026-09-30, grammar.ts) ----
+  /**
+   * A deliberate reaction / listener shot: the speaker is OFF-SCREEN and the
+   * people in frame listen with their mouths closed. Always paired with
+   * setup "reaction:<Name>". Anything else must show the speaker.
+   */
+  offscreenSpeaker?: boolean;
+  /** Screen side of each person in frame (180-degree rule) - always equal to plan.screenSides. */
+  sides?: Record<string, ScreenSide>;
+  /** People in frame who have no reference photo - flagged for the customer, never invented. */
+  missingRefs?: string[];
 };
+
+/** Which side of frame a character holds for the whole scene (180-degree rule). */
+export type ScreenSide = "left" | "right";
 
 export type FilmQuality = "draft" | "final";
 
@@ -137,6 +151,12 @@ export type DirectorPlan = {
   quality?: FilmQuality;
   /** The scene's room tone, used when a shot has no ambience of its own. */
   roomTone?: string;
+  /** 180-degree rule (2026-09-30): each character's screen side for the scene; they look toward the other side. */
+  screenSides?: Record<string, ScreenSide>;
+  /** Each character's fixed look + wardrobe string, repeated verbatim in every prompt they appear in. */
+  castLook?: Record<string, string>;
+  /** People who appear in frame with no reference photo ("add a photo of Dawn..."). */
+  refWarnings?: string[];
   title: string;
   logline: string;
   goal: DirectorGoal; // what the user is really trying to do - drives the structure
@@ -344,14 +364,38 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   const hasPeople = people.length > 0 || !!inputs.hasCharacterPhoto || /\b(man|woman|guy|girl|person|people|he|she|they|ceo|broker|founder|host|presenter|customer|couple|friends?)\b/i.test(idea);
   if (hasPeople && !scripted.length && !lines.length && FALLBACK_LINE[style]) lines.push({ speaker: "", words: FALLBACK_LINE[style] });
   const shortIdea = idea.split(/\s+/).slice(0, 24).join(" ");
+  const byFirst = (n: string | undefined) => (n ? people.find((p) => p.split(" ")[0].toLowerCase() === n.split(" ")[0].toLowerCase()) : undefined);
+  // 2026-09-30 coverage grammar: a scripted conversation between named people
+  // is covered like a film - a wide master, then the camera ON whoever speaks
+  // (over the listener's shoulder), tighter as it goes. The old fallback cycled
+  // through the cast and style templates regardless of the speaker, so the
+  // camera was often on someone else (or on an insert) while a line was said.
+  const spoken = scripted.length ? scripted.filter((x) => x.dialogue).length : lines.length;
+  const conversation = people.length >= 2 && spoken >= 2 && style !== "ugc" && style !== "music_video";
   const shots: DirectorShot[] = Array.from({ length: count }, (_, i) => {
-    const t = tmpl[i % tmpl.length];
     const sc = scripted[i];
     const line = lines[i];
-    const who = people.length ? (line?.speaker && people.find((p) => p.split(" ")[0].toLowerCase() === line.speaker.toLowerCase())) || people[i % people.length] : hasPeople ? (style === "ugc" ? "The creator" : "The lead") : "";
+    const scriptedWho = byFirst(sc?.speaker) ?? byFirst(line?.speaker);
+    const who = people.length ? scriptedWho || people[i % people.length] : hasPeople ? (style === "ugc" ? "The creator" : "The lead") : "";
     const other = people.find((p) => p !== who);
     const speaker = sc?.speaker ?? (line ? line.speaker || who : "");
+    const says = !!(sc?.dialogue ?? line?.words);
+    const t: ShotTemplate = conversation
+      ? i === 0
+        ? { beat: "establish the room and who is where", size: "wide", angle: "eye_level", move: "locked_off" }
+        : says
+          ? { beat: `on ${who.split(" ")[0]} as they speak`, size: i >= Math.ceil((count * 2) / 3) ? "close_up" : "medium_close_up", angle: "eye_level", move: "over_the_shoulder" }
+          : { beat: "the moment plays out", size: "medium", angle: "eye_level", move: "locked_off" }
+      : tmpl[i % tmpl.length];
     const blocking = !sc && who && t.size !== "insert" ? fallbackBlocking(who, other, i, style) : "";
+    const named = people.filter((p) => new RegExp(`\\b${p.split(" ")[0]}\\b`).test(sc?.action ?? ""));
+    const visible = conversation
+      ? i === 0
+        ? people
+        : says
+          ? [who, ...(other ? [other] : [])]
+          : named.length ? named : [who]
+      : [who, ...(other && t.size !== "close_up" && t.size !== "extreme_close_up" ? [other] : [])];
     return {
       ...t,
       setting: "",
@@ -363,7 +407,7 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
       sound: soundFor(style, emotion),
       durationSeconds: seconds,
       ...(blocking ? { blocking } : {}),
-      ...(people.length && t.size !== "insert" ? { visible: [who, ...(other && t.size !== "close_up" && t.size !== "extreme_close_up" ? [other] : [])].filter(Boolean) } : {}),
+      ...(people.length && t.size !== "insert" ? { visible: visible.filter(Boolean) } : {}),
     };
   });
   return sanitizePlan(
@@ -436,7 +480,34 @@ function directorFields(s: Record<string, unknown>): Partial<DirectorShot> {
   const from = Number(s.continuityFrom ?? (s.continuity as Record<string, unknown> | undefined)?.from_shot);
   if (Number.isInteger(from) && from >= 0 && from < 12) out.continuityFrom = from;
   if (s.hero === true) out.hero = true;
+  if (s.offscreenSpeaker === true || s.offscreen_speaker === true) out.offscreenSpeaker = true;
+  const sides = sideMap(s.sides ?? s.screen);
+  if (sides) out.sides = sides;
+  const missing = textList(s.missingRefs, 4, 60);
+  if (missing.length) out.missingRefs = missing;
   return out;
+}
+
+/** {"Lawrence": "left", "Liam": "right"} -> validated (max 4 people). */
+function sideMap(v: unknown): Record<string, ScreenSide> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const out: Record<string, ScreenSide> = {};
+  for (const [k, side] of Object.entries(v as Record<string, unknown>).slice(0, 4)) {
+    const name = clampText(k, 60);
+    if (name && (side === "left" || side === "right")) out[name] = side;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function textMap(v: unknown, maxLen: number): Record<string, string> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, text] of Object.entries(v as Record<string, unknown>).slice(0, 4)) {
+    const name = clampText(k, 60);
+    const t = clampText(text, maxLen);
+    if (name && t) out[name] = t;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): DirectorPlan {
@@ -504,6 +575,9 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
     ...(typeof r.chain === "boolean" ? { chain: r.chain } : {}),
     ...(r.quality === "final" ? { quality: "final" as const } : {}),
     ...(clampText(r.roomTone, 200) ? { roomTone: clampText(r.roomTone, 200) } : {}),
+    ...(sideMap(r.screenSides) ? { screenSides: sideMap(r.screenSides) } : {}),
+    ...(textMap(r.castLook, 160) ? { castLook: textMap(r.castLook, 160) } : {}),
+    ...(textList(r.refWarnings, 6, 200).length ? { refWarnings: textList(r.refWarnings, 6, 200) } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),
     location: clampText(r.location, 300),
@@ -543,7 +617,7 @@ Shot rules:
 - Use ONLY ids from the menu for style, emotion, size, angle and move.
 - ONE camera instruction per shot: static (locked_off), one move, or handheld. Never two moves. Dolly in (slow_push_in) to land a line or a realisation; over_the_shoulder for conversations; tracking/leading moves only when someone walks. Stay on one side of the action (180-degree rule) so eyelines match across cuts.
 - Dialogue: at most ONE spoken line per shot, about 20 words or fewer (people speak ~2.5 words a second and the shot needs a beat before and after). A long speech becomes several shots. Write natural speech: contractions, and a filler ("um", "look,", "I mean") or a false start where a real person would use one. Numbers as words.
-- "speaker": exact name of whoever says the line, even off screen; "" if nobody speaks.
+- "speaker": exact name of whoever says the line (also on a reaction shot, where they are off screen); "" if nobody speaks.
 - "delivery": HOW the line is said - a subtext verb plus pace/volume ("testing him, slow then clipped, low"), never just an adjective.
 - "blocking": physical and specific - who stands or sits where, what the hands do, one prop interaction. Hands rest apart on something or hold a prop; avoid clasped, interlocked or steepled fingers (video models melt them).
 - "eyeline": where the speaker looks ("at Liam, just left of the lens"; "straight into the lens" only for selfie/UGC).
@@ -552,6 +626,15 @@ Shot rules:
 - "keep": continuity to hold from the previous shot - each visible person's wardrobe item that is easy to lose (tie pattern, blazer colour, glasses), props, positions, the light.
 - "continuityFrom": the index (0-based) of the earlier shot this one continues in the same place, if any - its props, positions and light carry over.
 - Speaking shots: frame the speaker so the face is clearly readable (medium close-up or closer, frontal to three-quarter, face at least a fifth of the frame) - wides, backs and profiles are for listening and silent beats.
+
+Coverage grammar (every scene where two or more people talk) - shoot it like a real film crew:
+- The camera is on whoever speaks. The speaker is in frame and facing the camera enough to see their mouth (frontal to three-quarter): a single on them, an over-the-shoulder ON the speaker past the listener's soft shoulder, or a two-shot where the speaker is prominent. Never film the speaker's back, profile or foreground shoulder while they talk, and never film someone else while they talk.
+- The ONLY exception is a deliberate reaction shot: "setup":"reaction:<Listener>", "offscreenSpeaker":true, "visible" = the listener(s) only (never the speaker), plus their "listeners" reaction. The listener does NOT speak or move their lips - mouth closed, listening. Use one at a key beat (a blow lands, a decision, a lie) in any dialogue scene of 4+ lines, usually while the same person keeps talking.
+- "setup" on every shot: "master" | "single:<Name>" (camera on that person; an over-the-shoulder when someone else is in "visible") | "two:<A>+<B>" | "reaction:<Name>".
+- Open every scene (and every change of location) on a wide "master" that shows the geography: who is where, the room, the doors and windows.
+- Then shot / reverse-shot: matching over-the-shoulders or singles on each speaker, same lens and height, alternating as the conversation passes.
+- 180-degree rule: give every character one screen side for the whole scene in "screenSides" ({"Lawrence":"left","Liam":"right"}) and repeat it in every shot's "sides". A character on the left looks right of the lens, a character on the right looks left - write the eyeline that way ("at Liam, just right of the lens").
+- Shot sizes progress with the tension: wide master, then medium / medium close-up coverage, then close-ups for the climax. Never cut between two near-identical setups back to back (same camera, same size) - change the size, cut to the other person, or cut to a reaction.
 - "hero": true on the ONE shot the film hangs on (the reveal, the punchline); omit it everywhere else.
 - "expression": one physical tell (a swallow, a glance down), never the feeling's name.
 - Sound: "roomTone" once for the scene (the real sound of the place, e.g. "air-conditioning hum, distant traffic far below"); per shot "ambience" if the place changes, and "sfx" = 1-2 motivated sounds (a chair creak, a door latch). No music unless the idea asks for it or it is diegetic; leave "sound" for anything else.
@@ -567,10 +650,10 @@ People:
 - If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression", "visible" and every "dialogue" empty, never describe faces, hands or people, and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
 - If a character/product/location photo is provided, refer to it as "the exact person/product/location from the reference photo" and only add details that don't contradict it.
 
-Before answering, check: every line fits its duration, one move per shot, every speaker has a voice description, every person in frame is in "visible", wardrobe is specific.
+Before answering, check: every line fits its duration, one move per shot, every speaker has a voice description, every person in frame is in "visible", wardrobe is specific, the speaker is on camera in every shot that isn't a marked reaction shot, each scene opens on a master, nobody changes screen side, and no two shots in a row share the same setup and size.
 
 Reply with JSON only:
-{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","visible":[""],"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"continuityFrom":0,"hero":false,"sound":"","durationSeconds":6}]}
+{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","screenSides":{"Name":"left|right"},"shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","setup":"master|single:Name|two:A+B|reaction:Name","offscreenSpeaker":false,"visible":[""],"sides":{"Name":"left|right"},"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"continuityFrom":0,"hero":false,"sound":"","durationSeconds":6}]}
 
 Menu:
 ${menu()}`;

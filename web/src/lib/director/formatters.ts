@@ -24,7 +24,7 @@
 
 import { ANGLES, CAMERA_MOVES, SHOT_SIZES, type CameraMoveId, type ShotSizeId } from "./filmScience";
 import type { DirectorPlan, DirectorShot } from "./plan";
-import { onScreen, planCast } from "./coverage";
+import { isReactionShot, onScreen, parseSetup, planCast } from "./coverage";
 
 export type RefFlags = { character: boolean; product: boolean; location: boolean };
 export type PromptModel = "veo" | "seedance2" | "kling3";
@@ -34,6 +34,20 @@ export const WORD_BUDGET: Record<PromptModel, { min: number; max: number }> = {
   seedance2: { min: 50, max: 140 },
   kling3: { min: 50, max: 130 },
 };
+
+/**
+ * The word budget for one shot. Every person in frame carries a fixed look
+ * string repeated verbatim, so a group shot gets 10 extra words per person
+ * beyond two (a three-person master: Veo 130) rather than losing its blocking.
+ */
+export function budgetFor(model: PromptModel, peopleInFrame: number): number {
+  return WORD_BUDGET[model].max + 10 * Math.min(2, Math.max(0, peopleInFrame - 2));
+}
+
+/** Text without its closing punctuation, for joining into a longer sentence. */
+function bare(text: string): string {
+  return text.replace(/[.!?;,\s]+$/, "");
+}
 
 /**
  * Which prompt dialect a video engine / resolved endpoint speaks.
@@ -60,6 +74,12 @@ export type FormatOptions = {
   ingredients?: boolean;
   /** Seedance 2.x reference images, in order ("Liam", "Dawn", "the set") - named as Image 1..n. */
   referenceNames?: string[];
+  /**
+   * Reaction shot whose line is laid in at the stitch from the speaker's own
+   * voice track (2026-09-30): the clip is filmed with nobody speaking, so the
+   * listener never lip-flaps.
+   */
+  lineLaidIn?: boolean;
 };
 
 export type Clause = {
@@ -86,6 +106,8 @@ export type FormattedPrompt = {
   quotedLine: string;
   /** Full untrimmed clauses, for an LLM shorten step. */
   clauses: Clause[];
+  /** The word budget this prompt was fitted to (see budgetFor). */
+  budget: number;
 };
 
 export const countWords = (s: string): number => (s.trim() ? s.trim().split(/\s+/).length : 0);
@@ -134,6 +156,8 @@ export function hasPerson(plan: DirectorPlan, refs: RefFlags): boolean {
 type CastInfo = { name: string; look: string; lookShort: string; voice: string; wardrobe: string; wardrobeShort: string };
 
 const VOICE_PART = /\b(voice|accent|tone|speaks?|spoken|drawl|lisp|timbre|baritone|tenor|soprano|raspy|husky|gravelly)\b/i;
+const CLOTHING_PART = /\b(suit|tie|braces|blazer|jacket|sweater|jumper|shirt|blouse|dress|coat|cardigan|hoodie|scarf|earrings|hat|cap|uniform|skirt|trousers|jeans|vest|waistcoat|t-shirt|tee|overalls|apron|necklace|gown)\b/i;
+const FEATURE_PART = /\b(hair|bob|bald|beard|moustache|mustache|stubble|glasses|freckles|braids?|curls|curly|ponytail|bun|shaved|scar|tattoo|dreadlocks|fringe|grey|gray|silver|blonde|redhead|auburn)\b/i;
 
 /** "Name: description; Name: description" -> per-person look / voice / wardrobe. */
 export function castInfo(plan: DirectorPlan): CastInfo[] {
@@ -145,12 +169,16 @@ export function castInfo(plan: DirectorPlan): CastInfo[] {
     const desc = raw.includes(":") ? raw.slice(raw.indexOf(":") + 1).trim() : "";
     const bits = desc.split(",").map((b) => b.trim()).filter(Boolean);
     const voiceBits = bits.filter((b) => VOICE_PART.test(b));
-    const lookBits = bits.filter((b) => !VOICE_PART.test(b));
     const w = wardrobeParts.find((p) => new RegExp(`^${esc(first(name))}\\b`, "i").test(p));
-    const wardrobe = w ? w.slice(w.indexOf(":") + 1).trim() : wardrobeParts.length === 1 && names.length === 1 ? wardrobeParts[0] : "";
+    let wardrobe = w ? w.slice(w.indexOf(":") + 1).trim() : wardrobeParts.length === 1 && names.length === 1 ? wardrobeParts[0] : "";
+    // 2026-09-30: saved-cast descriptions often carry the clothes ("..., navy
+    // suit, polka-dot tie, ...") and plan.wardrobe is empty - read them from there.
+    const clothesInDesc = !wardrobe ? bits.filter((b) => !VOICE_PART.test(b) && CLOTHING_PART.test(b)) : [];
+    if (clothesInDesc.length) wardrobe = clothesInDesc.join(", ");
+    const lookBits = bits.filter((b) => !VOICE_PART.test(b) && !clothesInDesc.includes(b));
     const wParts = wardrobe.split(",").map((p) => p.trim()).filter(Boolean);
     // The short form keeps the distinctive pieces (suit, tie pattern, braces, blazer) and drops plain shirts/shoes.
-    const distinctive = wParts.filter((p, i) => i === 0 || !/\b(shirt|blouse|trousers|pants|shoes|socks|belt)\b/i.test(p));
+    const distinctive = wParts.filter((p, i) => i === 0 || !/\b(shirt|blouse|trousers|pants|shoes|socks|belt)\b/i.test(p.split(/\s+(?:over|with|under)\s+/i)[0]));
     return {
       name,
       look: clipWords(lookBits.slice(0, 3).join(", "), 12),
@@ -160,6 +188,30 @@ export function castInfo(plan: DirectorPlan): CastInfo[] {
       wardrobeShort: partsWithin(distinctive, 12),
     };
   });
+}
+
+/**
+ * Each character's fixed look + wardrobe string (2026-09-30): the most
+ * recognisable feature (hair etc.) and their distinctive wardrobe, written
+ * VERBATIM into every prompt they appear in so nothing drifts between cuts.
+ */
+export function castLooks(plan: DirectorPlan): Record<string, string> {
+  const out: Record<string, string> = {};
+  const parts = plan.character.split(";").map((p) => p.trim());
+  for (const c of castInfo(plan)) {
+    const raw = parts.find((p) => p.split(":")[0].trim() === c.name) ?? "";
+    const bits = (raw.includes(":") ? raw.slice(raw.indexOf(":") + 1) : "").split(",").map((b) => b.trim()).filter((b) => b && !VOICE_PART.test(b) && !CLOTHING_PART.test(b));
+    const feature = bits.find((b) => FEATURE_PART.test(b)) ?? c.lookShort;
+    const look = [clipWords(feature, 4), c.wardrobeShort].filter(Boolean).join(", ");
+    if (look) out[c.name] = look;
+  }
+  return out;
+}
+
+/** The fixed look string for one person (the plan's stored one wins, so it never changes mid-film). */
+export function castLookOf(plan: DirectorPlan, name: string): string {
+  const stored = plan.castLook ? Object.entries(plan.castLook).find(([k]) => firstLower(k) === firstLower(name))?.[1] : undefined;
+  return stored ?? castLooks(plan)[name] ?? "";
 }
 
 /** Whole comma-separated parts, as many as fit in `max` words (never cuts a part in half unless it is the only one). */
@@ -232,7 +284,7 @@ export function lineOf(plan: DirectorPlan, shot: DirectorShot, shotIndex = -1): 
   const cast = planCast(plan);
   const speaker = cast.find((c) => shot.speaker && firstLower(c) === firstLower(shot.speaker)) ?? shot.speaker.trim();
   const inFrame = !speaker || visibleCast(plan, shot).some((v) => firstLower(v) === firstLower(speaker));
-  const offScreen = OFF_SCREEN.test(`${shot.dialogue} ${shot.action}`) || (!!speaker && cast.length > 1 && !inFrame);
+  const offScreen = shot.offscreenSpeaker === true || OFF_SCREEN.test(`${shot.dialogue} ${shot.action}`) || (!!speaker && cast.length > 1 && !inFrame);
   return { speaker, words, delivery: clipWords(delivery, 14), offScreen };
 }
 
@@ -291,6 +343,22 @@ export const CAMERA_FAMILIES: Record<string, RegExp> = {
 
 function framingLine(plan: DirectorPlan, shot: DirectorShot, person: boolean): string {
   const cast = planCast(plan);
+  // Coverage grammar (2026-09-30): the setup the grammar pass chose decides
+  // the framing, so the camera is always on whoever speaks (or on the
+  // listener in a marked reaction shot).
+  const g = parseSetup(shot.setup);
+  if (plan.screenSides && g.kind) {
+    const size = SIZE_SHORT[shot.size].toLowerCase();
+    const subject = first(g.who[0] ?? "");
+    if (g.kind === "master") return `${shot.size === "extreme_wide" ? "Extreme wide" : "Wide"} master shot showing the whole room and where everyone is, from the side of the room, eye level, 35mm`;
+    if (g.kind === "reaction") return `Reaction shot on ${subject}, ${size}, 85mm, shallow focus`;
+    if (g.kind === "single") {
+      const other = visibleCast(plan, shot).find((v) => firstLower(v) !== firstLower(subject));
+      return other ? `Over-the-shoulder ${size} on ${subject} past ${first(other)}'s soft shoulder, 85mm, shallow focus` : `Clean single on ${subject}, ${size}, 85mm, shallow focus`;
+    }
+    const speaking = shot.dialogue.trim() && g.who.find((w) => firstLower(w) === firstLower(shot.speaker));
+    return `Two-shot of ${g.who.map(first).join(" and ")}, 50mm, both sharp${speaking ? `, ${first(speaking)} prominent and facing the camera` : ""}`;
+  }
   if (plan.coverage && shot.setup) {
     if (shot.setup === "master") return "Wide master shot from the side of the room, eye level, 35mm, everyone in their places";
     if (shot.setup.startsWith("single:")) {
@@ -363,9 +431,23 @@ type Spec = {
   /** The rest of the blocking, written after the line. */
   restAction: string;
   eyeline: string;
+  /** Who the eyeline belongs to: the speaker, or the listener in a reaction shot. */
+  looker: string;
   line: LineInfo | null;
+  /** A marked reaction shot: the speaker is off-screen, everyone in frame listens. */
+  reaction: boolean;
+  /** "Lawrence, on the left in the charcoal double-breasted suit" - who speaks, by name and description. */
+  speakerTag: string;
   speakerVoice: string;
+  /** "Liam and Dawn stay silent, mouths closed." - never trimmed away from the line. */
+  silent: string;
+  /** First names of the people in frame who do not speak. */
+  silentNames: string[];
   listeners: string;
+  /** Everyone in frame with their fixed look string and screen side (180-degree rule). */
+  positions: string;
+  /** True when `positions` already carries each person's wardrobe verbatim. */
+  positionsHaveWardrobe: boolean;
   expression: string;
   wardrobe: string;
   wardrobeShort: string;
@@ -378,21 +460,76 @@ type Spec = {
   sfx: string;
 };
 
-function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: FormatOptions): Spec {
+const sideOf = (plan: DirectorPlan, name: string) => (plan.screenSides ? Object.entries(plan.screenSides).find(([k]) => firstLower(k) === firstLower(name))?.[1] : undefined);
+const otherSide = (side: "left" | "right") => (side === "left" ? "right" : "left");
+
+/** The head item of someone's wardrobe ("charcoal double-breasted suit"), for telling people apart in one line. */
+function wardrobeHead(info: CastInfo | undefined): string {
+  const firstItem = (info?.wardrobeShort || info?.wardrobe || "").split(",")[0]?.split(/\s+(?:over|with|under)\s+/i)[0] ?? "";
+  return clipWords(firstItem, 4);
+}
+
+/** "Liam and Dawn" */
+const andList = (names: string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+
+/**
+ * Everyone in frame, each with their fixed look string (verbatim in every
+ * prompt) and screen side: "Lawrence (silver swept-back hair, charcoal suit)
+ * on the left of frame looking right; Liam (...) seen from behind, a soft
+ * out-of-focus shoulder in the right foreground".
+ */
+function positionsOf(plan: DirectorPlan, shot: DirectorShot, visible: CastInfo[], refs: boolean): { text: string; hasWardrobe: boolean } {
+  if (!visible.length) return { text: "", hasWardrobe: false };
+  const g = parseSetup(shot.setup);
+  const subject = g.kind === "single" || g.kind === "reaction" ? firstLower(g.who[0]) : "";
+  let shoulder = false;
+  let hasWardrobe = true;
+  // Two people framed together who share a screen side (e.g. Liam and Dawn at
+  // the door): say they're together rather than both "on the right".
+  const sidesInShot = new Set(visible.map((v) => sideOf(plan, v.name)).filter(Boolean));
+  const together = !subject && g.kind !== "master" && visible.length >= 2 && sidesInShot.size === 1;
+  const parts = visible.map((v) => {
+    const look = castLookOf(plan, v.name);
+    const noRef = refs && (shot.missingRefs ?? []).some((m) => firstLower(m) === firstLower(v.name));
+    const described = [look, noRef || !refs ? v.look : ""].filter(Boolean).join("; ");
+    if (!v.wardrobeShort || !look.includes(v.wardrobeShort)) hasWardrobe = false;
+    const who = described ? `${first(v.name)} (${described})` : first(v.name);
+    const side = sideOf(plan, v.name);
+    if (!side || together) return who;
+    const role = subject && firstLower(v.name) !== subject ? (g.kind === "single" && !shoulder ? ((shoulder = true), "shoulder") : "background") : "subject";
+    if (role === "shoulder") return `${who} seen from behind, a soft out-of-focus shoulder in the ${side} foreground`;
+    if (role === "background") return `${who} further back on the ${side}`;
+    return `${who} on the ${side} of frame looking ${otherSide(side)}`;
+  });
+  const lead = refs ? "In frame, as in the reference images" : "In frame";
+  return { text: `${lead}${together ? ", side by side" : ""}: ${parts.join("; ")}`, hasWardrobe };
+}
+
+function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: FormatOptions, withRefs: boolean): Spec {
   const shot = plan.shots[idx];
   const person = hasPerson(plan, refs);
   const info = castInfo(plan);
   const visNames = person ? visibleCast(plan, shot) : [];
   const visible = visNames.map((n) => info.find((c) => c.name === n) ?? { name: n, look: "", lookShort: "", voice: "", wardrobe: "", wardrobeShort: "" });
   const line = opts.nativeAudio ? lineOf(plan, shot, idx) : null;
+  const reaction = !!line && isReactionShot(shot);
   const speakerInfo = line ? info.find((c) => firstLower(c.name) === firstLower(line.speaker)) : undefined;
-  const silent = visible.filter((v) => !line || firstLower(v.name) !== firstLower(line.speaker) || line.offScreen);
+  const onScreenSpeaker = !!line && !line.offScreen && !reaction;
+  const silentPeople = visible.filter((v) => !onScreenSpeaker || firstLower(v.name) !== firstLower(line!.speaker));
+  const silentNames = silentPeople.map((v) => first(v.name));
+  const silent = line && silentNames.length
+    ? reaction
+      ? `${andList(silentNames)} ${silentNames.length > 1 ? "listen" : "listens"} in silence, ${silentNames.length > 1 ? "mouths" : "mouth"} closed and lips still - nobody on screen speaks`
+      : `${andList(silentNames)} ${silentNames.length > 1 ? "stay silent, mouths closed" : "stays silent, mouth closed"}`
+    : "";
   const reactions = shot.listeners?.length
     ? shot.listeners.map((l) => `${first(l.name)} ${l.reaction.replace(/[.\s]+$/, "")}`).join("; ")
     : "";
-  const listeners = line && silent.length
-    ? `${silent.map((v) => first(v.name)).join(" and ")} ${silent.length > 1 ? "listen without speaking, mouths closed" : "listens without speaking, mouth closed"}${reactions ? `: ${reactions}` : ""}`
-    : reactions;
+  const side = line ? sideOf(plan, line.speaker) : undefined;
+  const head = wardrobeHead(speakerInfo);
+  const speakerTag = line?.speaker
+    ? `${first(line.speaker)}${side || head ? "," : ""}${side ? ` on the ${side}` : ""}${head ? ` in the ${head}` : ""}${side || head ? "," : ""}`
+    : "";
   const wardrobe = visible
     .filter((v) => v.wardrobe)
     .map((v) => `${first(v.name)} in ${v.wardrobe}`)
@@ -412,6 +549,8 @@ function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: Format
       return words.length > 0 && words.filter((w) => have.has(w)).length / words.length >= 0.8;
     });
   const keep = steadyHands((shot.keep ?? []).filter((k) => !restatesWardrobe(k)).join("; "));
+  const positions = positionsOf(plan, shot, visible, withRefs);
+  const looker = reaction ? first(parseSetup(shot.setup).who[0] ?? silentNames[0] ?? "") : first(line?.speaker || "");
   return {
     person,
     framing: framingLine(plan, shot, person),
@@ -421,10 +560,17 @@ function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: Format
     story: shot.blocking && !shot.blocking.includes(cleanAction(shot.action)) ? steadyHands(cleanAction(shot.action)) : "",
     ...splitAction(steadyHands(cleanAction(shot.blocking || shot.action))),
     eyeline: shot.eyeline ?? "",
+    looker,
     line,
+    reaction,
+    speakerTag,
     speakerVoice: speakerInfo?.voice ?? "",
-    listeners,
-    expression: person && shot.expression.trim() ? `${first(line?.speaker || visNames[0] || "") ? `${first(line?.speaker || visNames[0])}: ` : ""}${clipWords(shot.expression, 16)}` : "",
+    silent,
+    silentNames,
+    listeners: reactions,
+    positions: positions.text,
+    positionsHaveWardrobe: positions.hasWardrobe,
+    expression: person && shot.expression.trim() ? `${first(reaction ? looker : line?.speaker || visNames[0] || "") ? `${first(reaction ? looker : line?.speaker || visNames[0])}: ` : ""}${clipWords(shot.expression, 16)}` : "",
     wardrobe,
     wardrobeShort,
     keep,
@@ -441,11 +587,6 @@ function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: Format
   };
 }
 
-/**
- * Everyone in frame, by name. With cast reference images attached the faces
- * come from the images, so the prompt only names people (re-describing a face
- * that has a reference fights the reference); without refs, a short look.
- */
 /** "A sits; B stands; C waits" -> lead "A sits" + rest "B stands; C waits". */
 function splitAction(action: string): { leadAction: string; restAction: string } {
   const parts = action.split(/;\s+|\.\s+/).map((p) => p.trim()).filter(Boolean);
@@ -463,45 +604,55 @@ function splitAction(action: string): { leadAction: string; restAction: string }
   return { leadAction: lead, restAction: rest };
 }
 
-function peopleClause(spec: Spec, refs: boolean): { text: string; short: string } {
-  if (!spec.visible.length) return { text: "", short: "" };
-  const names = spec.visible.map((v) => v.name).join(", ");
-  const n = spec.visible.length;
-  const lead = n === 1 ? "In frame" : n === 2 ? "Both in frame" : `All ${n === 3 ? "three" : n} in frame`;
-  const full = refs
-    ? `${lead}, as in the reference images: ${names}`
-    : `${lead}: ${spec.visible.map((v) => [v.name, v.look].filter(Boolean).join(", ")).join("; ")}`;
-  const short = refs ? `In frame: ${names}` : `In frame: ${spec.visible.map((v) => [v.name, v.lookShort].filter(Boolean).join(", ")).join("; ")}`;
-  return { text: full, short };
-}
-
-function veoLine(spec: Spec): string {
+/**
+ * The spoken line, attributed to the ON-SCREEN speaker by name and
+ * description, with everyone else in frame told to stay silent - one clause
+ * that is never trimmed. A reaction shot says the listener doesn't speak and
+ * the speaker is off-screen; with the line laid in later there is no quote.
+ */
+function lineClause(spec: Spec, style: "veo" | "seedance2" | "kling3", opts: FormatOptions): string {
   const l = spec.line!;
+  const who = first(l.speaker);
+  const voice = spec.speakerVoice ? spec.speakerVoice.replace(/^(a|an|the)\s+/i, "") : "";
   const how = l.delivery ? ` (${l.delivery})` : "";
-  const voice = spec.speakerVoice ? ` in a ${spec.speakerVoice.replace(/^(a|an|the)\s+/i, "")}` : "";
-  if (!l.speaker) return `A voice says${how}: "${l.words}"`;
-  if (l.offScreen) return `${first(l.speaker)}, off-screen and unseen, says${voice}${how}: "${l.words}"`;
-  return `${first(l.speaker)} says${voice}${how}: "${l.words}"`;
+  const silent = spec.silent ? ` ${sentence(spec.silent)}` : "";
+  if (spec.reaction) {
+    const listeners = sentence(spec.silent || "Nobody on screen speaks");
+    if (opts.lineLaidIn) return `${listeners} ${who ? `${who} is talking off-screen, unseen.` : ""}`.trim();
+    if (style === "kling3") return `${listeners} [${[who || "Voice", "off-screen and unseen", voice, l.delivery].filter(Boolean).join(", ")}]: "${l.words}"`;
+    return `${listeners} Off-screen and unseen, ${who || "a voice"} says${voice ? ` in a ${voice}` : ""}${how}: "${l.words}"`;
+  }
+  if (!l.speaker) return `A voice says${how}: "${l.words}"${silent}`;
+  if (l.offScreen) return `${who}, off-screen and unseen, says${voice ? ` in a ${voice}` : ""}${how}: "${l.words}"${silent}`;
+  if (style === "kling3") return `[${[spec.speakerTag.replace(/,$/, ""), voice, l.delivery].filter(Boolean).join(", ")}]: "${l.words}"${silent}`;
+  if (style === "seedance2" && opts.audioRef) return `${spec.speakerTag || who} says: "${l.words}" - voice, timing and pauses follow Audio 1 exactly, lips in sync with Audio 1.${silent}`;
+  return `${spec.speakerTag || who} says${voice ? ` in a ${voice}` : ""}${how}: "${l.words}"${silent}`;
 }
 
 const NOBODY_SPEAKS = "Nobody speaks in this shot; only room sound and small movement sounds.";
 
-function veoClauses(spec: Spec, opts: FormatOptions, refs: boolean): Clause[] {
-  const people = peopleClause(spec, refs);
+function peopleClauseOf(spec: Spec): Clause | null {
+  // The fixed look strings and screen sides are never shortened: they are what
+  // keeps each face, outfit and eyeline the same across the cut.
+  return spec.positions ? { key: "people", text: sentence(spec.positions), priority: 93 } : null;
+}
+
+function veoClauses(spec: Spec, opts: FormatOptions): Clause[] {
+  const eyeline = spec.eyeline.replace(/^(eyes|looking|looks)\s+/i, "");
   const c: Clause[] = [
     opts.continuousTake ? { key: "take", text: "Continuous take carrying straight on from the previous shot: same moment, same people in the same places.", priority: 88 } : null,
     { key: "camera", text: sentence(`${spec.framing}. ${spec.movement}`), short: sentence(`${spec.framing.split(",")[0]}. ${spec.movement}`), priority: 95 },
     spec.line
       ? spec.leadAction ? { key: "action", text: sentence(spec.leadAction), priority: 90 } : null
-      : { key: "action", text: sentence([spec.action, spec.eyeline ? `eyes ${spec.eyeline.replace(/^(eyes|looking|looks)\s+/i, "")}` : ""].filter(Boolean).join(", ")), short: sentence(clipWords(spec.action, 16)), priority: 90 },
-    spec.line ? { key: "line", text: veoLine(spec), priority: Infinity } : null,
+      : { key: "action", text: sentence([bare(spec.action), spec.eyeline ? `eyes ${eyeline}` : ""].filter(Boolean).join(", ")), short: sentence(clipWords(spec.action, 16)), priority: 90 },
+    spec.line ? { key: "line", text: lineClause(spec, "veo", opts), priority: Infinity } : null,
     spec.line && (spec.restAction || spec.eyeline)
-      ? { key: "blocking", text: sentence([spec.restAction, spec.eyeline ? `${first(spec.line.speaker) || "the speaker"} looks ${spec.eyeline.replace(/^(eyes|looking|looks)\s+/i, "")}` : ""].filter(Boolean).join("; ")), short: spec.restAction && spec.restAction.includes(";") ? sentence(partsWithin(spec.restAction.split(/;\s+/), 12)) : undefined, priority: 82 }
+      ? { key: "blocking", text: sentence([spec.restAction, spec.eyeline ? `${spec.looker || "the speaker"} looks ${eyeline}` : ""].filter(Boolean).join("; ")), short: spec.restAction && spec.restAction.includes(";") ? sentence(partsWithin(spec.restAction.split(/;\s+/), 12)) : undefined, priority: 82 }
       : null,
     !spec.line && opts.nativeAudio && spec.person ? { key: "silence", text: NOBODY_SPEAKS, priority: 85 } : null,
-    spec.listeners ? { key: "listeners", text: sentence(spec.listeners), short: sentence(spec.listeners.split(":")[0]), priority: 80 } : null,
-    people.text ? { key: "people", text: sentence(people.text), short: sentence(people.short), priority: 87 } : null,
-    spec.wardrobeShort ? { key: "wardrobe", text: sentence(`Same wardrobe as every shot: ${spec.wardrobeShort}`), short: sentence(`Same wardrobe: ${spec.wardrobeShort}`), priority: 86 } : null,
+    spec.listeners ? { key: "listeners", text: sentence(spec.listeners), short: sentence(clipWords(spec.listeners, 8)), priority: 80 } : null,
+    peopleClauseOf(spec),
+    spec.wardrobeShort && !spec.positionsHaveWardrobe ? { key: "wardrobe", text: sentence(`Same wardrobe as every shot: ${spec.wardrobeShort}`), short: sentence(`Same wardrobe: ${spec.wardrobeShort}`), priority: 86 } : null,
     spec.keep ? { key: "keep", text: sentence(`Continuity: ${spec.keep}`), short: spec.keep.includes(";") ? sentence(`Continuity: ${partsWithin(spec.keep.split(/;\s+/), 10)}`) : undefined, priority: 73 } : null,
     spec.product ? { key: "product", text: sentence(spec.product), priority: 84 } : null,
     spec.story ? { key: "story", text: sentence(spec.story), short: sentence(clipWords(spec.story, 14)), priority: 57 } : null,
@@ -518,25 +669,19 @@ function veoClauses(spec: Spec, opts: FormatOptions, refs: boolean): Clause[] {
   return c;
 }
 
-function seedanceClauses(spec: Spec, opts: FormatOptions, refs: boolean): Clause[] {
-  const people = peopleClause(spec, refs);
+function seedanceClauses(spec: Spec, opts: FormatOptions): Clause[] {
   const l = spec.line;
-  const lineText = l
-    ? opts.audioRef
-      ? `${first(l.speaker) || "The speaker"} says: "${l.words}" - voice, timing and pauses follow Audio 1 exactly, lips in sync with Audio 1.`
-      : `${first(l.speaker) || "The speaker"}${l.offScreen ? " (off-screen)" : ""} says${spec.speakerVoice ? ` in a ${spec.speakerVoice}` : ""}${l.delivery ? ` (${l.delivery})` : ""}: "${l.words}"`
-    : "";
   return [
     opts.referenceNames?.length
       ? { key: "refs", text: `${opts.referenceNames.map((n, i) => `Image ${i + 1} is ${n}`).join(", ")} - same faces, hair and clothes as the images.`, short: `${opts.referenceNames.map((n, i) => `Image ${i + 1}: ${n}`).join(", ")}.`, priority: 92 }
       : opts.firstFrame
         ? { key: "refs", text: opts.continuousTake ? "Image 1 is the last frame of the previous shot - carry straight on from it." : "Image 1 is the first frame.", priority: 92 }
         : null,
-    people.text ? { key: "people", text: sentence(people.text), short: sentence(people.short), priority: 85 } : null,
-    { key: "action", text: sentence([spec.action, spec.eyeline ? `eyes ${spec.eyeline}` : ""].filter(Boolean).join(", ")), short: sentence(clipWords(spec.action, 16)), priority: 90 },
-    l ? { key: "line", text: lineText, priority: Infinity } : null,
-    spec.listeners ? { key: "listeners", text: sentence(spec.listeners), short: sentence(spec.listeners.split(":")[0]), priority: 80 } : null,
-    spec.wardrobe ? { key: "wardrobe", text: sentence(`Wardrobe unchanged: ${spec.wardrobe}`), short: sentence(`Wardrobe unchanged: ${spec.wardrobeShort}`), priority: 84 } : null,
+    peopleClauseOf(spec),
+    { key: "action", text: sentence([bare(spec.action), spec.eyeline ? `eyes ${spec.eyeline.replace(/^(eyes|looking|looks)\s+/i, "")}` : ""].filter(Boolean).join(", ")), short: sentence(clipWords(spec.action, 16)), priority: 90 },
+    l ? { key: "line", text: lineClause(spec, "seedance2", opts), priority: Infinity } : null,
+    spec.listeners ? { key: "listeners", text: sentence(spec.listeners), short: sentence(clipWords(spec.listeners, 8)), priority: 80 } : null,
+    spec.wardrobe && !spec.positionsHaveWardrobe ? { key: "wardrobe", text: sentence(`Wardrobe unchanged: ${spec.wardrobe}`), short: sentence(`Wardrobe unchanged: ${spec.wardrobeShort}`), priority: 84 } : null,
     !l && opts.nativeAudio && spec.person ? { key: "silence", text: NOBODY_SPEAKS, priority: 83 } : null,
     spec.keep ? { key: "keep", text: sentence(`Continuity: ${spec.keep}`), priority: 70 } : null,
     spec.product ? { key: "product", text: sentence(spec.product), priority: 84 } : null,
@@ -549,17 +694,15 @@ function seedanceClauses(spec: Spec, opts: FormatOptions, refs: boolean): Clause
   ].filter((x): x is Clause => !!x);
 }
 
-function klingClauses(spec: Spec, opts: FormatOptions, refs: boolean): Clause[] {
-  const people = peopleClause(spec, refs);
+function klingClauses(spec: Spec, opts: FormatOptions): Clause[] {
   const l = spec.line;
-  const tag = l ? [first(l.speaker) || "Speaker", spec.speakerVoice, l.delivery, l.offScreen ? "off-screen" : ""].filter(Boolean).join(", ") : "";
   return [
     opts.continuousTake ? { key: "take", text: "Continuous take from the previous shot's last frame.", priority: 88 } : null,
-    people.text ? { key: "people", text: sentence(people.text), short: sentence(people.short), priority: 85 } : null,
+    peopleClauseOf(spec),
     { key: "action", text: sentence(spec.action), short: sentence(clipWords(spec.action, 16)), priority: 90 },
-    l ? { key: "line", text: `[${tag}]: "${l.words}"`, priority: Infinity } : null,
-    spec.listeners ? { key: "listeners", text: sentence(spec.listeners), short: sentence(spec.listeners.split(":")[0]), priority: 80 } : null,
-    spec.wardrobe ? { key: "wardrobe", text: sentence(`Wardrobe unchanged: ${spec.wardrobe}`), short: sentence(`Wardrobe unchanged: ${spec.wardrobeShort}`), priority: 84 } : null,
+    l ? { key: "line", text: lineClause(spec, "kling3", opts), priority: Infinity } : null,
+    spec.listeners ? { key: "listeners", text: sentence(spec.listeners), short: sentence(clipWords(spec.listeners, 8)), priority: 80 } : null,
+    spec.wardrobe && !spec.positionsHaveWardrobe ? { key: "wardrobe", text: sentence(`Wardrobe unchanged: ${spec.wardrobe}`), short: sentence(`Wardrobe unchanged: ${spec.wardrobeShort}`), priority: 84 } : null,
     !l && opts.nativeAudio && spec.person ? { key: "silence", text: NOBODY_SPEAKS, priority: 83 } : null,
     { key: "camera", text: sentence(`${spec.framing}. ${spec.movement}`), short: sentence(spec.movement), priority: 88 },
     spec.product ? { key: "product", text: sentence(spec.product), priority: 84 } : null,
@@ -614,11 +757,12 @@ function quotedStart(prompt: string, quoted: string): number {
 /** One shot's prompt for the given model, within its word budget. */
 export function formatShotPrompt(plan: DirectorPlan, idx: number, refs: RefFlags, opts: FormatOptions): FormattedPrompt {
   const model = opts.model ?? "veo";
-  const spec = buildSpec(plan, idx, refs, opts);
   const withRefs = refs.character || !!opts.ingredients || !!opts.referenceNames?.length;
-  const clauses = model === "seedance2" ? seedanceClauses(spec, opts, withRefs) : model === "kling3" ? klingClauses(spec, opts, withRefs) : veoClauses(spec, opts, withRefs);
-  let fit = fitClauses(clauses, WORD_BUDGET[model].max);
-  const quotedLine = spec.line?.words ?? "";
+  const spec = buildSpec(plan, idx, refs, opts, withRefs);
+  const clauses = model === "seedance2" ? seedanceClauses(spec, opts) : model === "kling3" ? klingClauses(spec, opts) : veoClauses(spec, opts);
+  const budget = budgetFor(model, spec.visible.length);
+  let fit = fitClauses(clauses, budget);
+  const quotedLine = spec.reaction && opts.lineLaidIn ? "" : (spec.line?.words ?? "");
   // Veo: the line must start in the first third. If the lead-in is too long,
   // move the lead action after the line, then shorten the camera.
   if (model === "veo" && quotedLine) {
@@ -629,15 +773,15 @@ export function formatShotPrompt(plan: DirectorPlan, idx: number, refs: RefFlags
       if (lead) {
         cl = cl.filter((c) => c !== lead);
         cl.splice(cl.findIndex((c) => c.key === "line") + 1, 0, lead);
-        fit = fitClauses(cl, WORD_BUDGET[model].max);
+        fit = fitClauses(cl, budget);
       }
     }
     if (late(fit.text)) {
       cl = cl.map((c) => (c.key === "camera" && c.short ? { ...c, text: c.short } : c));
-      fit = fitClauses(cl, WORD_BUDGET[model].max);
+      fit = fitClauses(cl, budget);
     }
   }
-  return { prompt: fit.text, words: fit.words, model, shortened: fit.shortened, dropped: fit.dropped, over: fit.over, dialogueStart: quotedStart(fit.text, quotedLine), quotedLine, clauses };
+  return { prompt: fit.text, words: fit.words, model, shortened: fit.shortened, dropped: fit.dropped, over: fit.over, dialogueStart: quotedStart(fit.text, quotedLine), quotedLine, clauses, budget };
 }
 
 /** Kept for its many callers: the formatted prompt text only. */

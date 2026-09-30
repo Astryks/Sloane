@@ -1,6 +1,7 @@
 // Server-only: runs the storyboard planner on Gemini (Vertex, Google
 // credits), falling back to the rule-based planner. See plan.ts.
 import { MAX_SHOTS } from "./plan";
+import { withCoverageGrammar } from "./grammar";
 import { geminiJson } from "../gemini";
 import {
   PLANNER_SYSTEM,
@@ -14,8 +15,14 @@ import {
 
 export async function planFilm(inputs: PlanInputs): Promise<{ plan: DirectorPlan; source: "ai" | "rules" }> {
   const raw = await geminiJson<unknown>(PLANNER_SYSTEM, plannerUserMessage(inputs), { temperature: 0.6 });
-  if (raw) return { plan: sanitizePlan(raw, inputs), source: "ai" };
-  return { plan: ruleBasedPlan(inputs), source: "rules" };
+  // Coverage grammar (2026-09-30): whatever the model returned, the speaker is
+  // on camera (or the shot is a marked reaction), scenes open on a master, the
+  // 180-degree sides are fixed and there are no back-to-back identical setups.
+  // Everyone from Your cast has reference photos.
+  const withPhotos = (inputs.cast ?? []).map((c) => c.name);
+  const grade = (plan: DirectorPlan) => withCoverageGrammar(plan, withPhotos.length ? { withPhotos } : {});
+  if (raw) return { plan: grade(sanitizePlan(raw, inputs)), source: "ai" };
+  return { plan: grade(ruleBasedPlan(inputs)), source: "rules" };
 }
 
 export async function revisePlan(plan: DirectorPlan, instruction: string, shotIndex: number | null): Promise<DirectorPlan | null> {
@@ -37,12 +44,18 @@ export async function revisePlan(plan: DirectorPlan, instruction: string, shotIn
     ...(plan.quality ? { quality: plan.quality } : {}),
     ...(!sanitized.roomTone && plan.roomTone ? { roomTone: plan.roomTone } : {}),
     modelVoices: plan.modelVoices !== false,
+    // The 180-degree sides stay put across a revision (the model may drop them).
+    ...(plan.screenSides ? { screenSides: { ...plan.screenSides, ...(sanitized.screenSides ?? {}) } } : {}),
     // Keep each shot's stored seed so a revised plan can reproduce earlier takes.
     shots: sanitized.shots.map((s, i) => (plan.shots[i]?.seed !== undefined && s.seed === undefined ? { ...s, seed: plan.shots[i].seed } : s)),
   };
-  // A single-shot edit must not touch the other shots or the locked bibles.
+  // A single-shot edit must not touch the other shots or the locked bibles;
+  // the grammar pass still checks the edited shot in context (speaker on
+  // camera, screen sides) but only that shot is taken from it.
   if (shotIndex != null) {
-    return { ...plan, shots: plan.shots.map((s, i) => (i === shotIndex ? next.shots[i] ?? s : s)) };
+    const merged = { ...plan, shots: plan.shots.map((s, i) => (i === shotIndex ? next.shots[i] ?? s : s)) };
+    const graded = withCoverageGrammar(merged);
+    return { ...merged, shots: merged.shots.map((s, i) => (i === shotIndex ? graded.shots[i] ?? s : s)), ...(graded.screenSides ? { screenSides: graded.screenSides } : {}) };
   }
-  return next;
+  return withCoverageGrammar(next);
 }

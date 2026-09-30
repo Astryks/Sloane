@@ -879,6 +879,15 @@ export function DirectorStudio({
               </div>
             </details>
 
+            {!!plan.refWarnings?.length && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-[11px] text-amber-900">
+                <p className="font-bold">📸 Missing reference photos</p>
+                <ul className="mt-1 list-disc pl-4">
+                  {plan.refWarnings.map((w) => <li key={w}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+
             <ol className="flex flex-col gap-3">
               {plan.shots.map((s, i) => {
                 const st = film?.shots[i];
@@ -887,6 +896,11 @@ export function DirectorStudio({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs font-extrabold text-foreground">
                         Shot {i + 1} · <span className="font-semibold text-purple">{s.beat}</span>
+                        {s.offscreenSpeaker && s.dialogue.trim() && (
+                          <span className="ml-2 rounded-full bg-purple/10 px-2 py-0.5 text-[10px] font-bold text-purple" title="The camera is on the listener; the speaker is heard off-screen and the listener's mouth stays closed.">
+                            👂 Reaction · {s.speaker ? `${s.speaker.split(" ")[0]} off-screen` : "speaker off-screen"}
+                          </span>
+                        )}
                       </p>
                       {st && <span className="text-[10px] font-bold uppercase text-muted">{stepLabel[st.status] ?? st.status}</span>}
                     </div>

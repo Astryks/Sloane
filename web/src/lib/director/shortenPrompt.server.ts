@@ -27,7 +27,7 @@ function cameraFamilies(text: string): number {
 
 /** Validates an LLM rewrite against the deterministic result. */
 export function acceptRewrite(candidate: string, base: FormattedPrompt, mustName: string[]): boolean {
-  const max = WORD_BUDGET[base.model].max;
+  const max = base.budget ?? WORD_BUDGET[base.model].max;
   if (!candidate || countWords(candidate) > max || countWords(candidate) < Math.min(40, base.words)) return false;
   if (base.quotedLine && !candidate.includes(`"${base.quotedLine}"`)) return false;
   if (mustName.some((n) => !candidate.includes(n.split(" ")[0]))) return false;
@@ -44,7 +44,7 @@ export async function shortenIfNeeded(base: FormattedPrompt, mustName: string[])
   if (!base.dropped.length && !base.shortened.length) return base.prompt;
   if (process.env.DIRECTOR_LLM_SHORTEN === "0" || !hasGeminiConfigured()) return base.prompt;
   const full = base.clauses.map((c) => c.text).join(" ");
-  const max = WORD_BUDGET[base.model].max;
+  const max = base.budget ?? WORD_BUDGET[base.model].max;
   const out = await geminiJson<{ prompt?: string }>(
     SYSTEM,
     `Compress this ${base.model === "veo" ? "Veo" : base.model === "kling3" ? "Kling" : "Seedance"} prompt to at most ${max} words.${

@@ -30,10 +30,13 @@ Modes (POST /start, Bearer MODAL_SHARED_SECRET):
          [chuckle]/[sigh] from the acting pass) or standard Chatterbox with
          expressive exaggeration/cfg. Used for voice-first engines (Seedance
          2.x reference audio) and as the audio for the optional lip-sync step.
-  {"mode": "sync_check", "video_url": ...}
+  {"mode": "sync_check", "video_url": ..., "expect": "speaker"|"reaction", "speaker_side": "left"|"right"}
       -> (2026-09-30) a free lip-sync score: faster-whisper word timings vs a
-         MediaPipe mouth-open signal -> {ok, score, lag_s, text} (text = what
-         was actually said, so the caller can spot gibberish).
+         MediaPipe mouth-open signal -> {ok, score, lag_s, text, flags} (text =
+         what was actually said, so the caller can spot gibberish). Up to 3
+         faces are tracked; flags: "mouth_on_non_speaker" (a listener's lips
+         move with the speech, or anyone's in a reaction shot where the
+         speaker is off-screen) and "speaker_mouth_closed".
   {"mode": "mix", "video_url": ..., "bed_video_url": ...}
       -> the (lip-synced) video with its speech over the original room sound.
 GET /result?call_id=... -> {status: running|done|failed, url?, result?, error?}
@@ -509,15 +512,48 @@ class Speaker:
 #
 # Does the mouth move when the words are spoken? faster-whisper word timings
 # (CPU, tiny model) give when speech happens; MediaPipe Face Mesh gives how
-# open the largest face's mouth is on each sampled frame. The score is the
+# open each face's mouth is on each sampled frame. The score is the
 # correlation between the two, at the best lag within +/-0.3s. No paid API.
+#
+# Coverage grammar (2026-09-30): up to 3 faces are tracked by their position
+# across the frame. The speaker is the face on their screen side (the plan's
+# 180-degree sides: "left" = left of frame), else the largest face; in a
+# reaction shot (expect="reaction") nobody in frame is the speaker. Flags:
+#   mouth_on_non_speaker - a non-speaker's lips move with the speech
+#                          (correlation >= 0.3 and 90th-percentile openness
+#                          >= 0.04) - e.g. the listener lip-flapping to an
+#                          off-screen line;
+#   speaker_mouth_closed - the speaker's mouth hardly opens while they talk
+#                          (90th-percentile openness during speech < 0.025).
 SYNC_FPS = 12.5
+LISTENER_MIN_CORR = 0.3
+LISTENER_MIN_OPEN = 0.04
+SPEAKER_MIN_OPEN = 0.025
+
+
+def _best_corr(speech, mouth, n):
+    """Best correlation (and lag in frames) between speech and a mouth signal within +/-0.3s."""
+    import numpy as np
+
+    best, best_lag = -1.0, 0
+    max_lag = int(0.3 * SYNC_FPS)
+    for lag in range(-max_lag, max_lag + 1):
+        a = speech[max(0, lag): n + min(0, lag)]
+        b = mouth[max(0, -lag): n - max(0, lag)]
+        if len(a) < 5 or a.std() == 0 or b.std() == 0:
+            continue
+        c = float(np.corrcoef(a, b)[0, 1])
+        if c > best:
+            best, best_lag = c, lag
+    return best, best_lag
 
 
 @app.function(image=image, timeout=300, cpu=2.0)
-def sync_check(video_url):
+def sync_check(video_url, expect="speaker", speaker_side=None):
     import numpy as np
 
+    expect = "reaction" if expect == "reaction" else "speaker"
+    speaker_side = speaker_side if speaker_side in ("left", "right") else None
     with tempfile.TemporaryDirectory() as tmp:
         v = os.path.join(tmp, "in.mp4")
         _download(video_url, v)
@@ -537,28 +573,46 @@ def sync_check(video_url):
             for w in seg.words or []:
                 words += 1
                 speech[int(w.start * SYNC_FPS): max(int(w.start * SYNC_FPS) + 1, int(w.end * SYNC_FPS))] = 1.0
-        mouth = _mouth_openness(v, n, tmp)
-        valid = ~np.isnan(mouth)
-        if words == 0 or valid.sum() < n * 0.5:
-            return {"ok": None, "reason": "no speech or no face", "words": words, "face_frames": int(valid.sum()), "frames": n, "text": " ".join(heard)[:600]}
-        m = np.where(valid, mouth, np.nanmean(mouth))
-        best, best_lag = -1.0, 0
-        max_lag = int(0.3 * SYNC_FPS)
-        for lag in range(-max_lag, max_lag + 1):
-            a = speech[max(0, lag): n + min(0, lag)]
-            b = m[max(0, -lag): n - max(0, lag)]
-            if len(a) < 5 or a.std() == 0 or b.std() == 0:
-                continue
-            c = float(np.corrcoef(a, b)[0, 1])
-            if c > best:
-                best, best_lag = c, lag
-        lag_s = best_lag / SYNC_FPS
-        ok = best >= float(os.environ.get("DIRECTOR_SYNC_MIN_SCORE", "0.2")) and abs(lag_s) <= 0.17
-        return {"ok": ok, "score": round(best, 3), "lag_s": round(lag_s, 3), "words": words, "frames": n, "text": " ".join(heard)[:600]}
+        text = " ".join(heard)[:600]
+        tracks = [t for t in _mouth_tracks(v, n, tmp) if (~np.isnan(t["open"])).sum() >= n * 0.5]
+        base = {"expect": expect, "words": words, "frames": n, "faces": len(tracks), "text": text}
+        if words == 0 or not tracks:
+            return {**base, "ok": None, "reason": "no speech or no face", "flags": []}
+
+        speaker = None
+        if expect == "speaker":
+            if speaker_side and len(tracks) >= 2:
+                speaker = min(tracks, key=lambda t: t["x"]) if speaker_side == "left" else max(tracks, key=lambda t: t["x"])
+            else:
+                speaker = max(tracks, key=lambda t: t["height"])
+        talking = speech > 0
+        flags = []
+        listeners = []
+        for t in tracks:
+            m = np.where(np.isnan(t["open"]), np.nanmean(t["open"]), t["open"])
+            corr, lag = _best_corr(speech, m, n)
+            p90 = float(np.nanpercentile(t["open"], 90))
+            if t is speaker:
+                during = t["open"][talking]
+                during = during[~np.isnan(during)]
+                speaker_open = float(np.percentile(during, 90)) if len(during) >= max(3, talking.sum() * 0.5) else None
+                speaker_corr, speaker_lag = corr, lag
+                if speaker_open is not None and speaker_open < SPEAKER_MIN_OPEN:
+                    flags.append("speaker_mouth_closed")
+            else:
+                listeners.append({"x": round(t["x"], 3), "score": round(corr, 3), "open_p90": round(p90, 4)})
+                if corr >= LISTENER_MIN_CORR and p90 >= LISTENER_MIN_OPEN and "mouth_on_non_speaker" not in flags:
+                    flags.append("mouth_on_non_speaker")
+        out = {**base, "flags": flags, "listeners": listeners}
+        if speaker is None:
+            return {**out, "ok": not flags}
+        lag_s = speaker_lag / SYNC_FPS
+        in_sync = speaker_corr >= float(os.environ.get("DIRECTOR_SYNC_MIN_SCORE", "0.2")) and abs(lag_s) <= 0.17
+        return {**out, "ok": in_sync and not flags, "score": round(speaker_corr, 3), "lag_s": round(lag_s, 3), "speaker_x": round(speaker["x"], 3), "speaker_open_p90": None if speaker_open is None else round(speaker_open, 4)}
 
 
-def _mouth_openness(video_path, n, tmp):
-    """Inner-lip gap / face height per sampled frame for the largest face (NaN = no face)."""
+def _mouth_tracks(video_path, n, tmp, max_faces=3):
+    """Per face (tracked by horizontal position): mean x (0 = left of frame), mean face height, and inner-lip gap / face height per sampled frame (NaN = not seen)."""
     import cv2
     import mediapipe as mp
     import numpy as np
@@ -567,22 +621,36 @@ def _mouth_openness(video_path, n, tmp):
     os.makedirs(frames_dir, exist_ok=True)
     _run(["ffmpeg", "-y", "-v", "error", "-i", video_path, "-vf", f"fps={SYNC_FPS},scale=480:-2", os.path.join(frames_dir, "%05d.jpg")])
     files = sorted(os.listdir(frames_dir))[:n]
-    out = np.full(n, np.nan, dtype=np.float32)
-    with mp.solutions.face_mesh.FaceMesh(static_image_mode=False, max_num_faces=3, refine_landmarks=False) as mesh:
+    tracks = []  # {"xs": [...], "hs": [...], "open": array, "last_x": float}
+    with mp.solutions.face_mesh.FaceMesh(static_image_mode=False, max_num_faces=max_faces, refine_landmarks=False) as mesh:
         for i, name in enumerate(files):
             img = cv2.cvtColor(cv2.imread(os.path.join(frames_dir, name)), cv2.COLOR_BGR2RGB)
             res = mesh.process(img)
             if not res.multi_face_landmarks:
                 continue
-            best = None
+            taken = set()
             for face in res.multi_face_landmarks:
                 lm = face.landmark
                 height = abs(lm[152].y - lm[10].y)  # chin - forehead
-                if best is None or height > best[0]:
-                    best = (height, abs(lm[14].y - lm[13].y))  # lower inner lip - upper inner lip
-            if best and best[0] > 0:
-                out[i] = best[1] / best[0]
-    return out
+                if height <= 0:
+                    continue
+                x = (lm[234].x + lm[454].x) / 2  # cheek to cheek centre
+                gap = abs(lm[14].y - lm[13].y) / height  # lower inner lip - upper inner lip
+                near = [k for k, t in enumerate(tracks) if k not in taken and abs(t["last_x"] - x) <= 0.15]
+                if near:
+                    k = min(near, key=lambda j: abs(tracks[j]["last_x"] - x))
+                elif len(tracks) < max_faces:
+                    tracks.append({"xs": [], "hs": [], "open": np.full(n, np.nan, dtype=np.float32), "last_x": x})
+                    k = len(tracks) - 1
+                else:
+                    continue
+                taken.add(k)
+                t = tracks[k]
+                t["xs"].append(x)
+                t["hs"].append(height)
+                t["last_x"] = x
+                t["open"][i] = gap
+    return [{"x": float(np.mean(t["xs"])), "height": float(np.mean(t["hs"])), "open": t["open"]} for t in tracks if t["xs"]]
 
 
 @app.function(image=image, secrets=[auth_secret])
@@ -617,7 +685,9 @@ def web():
             engine = "standard" if body.get("engine") == "standard" else "turbo"
             call = Speaker().speak.spawn(body["reference_url"], body["segments"], float(body.get("seconds") or 8), engine)
         elif mode == "sync_check" and _https(body.get("video_url")):
-            call = sync_check.spawn(body["video_url"])
+            expect = "reaction" if body.get("expect") == "reaction" else "speaker"
+            side = body.get("speaker_side") if body.get("speaker_side") in ("left", "right") else None
+            call = sync_check.spawn(body["video_url"], expect, side)
         elif mode == "mix" and _https(body.get("video_url")) and _https(body.get("bed_video_url")):
             call = Voice().mix.spawn(body["video_url"], body["bed_video_url"])
         elif mode == "preset":
