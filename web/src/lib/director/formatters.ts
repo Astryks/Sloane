@@ -101,7 +101,8 @@ export function steadyHands(text: string): string {
     .replace(/\b(hands|fingers)\s+(?:loosely\s+)?(?:clasped|interlocked|interlaced|laced|steepled|knitted)(?:\s+together)?\b/gi, "hands resting apart and still")
     .replace(/\b(?:clasps|laces|interlocks|steeples)\s+(his|her|their)\s+(?:hands|fingers)(?:\s+together)?\b/gi, "rests $1 hands apart");
 }
-const first = (n: string) => n.trim().split(/\s+/)[0] ?? "";
+/** First name for cast ("Lawrence Neilson" -> "Lawrence"); role phrases stay whole ("The creator"). */
+const first = (n: string) => (/^(the|a|an|our|my)\s/i.test(n.trim()) ? n.trim() : (n.trim().split(/\s+/)[0] ?? ""));
 const firstLower = (n: string) => first(n).toLowerCase();
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -320,7 +321,7 @@ function ambienceOf(plan: DirectorPlan, shot: DirectorShot): string {
   const keepMusic = plan.style === "music_video";
   const parts = shot.sound.split(/,|;| and /).map((p) => p.trim()).filter((p) => p && (keepMusic || !MUSIC.test(p)));
   const fromSound = parts.filter((p) => !/\b(foley|sfx)\b/i.test(p)).join(", ");
-  return fromSound || (shot.setting || plan.location ? "the natural room tone of this place" : "");
+  return fromSound || "the natural room tone of this place";
 }
 
 // ---- look (short, no brand names) ------------------------------------------
@@ -348,6 +349,8 @@ type Spec = {
   movement: string;
   visible: CastInfo[];
   action: string;
+  /** The story beat when separate blocking was given (low priority context). */
+  story: string;
   /** The first beat of the action (<= 14 words), written before the line so the line lands in the first third. */
   leadAction: string;
   /** The rest of the blocking, written after the line. */
@@ -398,6 +401,7 @@ function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: Format
     movement: movementLine(plan, shot),
     visible,
     action: steadyHands(cleanAction(shot.blocking || shot.action)),
+    story: shot.blocking && !shot.blocking.includes(cleanAction(shot.action)) ? steadyHands(cleanAction(shot.action)) : "",
     ...splitAction(steadyHands(cleanAction(shot.blocking || shot.action))),
     eyeline: shot.eyeline ?? "",
     line,
@@ -446,7 +450,7 @@ function peopleClause(spec: Spec, refs: boolean): { text: string; short: string 
   if (!spec.visible.length) return { text: "", short: "" };
   const names = spec.visible.map((v) => v.name).join(", ");
   const n = spec.visible.length;
-  const lead = n === 1 ? "In frame" : `All ${n === 2 ? "two" : n === 3 ? "three" : n} in frame`;
+  const lead = n === 1 ? "In frame" : n === 2 ? "Both in frame" : `All ${n === 3 ? "three" : n} in frame`;
   const full = refs
     ? `${lead}, as in the reference images: ${names}`
     : `${lead}: ${spec.visible.map((v) => [v.name, v.look].filter(Boolean).join(", ")).join("; ")}`;
@@ -483,6 +487,7 @@ function veoClauses(spec: Spec, opts: FormatOptions, refs: boolean): Clause[] {
     spec.wardrobeShort ? { key: "wardrobe", text: sentence(`Same wardrobe as every shot: ${spec.wardrobeShort}`), short: sentence(`Same wardrobe: ${spec.wardrobeShort}`), priority: 86 } : null,
     spec.keep ? { key: "keep", text: sentence(`Continuity: ${spec.keep}`), short: spec.keep.includes(";") ? sentence(`Continuity: ${partsWithin(spec.keep.split(/;\s+/), 10)}`) : undefined, priority: 73 } : null,
     spec.product ? { key: "product", text: sentence(spec.product), priority: 84 } : null,
+    spec.story ? { key: "story", text: sentence(spec.story), short: sentence(clipWords(spec.story, 14)), priority: 57 } : null,
     spec.ambience ? { key: "ambience", text: `Ambient noise: ${sentence(spec.ambience)}`, priority: 79 } : null,
     spec.expression ? { key: "expression", text: sentence(spec.expression), short: sentence(clipWords(spec.expression, 8)), priority: 62 } : null,
     spec.sfx ? { key: "sfx", text: `SFX: ${sentence(spec.sfx)}`, priority: 58 } : null,

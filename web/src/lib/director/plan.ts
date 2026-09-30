@@ -255,6 +255,67 @@ export function parseScriptShots(idea: string): Array<{ action: string; dialogue
   });
 }
 
+// ---- fallback people, lines and blocking (2026-09-30) ----
+// The rules planner used to copy the idea into every shot with no speaker,
+// no line and no blocking, and an empty character bible - so the compiler
+// decided there were no people and wrote "No people, no hands, no faces" for
+// a two-man office scene. Now it finds who is in the idea, gives each person
+// shot physical blocking and gives the film at least one short line.
+
+const NOT_NAMES = new Set(
+  "A An The This That These Those It Its I We You He She They My Our Your His Her Their In On At By For From With Without Into Over Under After Before When While Then And But Or So If As Of To Make Create Show Film Video Ad Advert Commercial Scene Shot Short Story Reel TikTok Instagram YouTube Shorts UGC CEO CFO CTO Mr Mrs Ms Dr Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September October November December New York London Paris Tokyo Sydney Manhattan Brooklyn Google Microsoft Amazon Apple".split(
+    " ",
+  ),
+);
+
+/** Named people in the idea: saved cast first, then capitalised names ("Lawrence Neilson", "Liam"). */
+export function peopleInIdea(idea: string, cast: PlanInputs["cast"] = []): string[] {
+  const out: string[] = cast.map((c) => c.name.trim()).filter(Boolean);
+  const quoted = idea.replace(/"[^"]*"|“[^”]*”/g, " ");
+  for (const m of quoted.matchAll(/\b([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\b/g)) {
+    const [firstName, lastName] = [m[1], m[2]];
+    if (NOT_NAMES.has(firstName)) continue;
+    const full = lastName && !NOT_NAMES.has(lastName) ? `${firstName} ${lastName}` : firstName;
+    if (!out.some((n) => n.split(" ")[0] === firstName)) out.push(full);
+    if (out.length >= 3) break;
+  }
+  return out.slice(0, 3);
+}
+
+/** Lines written in the idea: "quoted words" or NAME: line. */
+function linesInIdea(idea: string): Array<{ speaker: string; words: string }> {
+  const out: Array<{ speaker: string; words: string }> = [];
+  for (const m of idea.matchAll(/^\s*([A-Z][A-Za-z]{1,20}):\s*(.{3,240})$/gm)) out.push({ speaker: m[1][0] + m[1].slice(1).toLowerCase(), words: m[2].trim() });
+  if (!out.length) for (const m of idea.matchAll(/"([^"]{3,240})"|“([^”]{3,240})”/g)) out.push({ speaker: "", words: (m[1] ?? m[2]).trim() });
+  return out;
+}
+
+const FALLBACK_LINE: Record<ProductionStyleId, string> = {
+  cinematic: "We need to talk.",
+  commercial: "Okay, you have to see this.",
+  ugc: "Okay, so I have to tell you about this.",
+  documentary: "Let me show you how this works.",
+  music_video: "",
+};
+
+function fallbackBlocking(who: string, other: string | undefined, i: number, style: ProductionStyleId): string {
+  if (style === "ugc") {
+    return [
+      `${who} holds the phone at arm's length, talking straight into the lens, free hand gesturing`,
+      `${who} points the phone at the thing, one hand showing it up close`,
+      `${who} turns the phone back to their face, leans in, a small honest shrug`,
+    ][i % 3];
+  }
+  const target = other ? `at ${other}` : "just past the camera";
+  return [
+    `${who} walks into the room and stops, looking ${target}, hands relaxed at their sides`,
+    `${who} leans in slightly, one hand resting on the table, eyes ${target}`,
+    `${who} pauses, glances down, then back up ${target}`,
+    `${who} shifts their weight and folds their arms, holding the look`,
+    `${who} turns away toward the window, hands in pockets`,
+  ][i % 5];
+}
+
 export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   const idea = inputs.idea.trim();
   const scripted = parseScriptShots(idea);
@@ -264,19 +325,31 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   const dir = EMOTIONS[emotion];
   const seconds = secondsFor(style, emotion);
   const tmpl = TEMPLATES[style];
+  const people = peopleInIdea(idea, inputs.cast);
+  const lines = scripted.length ? [] : linesInIdea(idea);
+  const hasPeople = people.length > 0 || !!inputs.hasCharacterPhoto || /\b(man|woman|guy|girl|person|people|he|she|they|ceo|broker|founder|host|presenter|customer|couple|friends?)\b/i.test(idea);
+  if (hasPeople && !scripted.length && !lines.length && FALLBACK_LINE[style]) lines.push({ speaker: "", words: FALLBACK_LINE[style] });
+  const shortIdea = idea.split(/\s+/).slice(0, 24).join(" ");
   const shots: DirectorShot[] = Array.from({ length: count }, (_, i) => {
     const t = tmpl[i % tmpl.length];
     const sc = scripted[i];
+    const line = lines[i];
+    const who = people.length ? (line?.speaker && people.find((p) => p.split(" ")[0].toLowerCase() === line.speaker.toLowerCase())) || people[i % people.length] : hasPeople ? (style === "ugc" ? "The creator" : "The lead") : "";
+    const other = people.find((p) => p !== who);
+    const speaker = sc?.speaker ?? (line ? line.speaker || who : "");
+    const blocking = !sc && who && t.size !== "insert" ? fallbackBlocking(who, other, i, style) : "";
     return {
       ...t,
       setting: "",
       lighting: "",
-      action: sc ? sc.action || t.beat : i === 0 ? idea : `${idea} - ${t.beat}`,
+      action: sc ? sc.action || t.beat : i === 0 ? idea : `${shortIdea} - ${t.beat}`,
       expression: sc?.speaker ? dir.expression : scripted.length ? "" : dir.expression,
-      dialogue: sc?.dialogue ?? "",
-      speaker: sc?.speaker ?? "",
+      dialogue: sc?.dialogue ?? line?.words ?? "",
+      speaker,
       sound: soundFor(style, emotion),
       durationSeconds: seconds,
+      ...(blocking ? { blocking } : {}),
+      ...(people.length && t.size !== "insert" ? { visible: [who, ...(other && t.size !== "close_up" && t.size !== "extreme_close_up" ? [other] : [])].filter(Boolean) } : {}),
     };
   });
   return sanitizePlan(
@@ -288,7 +361,11 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
       emotion,
       aspectRatio: inputs.aspectRatio && inputs.aspectRatio !== "auto" ? inputs.aspectRatio : PRODUCTION_STYLES[style].aspectRatio,
       look: { ...DEFAULT_LOOK[style], palette: `${DEFAULT_LOOK[style].palette}; ${dir.colour}` },
-      character: inputs.hasCharacterPhoto ? "the exact person from the character reference photo" : "",
+      character: people.length
+        ? people.map((n) => `${n}: ${inputs.cast?.find((c) => c.name === n)?.description ?? ""}`.replace(/:\s*$/, "")).join("; ")
+        : inputs.hasCharacterPhoto
+          ? "the exact person from the character reference photo"
+          : "",
       wardrobe: "",
       location: inputs.hasLocationPhoto ? "the exact location from the location reference photo" : "",
       product: inputs.hasProductPhoto ? "the exact product from the product reference photo" : "",
