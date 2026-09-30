@@ -46,6 +46,21 @@ export function wantsIngredients(opts: { plan: DirectorPlan; idx: number; people
  * location photo, else the shot's still.
  */
 export function pickIngredients(plan: DirectorPlan, idx: number, people: CastPerson[] | undefined, set: { keyframe?: string | null; location?: string | null }): string[] {
+  return pickLabelledRefs(plan, idx, people, set, INGREDIENT_MAX_IMAGES).map((r) => r.url);
+}
+
+/**
+ * The same pick with a label per image ("Liam", "Dawn", "the set"), for
+ * models that are told in words which image is which (Seedance 2.x:
+ * "Image 1 is Liam..."). Empty when nobody in the shot has a photo.
+ */
+export function pickLabelledRefs(
+  plan: DirectorPlan,
+  idx: number,
+  people: CastPerson[] | undefined,
+  set: { keyframe?: string | null; location?: string | null },
+  max: number,
+): Array<{ url: string; label: string }> {
   const shot = plan.shots[idx];
   if (!shot) return [];
   const cast = castWithPhotos(people);
@@ -54,7 +69,21 @@ export function pickIngredients(plan: DirectorPlan, idx: number, people: CastPer
   const inShot = cast.filter((p) => visible.includes(firstLower(p.name)) || (speaker && firstLower(p.name) === speaker));
   inShot.sort((a, b) => Number(firstLower(b.name) === speaker) - Number(firstLower(a.name) === speaker));
   const setImage = (plan.coverage ? set.keyframe || set.location : set.location || set.keyframe) || null;
-  const faces = inShot.slice(0, setImage ? INGREDIENT_MAX_IMAGES - 1 : INGREDIENT_MAX_IMAGES).map((p) => p.photos[0]).filter(Boolean);
+  const faces = inShot
+    .slice(0, setImage ? max - 1 : max)
+    .filter((p) => !!p.photos[0])
+    .map((p) => ({ url: p.photos[0], label: p.name.trim().split(/\s+/)[0] }));
   if (!faces.length) return [];
-  return [...faces, ...(setImage ? [setImage] : [])].slice(0, INGREDIENT_MAX_IMAGES);
+  return [...faces, ...(setImage ? [{ url: setImage, label: "the set" }] : [])].slice(0, max);
+}
+
+/**
+ * Seedance 2.x multimodal references (2026-09-30, off unless
+ * DIRECTOR_SEEDANCE_REFS=1): cast photos + the set as reference images
+ * (role reference_image, not a first frame), up to 4. Only on a direct
+ * ModelArk Seedance 2.x endpoint and never on a continuous take.
+ */
+export const SEEDANCE_REF_MAX = 4;
+export function wantsSeedanceRefs(endpoint: string, chained: boolean, flag: string | undefined = process.env.DIRECTOR_SEEDANCE_REFS): boolean {
+  return flag === "1" && !chained && /^modelark:.*seedance-2/.test(endpoint);
 }

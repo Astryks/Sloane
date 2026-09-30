@@ -35,7 +35,7 @@ import {
   type DirectorShotRow,
 } from "../db";
 import { getFalJobResult, getFalJobStatus, submitFalJob, IMAGE_EDIT_ENDPOINT, TEXT_TO_IMAGE_ENDPOINT } from "../fal";
-import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
+import { editableModelArkInput, getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import { voiceLockRequested, type DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
@@ -289,6 +289,12 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       // Draft / Final (2026-09-30): Final = 1080p on the GA Veo 3.1 model,
       // only where allowed (owner, or veo31 with DIRECTOR_FINAL_FOR_VEO31=1).
       if (final) endpoint = (await import("./videoQuality")).FINAL_ENDPOINT;
+      // Seedance 2.x multimodal references (off unless DIRECTOR_SEEDANCE_REFS=1):
+      // cast photos + set as Image 1..n instead of a drawn first frame.
+      const { pickLabelledRefs, wantsSeedanceRefs, SEEDANCE_REF_MAX } = await import("./ingredients");
+      const seedanceRefs = wantsSeedanceRefs(endpoint, !!chainFrame)
+        ? pickLabelledRefs(plan, shot.idx, film.refs.people, { keyframe: shot.keyframe_url, location: refList(film.refs, "location")[0] }, SEEDANCE_REF_MAX)
+        : [];
       const d = plan.shots[shot.idx]?.durationSeconds ?? null;
       const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio || endpoint.startsWith(MODELARK_ENDPOINT_PREFIX);
       let prompt = shot.prompt;
@@ -335,13 +341,15 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
             firstFrame: !!imageUrl,
             audioRef: !!lineAudio,
             ingredients: ingredients.length > 0,
+            referenceNames: seedanceRefs.length ? seedanceRefs.map((r) => r.label) : undefined,
           });
           prompt = await shortenIfNeeded(formatted, visibleCast(plan, plan.shots[shot.idx]));
         }
       } catch (err) {
         console.error("[director] prompt rebuild failed - using the stored prompt", err);
       }
-      const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
+      // Editable form for direct Seedance too, so the reference audio / images / duration set below reach ModelArk.
+      const input = editableModelArkInput(buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio), prompt, imageUrl);
       if (lineAudio) input.reference_audio_urls = [lineAudio];
       // Director Vertex jobs (2026-09-30): ask Veo to use our prompt as written,
       // keep captions/watermarks/score out via negativePrompt, and pin the
@@ -354,6 +362,11 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         const seed = plan.shots[shot.idx]?.seed;
         if (typeof seed === "number") input.seed = seed;
         if (final) input.resolution = "1080p";
+      }
+      if (seedanceRefs.length) {
+        delete input.image_url;
+        input.image_urls = seedanceRefs.map((r) => r.url);
+        input.image_role = "reference_image";
       }
       if (ingredients.length) {
         delete input.image_url;

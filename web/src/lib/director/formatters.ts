@@ -35,8 +35,13 @@ export const WORD_BUDGET: Record<PromptModel, { min: number; max: number }> = {
   kling3: { min: 50, max: 130 },
 };
 
-/** Which prompt dialect a video engine / resolved endpoint speaks. */
+/**
+ * Which prompt dialect a video engine / resolved endpoint speaks.
+ * DIRECTOR_MODEL_FORMATTERS=veo sends the Veo dialect to every model (a
+ * rollback switch for the Seedance 2.x / Kling 3.0 formatters).
+ */
 export function promptModelFor(engine: string, endpoint = ""): PromptModel {
+  if (typeof process !== "undefined" && process.env?.DIRECTOR_MODEL_FORMATTERS === "veo") return "veo";
   if (/seedance/i.test(engine) || /seedance/i.test(endpoint)) return "seedance2";
   if (engine === "klingv3" || /kling-video\/v3|kling.*3/i.test(endpoint)) return "kling3";
   return "veo";
@@ -53,6 +58,8 @@ export type FormatOptions = {
   firstFrame?: boolean;
   /** Veo reference-to-video: cast/set photos are attached as ingredients. */
   ingredients?: boolean;
+  /** Seedance 2.x reference images, in order ("Liam", "Dawn", "the set") - named as Image 1..n. */
+  referenceNames?: string[];
 };
 
 export type Clause = {
@@ -510,7 +517,11 @@ function seedanceClauses(spec: Spec, opts: FormatOptions, refs: boolean): Clause
       : `${first(l.speaker) || "The speaker"}${l.offScreen ? " (off-screen)" : ""} says${spec.speakerVoice ? ` in a ${spec.speakerVoice}` : ""}${l.delivery ? ` (${l.delivery})` : ""}: "${l.words}"`
     : "";
   return [
-    opts.firstFrame ? { key: "refs", text: opts.continuousTake ? "Image 1 is the last frame of the previous shot - carry straight on from it." : "Image 1 is the first frame.", priority: 92 } : null,
+    opts.referenceNames?.length
+      ? { key: "refs", text: `${opts.referenceNames.map((n, i) => `Image ${i + 1} is ${n}`).join(", ")} - same faces, hair and clothes as the images.`, short: `${opts.referenceNames.map((n, i) => `Image ${i + 1}: ${n}`).join(", ")}.`, priority: 92 }
+      : opts.firstFrame
+        ? { key: "refs", text: opts.continuousTake ? "Image 1 is the last frame of the previous shot - carry straight on from it." : "Image 1 is the first frame.", priority: 92 }
+        : null,
     people.text ? { key: "people", text: sentence(people.text), short: sentence(people.short), priority: 85 } : null,
     { key: "action", text: sentence([spec.action, spec.eyeline ? `eyes ${spec.eyeline}` : ""].filter(Boolean).join(", ")), short: sentence(clipWords(spec.action, 16)), priority: 90 },
     l ? { key: "line", text: lineText, priority: Infinity } : null,
@@ -594,7 +605,7 @@ function quotedStart(prompt: string, quoted: string): number {
 export function formatShotPrompt(plan: DirectorPlan, idx: number, refs: RefFlags, opts: FormatOptions): FormattedPrompt {
   const model = opts.model ?? "veo";
   const spec = buildSpec(plan, idx, refs, opts);
-  const withRefs = refs.character || !!opts.ingredients;
+  const withRefs = refs.character || !!opts.ingredients || !!opts.referenceNames?.length;
   const clauses = model === "seedance2" ? seedanceClauses(spec, opts, withRefs) : model === "kling3" ? klingClauses(spec, opts, withRefs) : veoClauses(spec, opts, withRefs);
   let fit = fitClauses(clauses, WORD_BUDGET[model].max);
   const quotedLine = spec.line?.words ?? "";
