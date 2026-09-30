@@ -196,22 +196,6 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
 }
 
 /** The people in this shot (speaker first) and the set: one photo each, max 3. */
-function shotIngredients(film: DirectorFilmRow, plan: DirectorPlan, idx: number): string[] {
-  const shot = plan.shots[idx];
-  if (!shot) return [];
-  const people = film.refs.people ?? [];
-  const text = `${shot.action} ${shot.expression}`.toLowerCase();
-  const inShot = people.filter((p) => {
-    const first = p.name.split(/\s+/)[0].toLowerCase();
-    const speaks = (shot.speaker || "").toLowerCase().startsWith(first) && !/off[- ]?screen/i.test(shot.dialogue);
-    return speaks || text.includes(first);
-  });
-  inShot.sort((a, b) => Number((b.name.split(/\s+/)[0].toLowerCase() === (shot.speaker || "").split(/\s+/)[0].toLowerCase())) - Number((a.name.split(/\s+/)[0].toLowerCase() === (shot.speaker || "").split(/\s+/)[0].toLowerCase())));
-  const location = refList(film.refs, "location")[0];
-  const out = [...inShot.slice(0, location ? 2 : 3).map((p) => p.photos[0]).filter(Boolean), ...(location ? [location] : [])];
-  return out.length ? out : [];
-}
-
 /** Films one approved shot from its frame (or from text if the frame failed). */
 const TTS_PREFIX = "tts:";
 
@@ -268,11 +252,26 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   const engine = film.engine as VideoEngine;
   try {
     if (!shot.video_request_id || shot.video_request_id.startsWith(TTS_PREFIX)) {
-      // Veo 3.1 "ingredients" (2026-09-29): straight from the real cast and set
-      // photos (who's in this shot + the set, max 3) instead of a drawn first
-      // frame - Google's recommended way to keep dialogue scenes consistent,
-      // and it skips the too-clean drawn still.
-      const ingredients = plan.fromPhotos && !plan.coverage && !chainFrame && engine === "veo31" ? shotIngredients(film, plan, shot.idx) : [];
+      // Draft / Final is decided first: Final moves Veo onto the GA model, which
+      // also takes reference images.
+      let final = false;
+      if (plan.quality === "final") {
+        const { finalAllowed } = await import("./videoQuality");
+        const { getUserById } = await import("../db");
+        const { isOwner } = await import("../owner");
+        final = finalAllowed(engine, isOwner(await getUserById(film.user_id)));
+      }
+      // Veo 3.1 "ingredients" (2026-09-29, automatic since 2026-09-30): dialogue
+      // shots in scenes with 2+ cast members who have photos film from the
+      // faces of the people in the shot + the set (max 3, 8s) instead of only
+      // a drawn first frame - Google's recommended way to hold identity and
+      // wardrobe across cuts. GA Veo 3.1 only (veo31, or Final), never Lite,
+      // never on a continuous take. Falls back to the still if refused.
+      const { pickIngredients, wantsIngredients, INGREDIENT_SECONDS } = await import("./ingredients");
+      const supportsRefs = engine === "veo31" || final;
+      const ingredients = wantsIngredients({ plan, idx: shot.idx, people: film.refs.people, chained: !!chainFrame, supportsRefs })
+        ? pickIngredients(plan, shot.idx, film.refs.people, { keyframe: shot.keyframe_url, location: refList(film.refs, "location")[0] })
+        : [];
       const imageUrl = chainFrame ?? (ingredients.length ? null : (shot.keyframe_url ?? null));
       let endpoint = resolveVideoEndpoint(engine, !!imageUrl);
       // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
@@ -286,16 +285,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       }
       // Draft / Final (2026-09-30): Final = 1080p on the GA Veo 3.1 model,
       // only where allowed (owner, or veo31 with DIRECTOR_FINAL_FOR_VEO31=1).
-      let final = false;
-      if (plan.quality === "final") {
-        const { finalAllowed, FINAL_ENDPOINT } = await import("./videoQuality");
-        const { getUserById } = await import("../db");
-        const { isOwner } = await import("../owner");
-        if (finalAllowed(engine, isOwner(await getUserById(film.user_id)))) {
-          final = true;
-          endpoint = FINAL_ENDPOINT;
-        }
-      }
+      if (final) endpoint = (await import("./videoQuality")).FINAL_ENDPOINT;
       const d = plan.shots[shot.idx]?.durationSeconds ?? null;
       const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio || endpoint.startsWith(MODELARK_ENDPOINT_PREFIX);
       let prompt = shot.prompt;
@@ -358,7 +348,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       if (ingredients.length) {
         delete input.image_url;
         input.reference_image_urls = ingredients;
-        input.duration = "8s"; // Veo's reference-to-video only makes 8s clips
+        input.duration = INGREDIENT_SECONDS; // Veo's reference-to-video only makes 8s clips
       }
       // The reseller path caps Seedance at 4s; direct 1.5 pro takes 4-12s with sound.
       if (endpoint.startsWith(MODELARK_ENDPOINT_PREFIX)) {
@@ -375,6 +365,12 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
           console.error("[director] final quality refused - filming at draft settings", shot.id, err);
           final = false;
           endpoint = resolveVideoEndpoint(engine, !!imageUrl);
+          if (ingredients.length && engine !== "veo31") {
+            // Reference images only run on the GA model - film from the still instead.
+            delete input.reference_image_urls;
+            if (shot.keyframe_url) input.image_url = shot.keyframe_url;
+            endpoint = resolveVideoEndpoint(engine, !!shot.keyframe_url);
+          }
           if (draftResolution) input.resolution = draftResolution;
           else delete input.resolution;
           requestId = await submitVideoInferenceJob(endpoint, input);

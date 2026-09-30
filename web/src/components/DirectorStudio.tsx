@@ -853,11 +853,11 @@ export function DirectorStudio({
                     setConsent={setVoiceConsent}
                   />
                 )}
-                {engine === "veo31" && !(plan.coverage ?? coverageByDefault(plan)) && (
+                {engine === "veo31" && (
                   <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
                     <input type="checkbox" className="mt-0.5" checked={!!plan.fromPhotos} onChange={(e) => editPlan({ fromPhotos: e.target.checked || undefined })} />
                     <span>
-                      🧩 Film straight from my cast &amp; set photos (no drawn first frame) - Veo builds each shot from the real photos, which often looks more natural. The storyboard is still drawn so you can check the plan.
+                      🧩 Film every shot straight from my cast &amp; set photos (no drawn first frame) - Veo builds each shot from the real photos, which holds faces and clothes steady. Dialogue shots with two or more cast members already do this automatically. The storyboard is still drawn so you can check the plan.
                     </span>
                   </label>
                 )}
