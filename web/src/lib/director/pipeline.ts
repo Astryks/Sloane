@@ -202,8 +202,7 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   }
 }
 
-/** The people in this shot (speaker first) and the set: one photo each, max 3. */
-/** Films one approved shot from its frame (or from text if the frame failed). */
+/** video_request_id prefix while a voice-first line is being recorded (see advanceVideo). */
 const TTS_PREFIX = "tts:";
 
 /** The spoken words + the speaker's Lucy voice, if this shot's speaker has one. */
@@ -248,6 +247,7 @@ async function lastFrameOf(videoUrl: string): Promise<string | null> {
   }
 }
 
+/** Films one approved shot from its frame (or from text if the frame failed). */
 async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: DirectorShotRow, all: DirectorShotRow[] = []) {
   if (shot.status === "completed" || shot.status === "failed") return;
   let chainFrame: string | null = null;
@@ -338,7 +338,7 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
           const r = await voiceCall(
             "/start",
             voiceFirst.sampleUrl
-              ? { mode: "speak", reference_url: voiceFirst.sampleUrl, segments, seconds, engine: process.env.DIRECTOR_TTS_ENGINE === "standard" ? "standard" : "turbo" }
+              ? { mode: "speak", reference_url: voiceFirst.sampleUrl, segments, seconds, engine: (await import("./lipsync")).ttsEngine() }
               : { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, segments, seconds },
           ).catch(() => null);
           if (r && typeof r.call_id === "string") return updateDirectorShot(shot.id, { video_request_id: `${TTS_PREFIX}${r.call_id}` });
@@ -573,7 +573,8 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
     //    default): a free sync check first, and a lip-synced "dub" from the
     //    person's real recording when the take is out of sync or the words
     //    are wrong - see lipsync.ts.
-    const { LIPSYNC_ENDPOINTS, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, syncFlags, takeIsGood, voiceRegister, voiceState } = await import("./lipsync");
+    const { LIPSYNC_ENDPOINTS, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, syncFlags, takeIsGood, ttsEngine, voiceRegister, voiceState } = await import("./lipsync");
+    const { screenSideOf } = await import("./formatters");
     const lip = lipsyncProvider();
     const check = syncCheckEnabled();
     let pending = false;
@@ -589,7 +590,7 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
       const planned = plan.shots[s.idx];
       // A reaction shot's speaker is off-screen: never lip-sync the listener.
       const reaction = !!planned && isReactionShot(planned);
-      const speakerSide = plan.screenSides?.[p.name] ?? Object.entries(plan.screenSides ?? {}).find(([k]) => k.split(" ")[0].toLowerCase() === p.name.split(" ")[0].toLowerCase())?.[1];
+      const speakerSide = screenSideOf(plan, p.name);
       const register = voiceRegister(p.description, p.name);
       const syncCheck = (url: string) => voiceCall("/start", { mode: "sync_check", video_url: url, expect: reaction ? "reaction" : "speaker", ...(speakerSide ? { speaker_side: speakerSide } : {}), ...(register ? { voice: register } : {}) });
       const original = s.raw_video_url ?? s.video_url ?? "";
@@ -610,7 +611,7 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
           reference_url: p.voiceSampleUrl,
           segments: acted.length ? acted : heuristicActing(script, delivery),
           seconds: shot?.durationSeconds ?? 8,
-          engine: process.env.DIRECTOR_TTS_ENGINE === "standard" ? "standard" : "turbo",
+          engine: ttsEngine(),
         });
         if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
         await setDirectorShotVoice(s.id, { voice_request_id: voiceState.dub(r.call_id) });
@@ -838,7 +839,6 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await Promise.all(shots.map((s) => advanceVideo(film, plan, s, shots)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.status === "completed" || s.status === "failed")) {
-      // Voice lock (opt-in, real recordings only) before joining the shots.
       // Voice lock (opt-in, real recordings only) and/or the free sync check before joining the shots.
       await updateDirectorFilm(film.id, { status: (await wantsVoicing(plan, film.refs.people)) ? "voicing" : "stitching" });
     }

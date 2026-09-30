@@ -452,7 +452,12 @@ type Spec = {
   sfx: string;
 };
 
-const sideOf = (plan: DirectorPlan, name: string) => (plan.screenSides ? Object.entries(plan.screenSides).find(([k]) => firstLower(k) === firstLower(name))?.[1] : undefined);
+/** A character's fixed screen side (180-degree rule): the exact name first, then a first-name match ("Lawrence" = "Lawrence Neilson"). */
+export function screenSideOf(plan: Pick<DirectorPlan, "screenSides">, name: string): "left" | "right" | undefined {
+  if (!plan.screenSides || !name) return undefined;
+  return plan.screenSides[name] ?? Object.entries(plan.screenSides).find(([k]) => firstLower(k) === firstLower(name))?.[1];
+}
+const sideOf = screenSideOf;
 const otherSide = (side: "left" | "right") => (side === "left" ? "right" : "left");
 
 /** The head item of someone's wardrobe ("charcoal double-breasted suit"), for telling people apart in one line. */

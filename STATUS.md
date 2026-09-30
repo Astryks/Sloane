@@ -1,5 +1,7 @@
 # Sloane Project Status
 
+Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
+
 ## Latest update, 2026-09-30 (evening) - Review of PRs #40-#43 (realism, coverage grammar, cinematic engine)
 
 Reviewed after merge. `npm test` passes 64/64 and tsc is clean. The design is sound and was kept (beats, recipes, playbooks, grammar, per-model formatters, automatic Veo ingredients that skip chained takes and pass the coverage still as the set ref, Director's review, takes, stitch L-cuts and room-tone beds). Changes made in this review:
@@ -75,7 +77,7 @@ Fixes Sid's "a character is speaking but the camera is on someone else" and shoo
   - Flagged shots show "Lip-sync looks off … tap Retake".
 - **Tests:** `grammar.test.ts` (13 tests) plus the Neilson idea fixture. `npm test` passes 49/49; tsc, build and py_compile are clean; eslint is no worse than main.
 
-## Latest update, 2026-09-30 - Realism pass (PR `lucy-realism-v1`, merged as #40; Modal apps redeployed 2026-09-30 by the review below)
+## Latest update, 2026-09-30 - Realism pass (PR #40 `lucy-realism-v1`, merged and live)
 
 Implements the realism diagnosis (§6 checklist) and Sid's Neilson review. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Every new paid path is off by default.
 

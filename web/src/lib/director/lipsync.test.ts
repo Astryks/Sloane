@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lineRecall, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, syncFlags, takeIsGood, voiceRegister, voiceState } from "./lipsync";
+import { lineRecall, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, syncFlags, takeIsGood, ttsEngine, voiceRegister, voiceState } from "./lipsync";
 
 test("paid lip-sync is off unless configured; the free sync check is on unless turned off", () => {
   assert.equal(lipsyncProvider(undefined), null);
@@ -49,4 +49,12 @@ test("wrong-voice check: expected register from the cast description", () => {
   assert.equal(voiceRegister("late 20s woman, dark-blonde ponytail, light freckles", "Jess"), "high");
   assert.equal(voiceRegister("navy suit, wavy light-brown hair", "Liam"), undefined);
   assert.deepEqual(syncFlags({ flags: ["voice_mismatch", "other"] }), ["voice_mismatch"]);
+});
+
+test("DIRECTOR_TTS_ENGINE: Turbo by default, 'standard' is the rollback", () => {
+  assert.equal(ttsEngine(undefined), "turbo");
+  assert.equal(ttsEngine(""), "turbo");
+  assert.equal(ttsEngine("turbo"), "turbo");
+  assert.equal(ttsEngine("standard"), "standard");
+  assert.equal(ttsEngine(" Standard "), "standard");
 });
