@@ -188,3 +188,12 @@ test("sync check flags and the reaction lay-in voice state", () => {
   assert.equal(takeIsGood({ ok: false, flags: ["mouth_on_non_speaker"] }, ""), true, "a dub can't fix a listener's lips (flagged for a retake instead)");
   assert.equal(takeIsGood({ ok: false }, ""), false);
 });
+
+test("addressee: a name said in the line wins over the neighbouring speaker", async () => {
+  const { runExample, NEILSON_IDEA, NEILSON_CAST } = await import("./testdata/cinematicExamples");
+  const { plan } = runExample(NEILSON_IDEA, NEILSON_CAST, "veo");
+  const yes = plan.shots.find((s) => /Mr\. Neilson/.test(s.dialogue));
+  assert.ok(yes, "the fixture has Liam's 'Yes, Mr. Neilson'");
+  assert.ok(!/Jess/.test(`${yes!.setup ?? ""} ${yes!.eyeline ?? ""}`), `Liam should face Lawrence, got setup=${yes!.setup} eyeline=${yes!.eyeline}`);
+  assert.ok(/Lawrence|Neilson/.test(yes!.eyeline ?? ""), `eyeline names Lawrence, got ${yes!.eyeline}`);
+});

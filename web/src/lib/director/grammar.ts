@@ -98,6 +98,14 @@ function addresseeOf(ctx: Ctx, shots: DirectorShot[], i: number, speaker: string
   const s = shots[i];
   const eye = /\bat\s+([A-Z][\w'-]+)/.exec(s.eyeline ?? "")?.[1];
   if (eye && ctx.canon(eye) && !same(eye, speaker)) return ctx.canon(eye);
+  // 2026-09-30: a name said in the line ("Yes, Mr. Neilson", "Liam, listen")
+  // is who they're talking to - the dry run framed Liam's "Yes, Mr. Neilson"
+  // over Jess's shoulder because Jess spoke next.
+  const line = (s.dialogue ?? "").replace(/\([^)]*\)/g, " ");
+  const named = [...ctx.cast].filter((c) => !same(c, speaker)).find((c) =>
+    c.split(/\s+/).filter((part) => part.length > 2).some((part) => new RegExp(`\\b${esc(part)}\\b`, "i").test(line)),
+  );
+  if (named) return named;
   for (const j of [i + 1, i - 1, i + 2, i - 2]) {
     const o = shots[j];
     if (o && hasLine(o) && ctx.canon(o.speaker) && !same(o.speaker, speaker)) return ctx.canon(o.speaker);

@@ -9,6 +9,7 @@
 // The live studio plans with Gemini first (the rules planner is its
 // fallback), so shot sizes/setups can differ; the lines and speakers can't.
 import { frameKey } from "../coverage";
+import { syncCheckEnabled } from "../lipsync";
 import { runExample } from "./cinematicExamples";
 import { NEILSON_V2_CAST, NEILSON_V2_MEETING_IDEA, NEILSON_V2_OPENING_IDEA } from "./neilsonV2Test";
 
@@ -43,5 +44,5 @@ console.log(`- Planner: Gemini on Vertex, 1-2 calls, < $0.05`);
 console.log(`- Stills: ${images} x Gemini 3 Pro Image on Vertex (3 cast angles + 1 anchor + ${frames} setup frames) ~ $${(images * IMAGE_VERTEX).toFixed(2)}`);
 console.log(perSecond ? `- Video: ${plan.shots.length} x ${engine} on Vertex, ${seconds}s billed at $${perSecond}/s ~ $${(seconds * perSecond).toFixed(2)}` : `- Video: engine ${engine} is not a Vertex Veo engine - price not estimated here`);
 console.log("- Voice/TTS: none (the model's own voices; voice lock needs an uploaded recording)");
-console.log("- Lip-sync: none (DIRECTOR_LIPSYNC unset); sync check: none (DIRECTOR_SYNC_CHECK unset)");
+console.log(`- Lip-sync: none (DIRECTOR_LIPSYNC unset); sync check + wrong-voice check: ${syncCheckEnabled() ? "on - free, our Modal CPU, one check per speaking shot" : "off (DIRECTOR_SYNC_CHECK=0)"}`);
 console.log("- Stitch: Modal director-stitch (CPU, cents)");
