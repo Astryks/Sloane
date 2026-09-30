@@ -172,7 +172,15 @@ export function directorReview(plan: DirectorPlan, opts: ReviewOptions = {}): Di
   }
   const score = Math.round((Object.keys(WEIGHT) as ReviewCheck[]).reduce((t, c) => t + checks[c] * WEIGHT[c], 0) / 100);
   const grade = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : "D";
-  return { score, grade, checks, shots: shotScores, issues, autoFixes: issues.filter((x) => x.auto).length, asl: { seconds: Math.round(asl * 10) / 10, band } };
+  // Scores count every problem; the list shows "nobody has a screen side" once, not once per person per shot.
+  const noSide = issues.filter((x) => x.check === "axis" && / has no screen side in the plan$/.test(x.message));
+  const shown = noSide.length > 1
+    ? [
+        { shot: 0, check: "axis" as const, severity: "error" as const, code: "grammar" as const, auto: true, message: `no screen sides for ${[...new Set(noSide.map((x) => x.message.split(" has ")[0]))].join(", ")} - they can flip sides between cuts`, fix: noSide[0].fix },
+        ...issues.filter((x) => !noSide.includes(x)),
+      ]
+    : issues;
+  return { score, grade, checks, shots: shotScores, issues: shown, autoFixes: shown.filter((x) => x.auto).length, asl: { seconds: Math.round(asl * 10) / 10, band } };
 }
 
 /**
