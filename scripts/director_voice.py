@@ -267,6 +267,9 @@ EXAG_RANGE = (0.35, 0.95)
 CFG_RANGE = (0.25, 0.5)
 EXPRESSIVE_EXAGGERATION = float(os.environ.get("DIRECTOR_TTS_EXAGGERATION", "0.7"))
 EXPRESSIVE_CFG = float(os.environ.get("DIRECTOR_TTS_CFG", "0.3"))
+PRESET_SAFE = os.environ.get("DIRECTOR_PRESET_SAFE", "1") != "0"
+VOICE_LOW_MAX_HZ = 175.0   # a man's line with a median pitch above this is someone else's voice
+VOICE_HIGH_MIN_HZ = 150.0  # a woman's line below this likewise
 MAX_ATEMPO = 1.1  # beyond ~1.1x time-stretching audibly smears a voice
 
 # Paralinguistic tags Chatterbox-Turbo speaks as sounds. Only Turbo knows them;
@@ -436,7 +439,13 @@ def tts_acted(voice_id, segments, seconds):
         parts, pauses = [], []
         for i, run in enumerate(_group_runs(segments)):
             raw = os.path.join(tmp, f"raw{i}.wav")
-            _lucy_take(tts, " ".join(run["texts"]), voice_id, run["exag"], run["cfg"], raw)
+            exag, cfg = run["exag"], run["cfg"]
+            if PRESET_SAFE:
+                # Sid's ear test 2026-09-30: the fine-tuned Lucy voices (Brad...)
+                # distort far from their tuned 0.6/0.4 - keep them in a safe
+                # window. The Turbo speak() path from real recordings is not clamped.
+                exag, cfg = max(0.48, min(0.72, exag)), max(0.36, min(0.48, cfg))
+            _lucy_take(tts, " ".join(run["texts"]), voice_id, exag, cfg, raw)
             trimmed = os.path.join(tmp, f"take{i}.wav")
             _trim_ends(raw, trimmed)
             parts.append(trimmed)
@@ -549,7 +558,7 @@ def _best_corr(speech, mouth, n):
 
 
 @app.function(image=image, timeout=300, cpu=2.0)
-def sync_check(video_url, expect="speaker", speaker_side=None):
+def sync_check(video_url, expect="speaker", speaker_side=None, voice=None):
     import numpy as np
 
     expect = "reaction" if expect == "reaction" else "speaker"
@@ -576,8 +585,19 @@ def sync_check(video_url, expect="speaker", speaker_side=None):
         text = " ".join(heard)[:600]
         tracks = [t for t in _mouth_tracks(v, n, tmp) if (~np.isnan(t["open"])).sum() >= n * 0.5]
         base = {"expect": expect, "words": words, "frames": n, "faces": len(tracks), "text": text}
+        # 2026-09-30: the WRONG PERSON'S VOICE on a line (Lawrence's line in a
+        # woman's voice in Neilson v2). `voice` = the speaker's expected
+        # register from their description ("low" / "high"); a clear miss is flagged.
+        voice_flags = []
+        if words and voice in ("low", "high"):
+            import soundfile as sf
+            audio, sr0 = sf.read(wav, dtype="float32")
+            f0 = _median_f0(audio if audio.ndim == 1 else audio.mean(1), sr0)
+            base["f0"] = round(f0, 1)
+            if f0 and ((voice == "low" and f0 > VOICE_LOW_MAX_HZ) or (voice == "high" and f0 < VOICE_HIGH_MIN_HZ)):
+                voice_flags.append("voice_mismatch")
         if words == 0 or not tracks:
-            return {**base, "ok": None, "reason": "no speech or no face", "flags": []}
+            return {**base, "ok": None if not voice_flags else False, "reason": "no speech or no face", "flags": voice_flags}
 
         speaker = None
         if expect == "speaker":
@@ -603,6 +623,7 @@ def sync_check(video_url, expect="speaker", speaker_side=None):
                 listeners.append({"x": round(t["x"], 3), "score": round(corr, 3), "open_p90": round(p90, 4)})
                 if corr >= LISTENER_MIN_CORR and p90 >= LISTENER_MIN_OPEN and "mouth_on_non_speaker" not in flags:
                     flags.append("mouth_on_non_speaker")
+        flags += voice_flags
         out = {**base, "flags": flags, "listeners": listeners}
         if speaker is None:
             return {**out, "ok": not flags}
@@ -687,7 +708,8 @@ def web():
         elif mode == "sync_check" and _https(body.get("video_url")):
             expect = "reaction" if body.get("expect") == "reaction" else "speaker"
             side = body.get("speaker_side") if body.get("speaker_side") in ("left", "right") else None
-            call = sync_check.spawn(body["video_url"], expect, side)
+            voice = body.get("voice") if body.get("voice") in ("low", "high") else None
+            call = sync_check.spawn(body["video_url"], expect, side, voice)
         elif mode == "mix" and _https(body.get("video_url")) and _https(body.get("bed_video_url")):
             call = Voice().mix.spawn(body["video_url"], body["bed_video_url"])
         elif mode == "preset":

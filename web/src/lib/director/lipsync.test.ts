@@ -1,16 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lineRecall, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, takeIsGood, voiceState } from "./lipsync";
+import { lineRecall, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, syncFlags, takeIsGood, voiceRegister, voiceState } from "./lipsync";
 
-test("lip-sync and sync check are off unless configured", () => {
+test("paid lip-sync is off unless configured; the free sync check is on unless turned off", () => {
   assert.equal(lipsyncProvider(undefined), null);
   assert.equal(lipsyncProvider(""), null);
   assert.equal(lipsyncProvider("off"), null);
   assert.equal(lipsyncProvider("kling"), "kling");
   assert.equal(lipsyncProvider("LatentSync"), "latentsync");
   assert.equal(lipsyncProvider("sync-2-pro"), "sync2pro");
-  assert.equal(syncCheckEnabled(undefined), false);
+  assert.equal(syncCheckEnabled(undefined), true);
   assert.equal(syncCheckEnabled("1"), true);
+  assert.equal(syncCheckEnabled("0"), false);
+  assert.equal(syncCheckEnabled("false"), false);
 });
 
 test("provider inputs", () => {
@@ -40,4 +42,11 @@ test("gibberish or out-of-sync takes are flagged; unknown results never trigger 
   assert.equal(takeIsGood({ ok: false, score: 0.05, text: line }, line), false);
   assert.equal(takeIsGood({ ok: null }, line), true);
   assert.equal(takeIsGood(null, line), true);
+});
+
+test("wrong-voice check: expected register from the cast description", () => {
+  assert.equal(voiceRegister("late 50s, silver-grey hair, trimmed grey beard, charcoal tweed suit", "Lawrence Neilson"), "low");
+  assert.equal(voiceRegister("late 20s woman, dark-blonde ponytail, light freckles", "Jess"), "high");
+  assert.equal(voiceRegister("navy suit, wavy light-brown hair", "Liam"), undefined);
+  assert.deepEqual(syncFlags({ flags: ["voice_mismatch", "other"] }), ["voice_mismatch"]);
 });

@@ -36,8 +36,19 @@ export function lipsyncProvider(value: string | undefined = process.env.DIRECTOR
   return null;
 }
 
+/** 2026-09-30: ON by default (free - our own Modal CPU); DIRECTOR_SYNC_CHECK=0 turns it off. */
 export function syncCheckEnabled(value: string | undefined = process.env.DIRECTOR_SYNC_CHECK): boolean {
-  return value === "1" || value?.toLowerCase() === "true";
+  return !(value === "0" || value?.toLowerCase() === "false");
+}
+
+/** A speaker's expected voice register from their cast description, for the wrong-voice check. */
+export function voiceRegister(description: string, name = ""): "low" | "high" | undefined {
+  const d = ` ${description} ${name} `.toLowerCase();
+  const female = /\b(woman|women|girl|she|her|female|lady|mother|mum|mom|actress|wife|daughter|sister)\b/.test(d);
+  const male = /\b(man|men|guy|boy|he|his|him|male|gentleman|father|dad|husband|son|brother|beard|bearded|moustache|mustache)\b/.test(d);
+  if (female && !male) return "high";
+  if (male && !female) return "low";
+  return undefined;
 }
 
 /** fal input for each provider (schemas checked 2026-09-30). Audio longer than the video is cut, never looped. */
@@ -127,12 +138,12 @@ export function lineRecall(heard: string, script: string): number {
  *     reaction shot);
  *   speaker_mouth_closed - the speaker's mouth barely opens during their line.
  */
-export type SyncFlag = "mouth_on_non_speaker" | "speaker_mouth_closed";
+export type SyncFlag = "mouth_on_non_speaker" | "speaker_mouth_closed" | "voice_mismatch";
 export type SyncResult = { ok?: boolean | null; score?: number; lag_s?: number; text?: string; words?: number; flags?: unknown };
 
 export function syncFlags(r: SyncResult | null | undefined): SyncFlag[] {
   const raw = Array.isArray(r?.flags) ? r.flags : [];
-  return raw.filter((f): f is SyncFlag => f === "mouth_on_non_speaker" || f === "speaker_mouth_closed");
+  return raw.filter((f): f is SyncFlag => f === "mouth_on_non_speaker" || f === "speaker_mouth_closed" || f === "voice_mismatch");
 }
 
 /**

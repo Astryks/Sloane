@@ -573,7 +573,7 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
     //    default): a free sync check first, and a lip-synced "dub" from the
     //    person's real recording when the take is out of sync or the words
     //    are wrong - see lipsync.ts.
-    const { LIPSYNC_ENDPOINTS, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, syncFlags, takeIsGood, voiceState } = await import("./lipsync");
+    const { LIPSYNC_ENDPOINTS, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, syncFlags, takeIsGood, voiceRegister, voiceState } = await import("./lipsync");
     const lip = lipsyncProvider();
     const check = syncCheckEnabled();
     let pending = false;
@@ -590,7 +590,8 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
       // A reaction shot's speaker is off-screen: never lip-sync the listener.
       const reaction = !!planned && isReactionShot(planned);
       const speakerSide = plan.screenSides?.[p.name] ?? Object.entries(plan.screenSides ?? {}).find(([k]) => k.split(" ")[0].toLowerCase() === p.name.split(" ")[0].toLowerCase())?.[1];
-      const syncCheck = (url: string) => voiceCall("/start", { mode: "sync_check", video_url: url, expect: reaction ? "reaction" : "speaker", ...(speakerSide ? { speaker_side: speakerSide } : {}) });
+      const register = voiceRegister(p.description, p.name);
+      const syncCheck = (url: string) => voiceCall("/start", { mode: "sync_check", video_url: url, expect: reaction ? "reaction" : "speaker", ...(speakerSide ? { speaker_side: speakerSide } : {}), ...(register ? { voice: register } : {}) });
       const original = s.raw_video_url ?? s.video_url ?? "";
       const script = voiceFirstLine(film, plan, s.idx)?.words ?? plan.shots[s.idx]?.dialogue ?? "";
       const startConvert = async (retry: boolean) => {
@@ -666,7 +667,11 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
           // their line - a dub can't fix a listener's lips, so the shot is
           // flagged for a retake instead.
           const flags = syncFlags(result);
-          if (flags.includes("mouth_on_non_speaker") || (!good && !canDub)) {
+          if (flags.includes("voice_mismatch") && !convertable) {
+            // The model used someone else's voice for this line - only a retake fixes it.
+            console.error("[director] wrong voice on this line - flagged for a retake", s.id, result?.f0);
+            await updateDirectorShot(s.id, { error: "wrongvoice" });
+          } else if (flags.includes("mouth_on_non_speaker") || (!good && !canDub)) {
             console.error("[director] sync check flagged the take for a retake", s.id, flags, result?.score);
             await updateDirectorShot(s.id, { error: "sync" });
           }
