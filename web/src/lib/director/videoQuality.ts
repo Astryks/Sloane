@@ -42,3 +42,22 @@ export function effectiveQuality(plan: Pick<DirectorPlan, "quality">, engine: Vi
 /** Final renders on the GA Veo 3.1 model at 1080p. */
 export const FINAL_ENDPOINT = vertexEndpointToken(VERTEX_VEO_STANDARD_MODEL);
 export const FINAL_RESOLUTION = "1080p";
+
+/**
+ * Hero multi-sampling (2026-09-30): Veo returns 2-4 takes of a hero shot in
+ * one request and the customer can switch between them. Every take is billed,
+ * and shot prices don't change, so this is OWNER-ONLY, Final-only, and off
+ * unless DIRECTOR_HERO_SAMPLES is 2-4. Hero = a shot the planner marked
+ * `hero`, else the opening shot.
+ */
+export function heroSamples(plan: Pick<DirectorPlan, "shots">, idx: number, opts: { final: boolean; owner: boolean }, env: string | undefined = process.env.DIRECTOR_HERO_SAMPLES): number {
+  const n = Math.min(4, Math.max(1, Number.parseInt(env ?? "1", 10) || 1));
+  if (n < 2 || !opts.final || !opts.owner) return 1;
+  const anyHero = plan.shots.some((s) => s.hero);
+  return (anyHero ? plan.shots[idx]?.hero : idx === 0) ? n : 1;
+}
+
+/** Lossless Vertex output for a Final master (bigger files; off unless DIRECTOR_LOSSLESS_MASTER=1). */
+export function losslessMaster(final: boolean, env: string | undefined = process.env.DIRECTOR_LOSSLESS_MASTER): boolean {
+  return final && env === "1";
+}

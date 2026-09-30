@@ -401,7 +401,17 @@ function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: Format
     .filter((v) => v.wardrobeShort)
     .map((v) => `${first(v.name)} in ${v.wardrobeShort}`)
     .join("; ");
-  const keep = steadyHands((shot.keep ?? []).join("; "));
+  // A keep item that only restates a visible person's wardrobe (the continuity
+  // pass adds those) is already covered by the wardrobe clause - don't spend
+  // the word budget saying it twice.
+  const restatesWardrobe = (k: string) =>
+    visible.some((v) => {
+      if (!v.wardrobe || !k.toLowerCase().startsWith(`${firstLower(v.name)}'s `)) return false;
+      const have = new Set(v.wardrobe.toLowerCase().match(/[a-z]+/g) ?? []);
+      const words = k.slice(k.indexOf(" ") + 1).toLowerCase().match(/[a-z]+/g) ?? [];
+      return words.length > 0 && words.filter((w) => have.has(w)).length / words.length >= 0.8;
+    });
+  const keep = steadyHands((shot.keep ?? []).filter((k) => !restatesWardrobe(k)).join("; "));
   return {
     person,
     framing: framingLine(plan, shot, person),

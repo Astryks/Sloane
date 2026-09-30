@@ -204,6 +204,10 @@ export type VertexVeoParams = {
    * and retries if a model rejects it. Omitted = Google's default.
    */
   enhancePrompt?: boolean | null;
+  /** 1-4 takes in one request (hero shots; each take is billed). Default 1. */
+  sampleCount?: number | null;
+  /** "lossless" for a Final master; omitted = Google's default ("optimized"). */
+  compressionQuality?: "optimized" | "lossless" | null;
 };
 
 // Veo 3.x accepts 4/6/8s; snap anything else down to the nearest valid value.
@@ -221,7 +225,7 @@ export async function buildVertexVeoBody(p: VertexVeoParams): Promise<Record<str
     instance.image = await imageFromUrl(p.imageUrl);
   }
   const parameters: Record<string, unknown> = {
-    sampleCount: 1,
+    sampleCount: Math.min(4, Math.max(1, Math.round(p.sampleCount ?? 1))),
     durationSeconds: snapDuration(p.durationSeconds),
     resolution: p.resolution === "1080p" ? "1080p" : "720p",
     generateAudio: p.generateAudio ?? true,
@@ -235,6 +239,7 @@ export async function buildVertexVeoBody(p: VertexVeoParams): Promise<Record<str
   if (p.negativePrompt) parameters.negativePrompt = p.negativePrompt;
   if (typeof p.seed === "number") parameters.seed = p.seed;
   if (typeof p.enhancePrompt === "boolean") parameters.enhancePrompt = p.enhancePrompt;
+  if (p.compressionQuality === "lossless" || p.compressionQuality === "optimized") parameters.compressionQuality = p.compressionQuality;
   return { instances: [instance], parameters };
 }
 
@@ -253,6 +258,8 @@ export function vertexParamsFromFalShapedInput(input: Record<string, unknown>): 
     negativePrompt: typeof input.negative_prompt === "string" ? input.negative_prompt : null,
     seed: typeof input.seed === "number" ? input.seed : null,
     enhancePrompt: typeof input.enhance_prompt === "boolean" ? input.enhance_prompt : null,
+    sampleCount: typeof input.sample_count === "number" ? input.sample_count : null,
+    compressionQuality: input.compression_quality === "lossless" || input.compression_quality === "optimized" ? input.compression_quality : null,
   };
 }
 
@@ -320,25 +327,33 @@ export async function getVertexVeoStatus(model: string, operationName: string): 
 
 // Keyed by operation name so a status poll that just saw COMPLETED and the
 // immediately-following result call don't re-upload the same file.
-const uploadedByOperation = new Map<string, string>();
+const uploadedByOperation = new Map<string, string[]>();
 
-/** Returns { video: { url } } - the same shape fal results use, so getVideoInferenceUrl works unchanged. */
-export async function getVertexVeoResult(model: string, operationName: string): Promise<{ video: { url: string } }> {
+/**
+ * Returns { video: { url } } - the same shape fal results use, so
+ * getVideoInferenceUrl works unchanged - plus `takes` (every returned take's
+ * URL, first = video) when the job was multi-sampled.
+ */
+export async function getVertexVeoResult(model: string, operationName: string): Promise<{ video: { url: string }; takes: string[] }> {
   const cached = uploadedByOperation.get(operationName);
-  if (cached) return { video: { url: cached } };
+  if (cached) return { video: { url: cached[0] }, takes: cached };
   const op = await fetchOperation(model, operationName);
-  const v = op.response?.videos?.[0];
-  if (!op.done || !v) {
+  const videos = (op.response?.videos ?? []).filter((v) => v.bytesBase64Encoded || v.gcsUri);
+  if (!op.done || !videos.length) {
     const filtered = op.response?.raiMediaFilteredCount ? " (blocked by the model's safety filter)" : "";
     throw new Error(`Video generation produced no video${filtered}`);
   }
-  if (!v.bytesBase64Encoded) throw new Error("Video engine returned a storage link instead of the video - storageUri must stay unset");
-  const blob = await put(`videos/veo/${randomUUID()}.mp4`, Buffer.from(v.bytesBase64Encoded, "base64"), {
-    access: "public",
-    contentType: v.mimeType || "video/mp4",
-    addRandomSuffix: false,
-  });
-  const url = blob.url;
-  uploadedByOperation.set(operationName, url);
-  return { video: { url } };
+  if (!videos[0].bytesBase64Encoded) throw new Error("Video engine returned a storage link instead of the video - storageUri must stay unset");
+  const takes: string[] = [];
+  for (const v of videos.slice(0, 4)) {
+    if (!v.bytesBase64Encoded) continue;
+    const blob = await put(`videos/veo/${randomUUID()}.mp4`, Buffer.from(v.bytesBase64Encoded, "base64"), {
+      access: "public",
+      contentType: v.mimeType || "video/mp4",
+      addRandomSuffix: false,
+    });
+    takes.push(blob.url);
+  }
+  uploadedByOperation.set(operationName, takes);
+  return { video: { url: takes[0] }, takes };
 }

@@ -28,6 +28,7 @@ import {
   releaseDirectorFilm,
   setDirectorFilmCast,
   setDirectorFilmRefs,
+  setDirectorShotTakes,
   setDirectorShotVoice,
   updateDirectorFilm,
   updateDirectorShot,
@@ -40,7 +41,7 @@ import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, ty
 import { voiceLockRequested, type DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
 import { isVertexEndpoint } from "../vertexVeo";
-import { MODELARK_ENDPOINT_PREFIX, getModelArkApiKey } from "../modelArk";
+import { MODELARK_ENDPOINT_PREFIX, getModelArkApiKey, getSeedanceModelId } from "../modelArk";
 import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt, type CastPerson } from "./refs";
 import type { DirectorShot } from "./plan";
 import { refFlags } from "./filmAccess";
@@ -258,11 +259,13 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       // Draft / Final is decided first: Final moves Veo onto the GA model, which
       // also takes reference images.
       let final = false;
+      let owner = false;
       if (plan.quality === "final") {
         const { finalAllowed } = await import("./videoQuality");
         const { getUserById } = await import("../db");
         const { isOwner } = await import("../owner");
-        final = finalAllowed(engine, isOwner(await getUserById(film.user_id)));
+        owner = isOwner(await getUserById(film.user_id));
+        final = finalAllowed(engine, owner);
       }
       // Veo 3.1 "ingredients" (2026-09-29, automatic since 2026-09-30): dialogue
       // shots in scenes with 2+ cast members who have photos film from the
@@ -280,7 +283,13 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       // Owner test (2026-09-29): BYTEPLUS_OWNER_SEEDANCE_MODEL (default
       // seedance-1-0-pro-250528 - 1.5 pro is retired - free tokens on our BytePlus account), the
       // owner's Seedance films run there directly; customers are unaffected.
-      const ownerModel = process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim() || "seedance-1-0-pro-250528";
+      // 2026-09-30: Seedance 1.0 makes no sound and takes no reference audio, so
+      // it is wrong for dialogue. DIRECTOR_OWNER_SEEDANCE_2=1 moves the owner's
+      // Seedance films onto the configured 2.x model (BYTEPLUS_SEEDANCE_20_MODEL)
+      // - off by default because 1.0 runs on free tokens and 2.x is billed.
+      const ownerModel =
+        process.env.BYTEPLUS_OWNER_SEEDANCE_MODEL?.trim() ||
+        (process.env.DIRECTOR_OWNER_SEEDANCE_2 === "1" ? getSeedanceModelId("seedance") : "seedance-1-0-pro-250528");
       if (engine === "seedance" && ownerModel && getModelArkApiKey()) {
         const { getUserById } = await import("../db");
         const { isOwner } = await import("../owner");
@@ -334,7 +343,8 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         if (plan.shots[shot.idx]) {
           const { formatShotPrompt, promptModelFor, visibleCast } = await import("./formatters");
           const { shortenIfNeeded } = await import("./shortenPrompt.server");
-          const formatted = formatShotPrompt(plan, shot.idx, refFlags(film), {
+          const { withContinuity } = await import("./shotSchema");
+          const formatted = formatShotPrompt(withContinuity(plan), shot.idx, refFlags(film), {
             nativeAudio,
             model: promptModelFor(engine, endpoint),
             continuousTake: !!chainFrame,
@@ -361,7 +371,14 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         input.negative_prompt = veoNegativePrompt(plan);
         const seed = plan.shots[shot.idx]?.seed;
         if (typeof seed === "number") input.seed = seed;
-        if (final) input.resolution = "1080p";
+        if (final) {
+          input.resolution = "1080p";
+          // Hero takes + lossless master: owner-only / opt-in (see videoQuality.ts).
+          const { heroSamples, losslessMaster } = await import("./videoQuality");
+          const samples = heroSamples(plan, shot.idx, { final, owner });
+          if (samples > 1) input.sample_count = samples;
+          if (losslessMaster(final)) input.compression_quality = "lossless";
+        }
       }
       if (seedanceRefs.length) {
         delete input.image_url;
@@ -396,6 +413,8 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
           }
           if (draftResolution) input.resolution = draftResolution;
           else delete input.resolution;
+          delete input.sample_count;
+          delete input.compression_quality;
           requestId = await submitVideoInferenceJob(endpoint, input);
         }
       } catch (err) {
@@ -420,7 +439,10 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
     const endpoint = shot.video_endpoint as string;
     const status = await getVideoInferenceStatus(endpoint, shot.video_request_id);
     if (status === "COMPLETED") {
-      const url = getVideoInferenceUrl(await getVideoInferenceResult(endpoint, shot.video_request_id));
+      const result = await getVideoInferenceResult(endpoint, shot.video_request_id);
+      const url = getVideoInferenceUrl(result);
+      const takes = (result as { takes?: unknown }).takes;
+      if (url && Array.isArray(takes) && takes.length > 1) await setDirectorShotTakes(shot.id, takes.filter((t): t is string => typeof t === "string"));
       if (url) return updateDirectorShot(shot.id, { status: "completed", video_url: url });
       if (await failDirectorShot(shot.id, "Model returned no video")) await refundVideoCredit(film.user_id, shot.price_cents);
       return;

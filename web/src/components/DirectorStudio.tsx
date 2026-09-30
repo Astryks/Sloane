@@ -43,7 +43,7 @@ const GOAL_LABEL: Record<string, string> = {
   entertain: "Entertaining",
 };
 
-type ShotStatus = { idx: number; status: string; keyframeUrl: string | null; videoUrl: string | null; error: string | null };
+type ShotStatus = { idx: number; status: string; keyframeUrl: string | null; videoUrl: string | null; error: string | null; takes?: string[]; takeUrl?: string | null };
 type FilmStatus = {
   status: string;
   error: string | null;
@@ -585,6 +585,15 @@ export function DirectorStudio({
     }
   }
 
+  async function pickTake(i: number, take: number) {
+    const data = await filmAction("use-take", { shotIdx: i, take }, `usetake${i}`);
+    if (data) {
+      setFilm((f) => (f ? { ...f, status: "shots", finalVideoUrl: null } : f));
+      setNotice(`Using take ${take + 1} for shot ${i + 1} - Lucy will re-join the film.`);
+      restartPolling();
+    }
+  }
+
   async function cancelFilm() {
     const data = await filmAction("cancel", {}, "cancel");
     if (data) {
@@ -974,6 +983,22 @@ export function DirectorStudio({
                       </div>
                     )}
                     {st?.videoUrl && <video src={st.videoUrl} controls playsInline className="mt-2 w-full rounded-lg" />}
+                    {film && (film.status === "completed" || film.status === "failed") && (st?.takes?.length ?? 0) > 1 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className="font-semibold text-muted">Takes:</span>
+                        {st!.takes!.map((t, k) => (
+                          <button
+                            key={t}
+                            type="button"
+                            disabled={!!busy || t === st?.takeUrl}
+                            onClick={() => pickTake(i, k)}
+                            className={`rounded-full border px-2 py-0.5 font-bold ${t === st?.takeUrl ? "border-purple bg-purple text-white" : "border-purple text-purple"} disabled:opacity-70`}
+                          >
+                            {busy === `usetake${i}` ? "…" : `Take ${k + 1}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {film && (film.status === "completed" || film.status === "failed") && (
                       <div className="mt-2 flex gap-2">
                         <input

@@ -5,6 +5,7 @@ import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy"
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan, withShotSeeds } from "@/lib/director/plan";
+import { withContinuity } from "@/lib/director/shotSchema";
 import { finalAllowedFor } from "@/lib/director/videoQuality";
 import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
@@ -129,6 +130,9 @@ export async function POST(req: NextRequest) {
     // Per-shot seeds (stored, so a retake can reproduce a take) and the
     // Draft/Final choice - Final only where allowed (see videoQuality.ts).
     plan = withShotSeeds(plan);
+    // Continuity (2026-09-30): every visible cast member on every shot, their
+    // wardrobe held in `keep`, props/light carried from the shot before.
+    plan = withContinuity(plan);
     if (plan.quality === "final" && !finalAllowedFor(engine, user)) plan = { ...plan, quality: undefined };
     // Lucy makes the character sheet herself when there's a person and the
     // customer hasn't already given several angles.

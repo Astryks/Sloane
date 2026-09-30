@@ -69,6 +69,10 @@ export type DirectorShot = {
   keep?: string[];
   /** Vertex seed for this shot, stored so a retake can reproduce or vary it. */
   seed?: number;
+  /** Index of the earlier shot this one continues (same place and people) - its keep list carries over. */
+  continuityFrom?: number;
+  /** A hero shot (the moment the film hangs on) - eligible for multi-take sampling on Final. */
+  hero?: boolean;
 };
 
 export type FilmQuality = "draft" | "final";
@@ -429,6 +433,9 @@ function directorFields(s: Record<string, unknown>): Partial<DirectorShot> {
   if (keep.length) out.keep = keep;
   const seed = Number(s.seed);
   if (Number.isInteger(seed) && seed >= 0 && seed <= 4294967295) out.seed = seed;
+  const from = Number(s.continuityFrom ?? (s.continuity as Record<string, unknown> | undefined)?.from_shot);
+  if (Number.isInteger(from) && from >= 0 && from < 12) out.continuityFrom = from;
+  if (s.hero === true) out.hero = true;
   return out;
 }
 
@@ -543,6 +550,9 @@ Shot rules:
 - "visible": the exact names of EVERY cast member in frame, including a foreground shoulder in an over-the-shoulder shot. Nobody appears or vanishes between shots unless they walk in or out on screen.
 - "listeners": for each silent person in frame, a small physical reaction ("swallows, holds the stare").
 - "keep": continuity to hold from the previous shot - each visible person's wardrobe item that is easy to lose (tie pattern, blazer colour, glasses), props, positions, the light.
+- "continuityFrom": the index (0-based) of the earlier shot this one continues in the same place, if any - its props, positions and light carry over.
+- Speaking shots: frame the speaker so the face is clearly readable (medium close-up or closer, frontal to three-quarter, face at least a fifth of the frame) - wides, backs and profiles are for listening and silent beats.
+- "hero": true on the ONE shot the film hangs on (the reveal, the punchline); omit it everywhere else.
 - "expression": one physical tell (a swallow, a glance down), never the feeling's name.
 - Sound: "roomTone" once for the scene (the real sound of the place, e.g. "air-conditioning hum, distant traffic far below"); per shot "ambience" if the place changes, and "sfx" = 1-2 motivated sounds (a chair creak, a door latch). No music unless the idea asks for it or it is diegetic; leave "sound" for anything else.
 - durationSeconds: the time to say the line (words / 2.5) plus a 1.5-2.5 second beat; shots without a line: commercial 2-4, ugc 3-6, cinematic 4-8, music_video 2-4, documentary 5-8.
@@ -560,7 +570,7 @@ People:
 Before answering, check: every line fits its duration, one move per shot, every speaker has a voice description, every person in frame is in "visible", wardrobe is specific.
 
 Reply with JSON only:
-{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","visible":[""],"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"sound":"","durationSeconds":6}]}
+{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","visible":[""],"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"continuityFrom":0,"hero":false,"sound":"","durationSeconds":6}]}
 
 Menu:
 ${menu()}`;

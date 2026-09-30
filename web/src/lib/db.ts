@@ -665,6 +665,8 @@ async function runSchemaMigrations() {
   await sql`ALTER TABLE saved_characters ADD COLUMN IF NOT EXISTS voice_id TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS voice_request_id TEXT`;
   await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS raw_video_url TEXT`;
+  // Hero multi-sampling (2026-09-30, off unless DIRECTOR_HERO_SAMPLES>=2): the other takes, JSON array of URLs.
+  await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS alt_video_urls TEXT`;
   // Free storyboard planning is rate-limited per visitor (session or IP).
   await sql`
     CREATE TABLE IF NOT EXISTS director_plan_log (
@@ -2415,6 +2417,8 @@ export type DirectorShotRow = {
   error: string | null;
   voice_request_id: string | null;
   raw_video_url: string | null;
+  /** JSON array of every take's URL when the shot was multi-sampled (hero shots), else null. */
+  alt_video_urls?: string | null;
 };
 
 /** Counts this visitor's plans in the last 24h, then logs one more if under the cap. */
@@ -2592,8 +2596,31 @@ export async function resetDirectorShotForRetake(filmId: string, shotId: string)
   if (!rows.length) return false;
   await sql`
     UPDATE director_shots SET status = 'keyframe', video_endpoint = NULL, video_request_id = NULL, video_url = NULL,
-      voice_request_id = NULL, raw_video_url = NULL, error = NULL, claimed_at = NULL
+      voice_request_id = NULL, raw_video_url = NULL, alt_video_urls = NULL, error = NULL, claimed_at = NULL
     WHERE id = ${shotId}
+  `;
+  return true;
+}
+
+/** Every take of a multi-sampled shot (the first one is what video_url starts as). */
+export async function setDirectorShotTakes(shotId: string, urls: string[]) {
+  await sql`UPDATE director_shots SET alt_video_urls = ${JSON.stringify(urls.slice(0, 4))} WHERE id = ${shotId}`;
+}
+
+/**
+ * The customer picked another take: it becomes the shot's video (voice work is
+ * redone on it) and the film is re-joined. Free - the takes were already paid for.
+ */
+export async function useDirectorShotTake(filmId: string, shotId: string, url: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_films SET status = 'shots', final_video_url = NULL, stitch_request_id = NULL, error = NULL, claimed_at = NULL
+    WHERE id = ${filmId} AND status IN ('completed', 'failed', 'shots', 'voicing', 'stitching')
+    RETURNING id
+  `;
+  if (!rows.length) return false;
+  await sql`
+    UPDATE director_shots SET video_url = ${url}, raw_video_url = NULL, voice_request_id = NULL, error = NULL, claimed_at = NULL
+    WHERE id = ${shotId} AND film_id = ${filmId}
   `;
   return true;
 }
