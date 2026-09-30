@@ -10,6 +10,9 @@ import { CameraMoveChooser } from "@/components/CameraMoveChooser";
 import { ExpressionChooser } from "@/components/ExpressionChooser";
 import { DirectorTechniquePack } from "@/components/DirectorTechniquePack";
 import { StillGenerateBox } from "@/components/StillGenerateBox";
+import { YoutubeEmbed } from "@/components/YoutubeEmbed";
+import { CopyPrompt } from "@/app/character-sheet/CopyPrompt";
+import { HIGGSFIELD_CAR_COMMERCIAL } from "@/lib/promptGuideHiggsfield";
 
 function GuideCard({
   wash,
@@ -703,6 +706,18 @@ export function PromptGuideSection({
     if (window.location.hash === "#jojo-case-study" && jojoDetailsRef.current) {
       jojoDetailsRef.current.open = true;
     }
+    // Deep links into the guide (e.g. /#higgsfield-car-commercial) live inside the
+    // collapsed "More tools" <details>; open every ancestor so the anchor is visible.
+    const hash = window.location.hash;
+    if (hash === "#higgsfield-car-commercial" || hash === "#jojo-case-study") {
+      const target = document.getElementById(hash.slice(1));
+      let el = target?.parentElement ?? null;
+      while (el) {
+        if (el instanceof HTMLDetailsElement) el.open = true;
+        el = el.parentElement;
+      }
+      target?.scrollIntoView();
+    }
   }, []);
 
   return (
@@ -1223,6 +1238,80 @@ Do not add subtitles. No logos/watermarks unless wanted + [style anchor]`}</Past
           — finished video, storyboard stills, then your own drop grid.
         </p>
       </div>
+
+      <HiggsfieldCarCommercialCaseStudy />
     </GuideCard>
+  );
+}
+
+/** Credited third-party case study: Higgsfield's official dealership prompt + their ad. */
+function HiggsfieldCarCommercialCaseStudy() {
+  const c = HIGGSFIELD_CAR_COMMERCIAL;
+  return (
+    <div id={c.id} className="scroll-mt-6 rounded-2xl border border-purple/20 bg-white/80 p-4">
+      <p className="text-xs font-bold uppercase tracking-wide text-purple">Pro prompt, broken down</p>
+      <h3 className="mt-1 text-base font-extrabold tracking-tight text-foreground">{c.title}</h3>
+      <p className="mt-2 text-sm leading-relaxed text-muted">
+        This is the exact prompt Higgsfield used for the opening scene of their AI car commercial:
+        a race driver in a bad disguise picks up his keys, and the consultant works out who he is a
+        second too late. It fits <strong className="text-foreground">7 shots and 6 cuts</strong>{" "}
+        into one 12-second generation.
+      </p>
+      <p className="mt-3 text-xs font-semibold text-foreground">How it&apos;s built</p>
+      <ul className="mt-1 list-disc space-y-1.5 pl-4 text-sm leading-relaxed text-muted">
+        <li>
+          <strong className="text-foreground">Reference definitions.</strong> Every @name
+          (@hero_secretive_03, @manager_01, @car_sheet, @key, @prop_racedriver, @dealership3) is a
+          reference image they locked <em>before</em> writing the scene: two characters, the car, the
+          key, the champion photo and the showroom. Each line only says what that image is for
+          (appearance, prop or location).
+        </li>
+        <li>
+          <strong className="text-foreground">Technical block.</strong> Look, format and hard
+          rules in one place: 16:9, 12s, 35mm Kodak 500T grain, SFX only, and &quot;exactly seven
+          shots and six cuts, no extra inserts&quot;.
+        </li>
+        <li>
+          <strong className="text-foreground">Shot list.</strong> SHOT 1 to SHOT 7, one beat each.
+          The acting is written as physical cues (eyes widen, brows lift, a barely-there smile),
+          not mood words.
+        </li>
+        <li>
+          <strong className="text-foreground">SFX line.</strong> Every sound, in order, so the
+          audio lands on the cuts.
+        </li>
+      </ul>
+      <p className="mt-3 text-sm leading-relaxed text-muted">
+        No single take nailed it. They ran it <strong className="text-foreground">4 times</strong>{" "}
+        and stitched the best beats together: the opening from take one, the wide from take two, the
+        key close-up from take three and the rest from the last one. Judge a batch shot by shot, not
+        take by take.
+      </p>
+      <div className="mx-auto mt-3 max-w-xl">
+        <YoutubeEmbed videoId={c.video.youtubeId} title={c.video.title} channel={c.video.channel} />
+      </div>
+      <p className="mt-2 text-xs text-muted">
+        The video opens on the finished commercial, starting with this dealership scene; the rest
+        is their full build walkthrough. Embedded from Higgsfield&apos;s official YouTube channel.
+      </p>
+      <div className="mt-3">
+        <CopyPrompt label="Full prompt (exact source text)" text={c.prompt} />
+      </div>
+      <p className="mt-2 text-xs text-muted">
+        To reuse it, lock your own reference images first (steps 1–4 above), swap your names into
+        the reference definitions, and keep the structure.
+      </p>
+      <p className="mt-2 text-xs text-muted">
+        Credits: Prompt and video:{" "}
+        <a
+          href={c.sourceUrl}
+          className="font-semibold text-purple underline"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {c.sourceLabel}
+        </a>
+      </p>
+    </div>
   );
 }

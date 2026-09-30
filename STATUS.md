@@ -1,5 +1,11 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-30 - Prompt Guide: Higgsfield car-commercial case study
+
+- New credited entry in the home-page Prompt Guide (`web/src/components/PromptGuide.tsx`, anchor `/#higgsfield-car-commercial`): "Cinematic car commercial — dealership key handoff (Higgsfield)".
+- Includes a short Lucy-voice breakdown (7 shots / 6 cuts; reference definitions + technical block + shot list + SFX; @names are locked reference images; best beats stitched from 4 generations), the official YouTube embed (youtube-nocookie, Higgsfield AI channel, `GNxmt_4IifA`, opens on the finished ad), the full prompt verbatim with a Copy button, and the credit "Prompt and video: Higgsfield Academy" linking to the source lesson.
+- The prompt text lives in `web/src/lib/promptGuideHiggsfield.ts`. Embed only, no rehosted video. A hash deep link opens the collapsed "More tools" section.
+
 ## Latest update, 2026-09-30 - Coverage grammar: speaker on camera, 180-degree rule, character consistency (PR `director-coverage-grammar`)
 
 Fixes Sid's "a character is speaking but the camera is on someone else" and shoots scenes like a proper movie. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Shot counts never change.
