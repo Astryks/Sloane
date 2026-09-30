@@ -2,6 +2,26 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## Latest update, 2026-09-30 (night) - Everything from the other agent incorporated
+
+- **Merged `chore/realism-consolidation`**: `screenSideOf` and `ttsEngine` helpers, `docs/realism-status.md` (every DIRECTOR_* flag, now updated for sync check ON and the preset-safe clamp), and the Neilson v2 dry run (`npx tsx src/lib/director/testdata/printNeilsonTestPlan.ts`). Conflicts were resolved by keeping both sides (the review's wrong-voice check plus their refactors).
+- **Grammar fix found by their dry run:** a name said in the line ("Yes, Mr. Neilson", "Liam, listen") now decides who the speaker faces. Before, Liam's line was framed over Jess's shoulder because Jess spoke next. There is a new test, and `npm test` passes 67/67.
+- **Everything in PRs #40-#43 and the consolidation is on `main`, live on Vercel**, and its Modal apps are deployed (director-voice, director-stitch, lucy-tts).
+- **Paid or opt-in features are left off by default, as the other agent designed them:**
+  - `DIRECTOR_LIPSYNC` (paid fal)
+  - `DIRECTOR_HERO_SAMPLES` (billed multi-takes)
+  - `DIRECTOR_LOSSLESS_MASTER`
+  - `DIRECTOR_FINAL_FOR_VEO31`
+  - `DIRECTOR_SEEDANCE_REFS`
+  - `DIRECTOR_OWNER_SEEDANCE_2` (needs Seedance 2.x activated on BytePlus)
+
+  Turning any of these on costs money, so it's Sid's call.
+- **Older unmerged branches (23-24 Sep, not part of this work, left alone):** `feat/seedance-modelark-direct` (superseded; ModelArk routing is already on main), `rewrite-prompt-guide-stepwise`, `fix/paygo-prompt-font-size`, `fix/paygo-prompt-font-sm`, `fix/trim-ai-models-review-copy`, `chore/readme-lucy-labs-visibility`.
+- **Sid to do (from the other agent's list, still open):**
+  - Record a 60-120s acted reference voice per character, so the voice lock and Turbo speak can run.
+  - Check Veo 1080p pricing before turning on Final for customers.
+  - Choose which opt-in flags to enable.
+
 ## Latest update, 2026-09-30 (evening) - Review of PRs #40-#43 (realism, coverage grammar, cinematic engine)
 
 Reviewed after merge. `npm test` passes 64/64 and tsc is clean. The design is sound and was kept (beats, recipes, playbooks, grammar, per-model formatters, automatic Veo ingredients that skip chained takes and pass the coverage still as the set ref, Director's review, takes, stitch L-cuts and room-tone beds). Changes made in this review:
