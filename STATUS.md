@@ -27,6 +27,11 @@ Lucy now picks each camera shot for what the moment does, the way a director wou
   - The look string no longer ends on a dangling word.
   - Tunics, belts and sandals now count as wardrobe.
 - **Tests:** `cinematic.test.ts` (14 tests). `npm test` passes 63/63; tsc and build are clean; eslint is no worse than main. The Neilson and vlog examples come from `testdata/printCinematicExamples.ts`.
+## Latest update, 2026-09-30 - Prompt Guide: Higgsfield car-commercial case study
+
+- New credited entry in the home-page Prompt Guide (`web/src/components/PromptGuide.tsx`, anchor `/#higgsfield-car-commercial`): "Cinematic car commercial — dealership key handoff (Higgsfield)".
+- Includes a short Lucy-voice breakdown (7 shots / 6 cuts; reference definitions + technical block + shot list + SFX; @names are locked reference images; best beats stitched from 4 generations), the official YouTube embed (youtube-nocookie, Higgsfield AI channel, `GNxmt_4IifA`, opens on the finished ad), the full prompt verbatim with a Copy button, and the credit "Prompt and video: Higgsfield Academy" linking to the source lesson.
+- The prompt text lives in `web/src/lib/promptGuideHiggsfield.ts`. Embed only, no rehosted video. A hash deep link opens the collapsed "More tools" section.
 
 ## Latest update, 2026-09-30 - Coverage grammar: speaker on camera, 180-degree rule, character consistency (PR `director-coverage-grammar`)
 
