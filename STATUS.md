@@ -1,5 +1,34 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-30 - Coverage grammar: speaker on camera, 180-degree rule, character consistency (PR `director-coverage-grammar`)
+
+Fixes Sid's "a character is speaking but the camera is on someone else" and shoots scenes like a proper movie. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Shot counts never change.
+
+- **New `grammar.ts`** (`withCoverageGrammar` + `validateCoverage`). Runs after planning (`planFilm`, `revisePlan`) and again in `/api/director/create`. It:
+  - puts the speaker on camera (OTS or single on the speaker, or a two-shot with them in it); otherwise it turns the shot into a marked reaction shot (`setup: reaction:<Listener>`, `offscreenSpeaker: true`);
+  - opens each scene on a wide master with everyone in it;
+  - uses shot/reverse-shot, with sizes going wide → MCU → CU at the climax;
+  - adds a reaction cutaway at a key beat;
+  - removes back-to-back identical setups (jump cuts);
+  - makes each line fit its shot.
+- **180-degree rule:** `plan.screenSides` holds each character's side ("left"/"right") and per-shot `sides`. Eyelines point across the line, and every prompt and still says e.g. "Lawrence (…) on the left of frame looking right".
+- **Planner:** the system prompt has a "Coverage grammar" section, and the rule-based fallback builds master → OTS reverse singles.
+- **Prompts (Veo / Seedance / Kling):**
+  - The line is attributed to the on-screen speaker by name, side and wardrobe, and says who stays silent ("Liam stays silent, mouth closed").
+  - Reaction shots say the speaker is off-screen and the listener's lips stay still.
+  - Each character has a fixed look string (`plan.castLook`) repeated verbatim in every prompt they appear in.
+  - Group shots get +10 words of budget per person beyond two.
+- **References:** each shot's refs are exactly the people in frame (speaker first, the same anchor photo every shot, never an off-screen speaker), then the set if a slot is free. Anyone in frame without a photo is flagged (`missingRefs`, `plan.refWarnings`, shown in the studio).
+- **Voices:**
+  - Reaction shots with the voice lock on: the line is recorded in the speaker's voice first and the listener is filmed silent.
+  - `director_stitch.py` lays the line over the cutaway (ducking the clip's audio, up to 0.75s spill) and runs a 1s L-cut when the same speaker carries on over a reaction.
+  - Reaction shots are never lip-synced.
+  - Frames and continuous takes are keyed by camera + size family.
+- **Sync check** (`DIRECTOR_SYNC_CHECK=1`, free, also runs without the voice lock):
+  - `director_voice.py` tracks up to 3 faces and flags `mouth_on_non_speaker` / `speaker_mouth_closed`, using the speaker's screen side.
+  - Flagged shots show "Lip-sync looks off … tap Retake".
+- **Tests:** `grammar.test.ts` (13 tests) plus the Neilson idea fixture. `npm test` passes 49/49; tsc, build and py_compile are clean; eslint is no worse than main.
+
 ## Latest update, 2026-09-30 - Realism pass (PR `lucy-realism-v1`, NOT merged, nothing deployed)
 
 Implements the realism diagnosis (§6 checklist) and Sid's Neilson review. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Every new paid path is off by default.

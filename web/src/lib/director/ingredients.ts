@@ -16,6 +16,7 @@
 import type { DirectorPlan } from "./plan";
 import type { CastPerson } from "./refs";
 import { visibleCast } from "./formatters";
+import { isReactionShot } from "./coverage";
 
 export const INGREDIENT_MAX_IMAGES = 3;
 export const INGREDIENT_SECONDS = "8s";
@@ -41,13 +42,19 @@ export function wantsIngredients(opts: { plan: DirectorPlan; idx: number; people
 }
 
 /**
- * Up to 3 images: the photos of the people in this shot (speaker first), then
- * one set image - the shot's coverage still when coverage is on, else the
- * location photo, else the shot's still.
+ * Up to 3 images (2026-09-30 priority): the speaker's photo, then the other
+ * people in frame (including an over-the-shoulder foreground person), then one
+ * set image only if a slot is left - the shot's coverage still when coverage
+ * is on, else the location photo, else the shot's still. A speaker who is
+ * OFF-SCREEN (a marked reaction shot) is never attached: their face would pull
+ * them into the frame.
  */
 export function pickIngredients(plan: DirectorPlan, idx: number, people: CastPerson[] | undefined, set: { keyframe?: string | null; location?: string | null }): string[] {
   return pickLabelledRefs(plan, idx, people, set, INGREDIENT_MAX_IMAGES).map((r) => r.url);
 }
+
+/** Each person's anchor photo - the SAME image in every shot, so every shot is built from one face. */
+export const anchorPhoto = (p: CastPerson): string | undefined => p.photos[0];
 
 /**
  * The same pick with a label per image ("Liam", "Dawn", "the set"), for
@@ -66,15 +73,15 @@ export function pickLabelledRefs(
   const cast = castWithPhotos(people);
   const visible = visibleCast(plan, shot).map(firstLower);
   const speaker = firstLower(shot.speaker);
-  const inShot = cast.filter((p) => visible.includes(firstLower(p.name)) || (speaker && firstLower(p.name) === speaker));
-  inShot.sort((a, b) => Number(firstLower(b.name) === speaker) - Number(firstLower(a.name) === speaker));
+  const speakerOnScreen = !!speaker && !!shot.dialogue.trim() && !isReactionShot(shot) && visible.includes(speaker);
+  const inShot = visible
+    .map((v) => cast.find((p) => firstLower(p.name) === v))
+    .filter((p): p is CastPerson => !!p && !!anchorPhoto(p));
+  inShot.sort((a, b) => Number(speakerOnScreen && firstLower(b.name) === speaker) - Number(speakerOnScreen && firstLower(a.name) === speaker));
   const setImage = (plan.coverage ? set.keyframe || set.location : set.location || set.keyframe) || null;
-  const faces = inShot
-    .slice(0, setImage ? max - 1 : max)
-    .filter((p) => !!p.photos[0])
-    .map((p) => ({ url: p.photos[0], label: p.name.trim().split(/\s+/)[0] }));
+  const faces = inShot.slice(0, max).map((p) => ({ url: anchorPhoto(p)!, label: p.name.trim().split(/\s+/)[0] }));
   if (!faces.length) return [];
-  return [...faces, ...(setImage ? [{ url: setImage, label: "the set" }] : [])].slice(0, max);
+  return [...faces, ...(setImage && faces.length < max ? [{ url: setImage, label: "the set" }] : [])].slice(0, max);
 }
 
 /**

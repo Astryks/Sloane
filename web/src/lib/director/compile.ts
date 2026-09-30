@@ -10,8 +10,9 @@
 
 import { ANGLES as ANGLE_NOTES, EMBEDDING_RULES, OBJECT_REALISM, OBJECT_SHOT_SIZES, SHOT_SIZES, realismForShot, type ShotSizeId } from "./filmScience";
 import { CAMERA_FORMATS, type DirectorPlan, type DirectorShot } from "./plan";
-import { setupCamera } from "./coverage";
-import { castInfo, formatShotPrompt, hasPerson, steadyHands, visibleCast, type FormatOptions, type RefFlags } from "./formatters";
+import { isReactionShot, setupCamera } from "./coverage";
+import { castLookOf, formatShotPrompt, hasPerson, steadyHands, visibleCast, type FormatOptions, type RefFlags } from "./formatters";
+import { lookDirection } from "./grammar";
 
 // Angle notes carry "physical description - why a director uses it"; models
 // only need the physical part.
@@ -70,14 +71,19 @@ const CANDID_PEOPLE = "Candid and unposed, not a polished render: real skin with
  */
 function castInFrameLine(plan: DirectorPlan, shot: DirectorShot | undefined, refs: RefFlags): string {
   if (!shot || !hasPerson(plan, refs)) return "";
-  const info = castInfo(plan);
   const names = visibleCast(plan, shot);
+  // Coverage grammar (2026-09-30): the same look string as the video prompt,
+  // and each person's fixed screen side ("Lawrence on the left of frame
+  // looking right") so the stills keep the 180-degree line too.
   const who = names.map((n) => {
-    const w = info.find((c) => c.name === n)?.wardrobe;
-    return w ? `${n} (in ${w})` : n;
+    const look = castLookOf(plan, n);
+    const side = plan.screenSides?.[n] ?? Object.entries(plan.screenSides ?? {}).find(([k]) => k.split(" ")[0].toLowerCase() === n.split(" ")[0].toLowerCase())?.[1];
+    return [look ? `${n} (${look})` : n, side ? `on the ${side} of frame ${lookDirection(side)}` : ""].filter(Boolean).join(" ");
   });
+  const listening = isReactionShot(shot) ? names.map((n) => n.split(" ")[0]).join(" and ") : "";
   return [
     who.length ? sentence(`In frame, all clearly present: ${who.join("; ")}`) : "",
+    listening ? sentence(`${listening} ${names.length > 1 ? "listen" : "listens"} with mouth closed; the speaker is off-screen`) : "",
     shot.keep?.length ? sentence(`Unchanged from the previous shot: ${shot.keep.join("; ")}`) : "",
   ]
     .filter(Boolean)
@@ -150,7 +156,7 @@ export function compileSetupKeyframePrompt(plan: DirectorPlan, setup: string, sh
   const parts = [
     lead,
     refs.character ? "The other reference photos show the same people from different angles - use them so every face stays identical from this camera." : "",
-    setupCamera(plan, setup),
+    setupCamera(plan, setup, shot),
     castInFrameLine(plan, shot, refs),
     shot?.setting ? sentence(`Setting: ${shot.setting}`) : plan.location ? sentence(`Setting: ${plan.location}`) : "",
     sentence(`Light: ${plan.look.timeOfDay}, ${plan.look.keyLight}, staying within the same grade (${plan.look.grade})`),

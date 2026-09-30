@@ -8,6 +8,7 @@ import { sanitizePlan, withShotSeeds } from "@/lib/director/plan";
 import { withContinuity } from "@/lib/director/shotSchema";
 import { finalAllowedFor } from "@/lib/director/videoQuality";
 import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
+import { withCoverageGrammar } from "@/lib/director/grammar";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt, promptModelFor } from "@/lib/director/compile";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
@@ -127,6 +128,11 @@ export async function POST(req: NextRequest) {
     // Selfie vlogs play as one continuous take (each shot starts on the last frame of the one before).
     if (plan.chain === undefined) plan = { ...plan, chain: plan.style === "ugc" || plan.look.format === "phone" };
     plan = assignSetups(plan);
+    // Coverage grammar (2026-09-30): speaker on camera or a marked reaction
+    // shot, an establishing master, fixed 180-degree screen sides, no jump
+    // cuts, fixed look strings; anyone in frame without a photo is flagged.
+    // (Without Your cast, Lucy auto-casts a character sheet, so nobody is flagged.)
+    plan = withCoverageGrammar(plan, people ? { withPhotos: people.filter((p) => p.photos.length).map((p) => p.name) } : {});
     // Per-shot seeds (stored, so a retake can reproduce a take) and the
     // Draft/Final choice - Final only where allowed (see videoQuality.ts).
     plan = withShotSeeds(plan);

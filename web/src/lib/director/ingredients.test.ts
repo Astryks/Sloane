@@ -23,10 +23,13 @@ test("dialogue shots with 2+ cast photos use ingredients on GA Veo 3.1 only", ()
 });
 
 test("picks the speaker first, everyone visible, then the set image, max 3", () => {
+  // 2026-09-30: people in frame outrank the set - with three in frame there is no room for the set image,
+  // rather than leaving Dawn without a reference (the model would invent her face).
   const master = pickIngredients(plan, 0, people, { keyframe: "https://x/master.jpg", location: "https://x/office.jpg" });
   assert.equal(master.length, INGREDIENT_MAX_IMAGES);
-  assert.equal(master[0], "https://x/lawrence.jpg");
-  assert.equal(master[2], "https://x/master.jpg", "coverage: the setup still carries the room and framing");
+  assert.deepEqual(master, ["https://x/lawrence.jpg", "https://x/liam.jpg", "https://x/dawn.jpg"]);
+  const two = pickIngredients(plan, 2, people, { keyframe: "https://x/k2.jpg" });
+  assert.equal(two[2], "https://x/k2.jpg", "coverage: the setup still carries the room and framing when a slot is free");
   // Over Dawn's shoulder (v1 lost her at 0:40): Lawrence speaks, Dawn is in frame.
   const ots = pickIngredients(plan, 5, people, { keyframe: "https://x/k5.jpg" });
   assert.deepEqual(ots, ["https://x/lawrence.jpg", "https://x/dawn.jpg", "https://x/k5.jpg"]);

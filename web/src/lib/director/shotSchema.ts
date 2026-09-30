@@ -29,7 +29,9 @@ export const SHOT_JSON_SCHEMA = {
   properties: {
     size: { type: "string", description: "shot size id, e.g. wide | medium | medium_close_up | close_up" },
     move: { type: "string", description: "one camera move id, e.g. static | slow_push_in | handheld | over_the_shoulder" },
-    setup: { type: "string", description: "coverage setup, e.g. master | single:Liam | two:Liam+Dawn" },
+    setup: { type: "string", description: "coverage setup: master | single:Liam (on the speaker; over-the-shoulder when someone else is in frame) | two:Liam+Dawn | reaction:Liam (listener shot, only with offscreenSpeaker)" },
+    offscreenSpeaker: { type: "boolean", description: "true ONLY on a deliberate reaction shot: the speaker is off-screen and everyone in frame listens with mouths closed" },
+    sides: { type: "object", description: "screen side per person in frame, e.g. {\"Lawrence\": \"left\", \"Liam\": \"right\"} - the same for the whole scene (180-degree rule)" },
     setting: { type: "string", description: "where the shot happens; empty = the film's main location" },
     action: { type: "string", description: "what happens, present tense, one beat" },
     blocking: { type: "string", description: "who stands where, what the hands do (never clasped/steepled), one prop" },
@@ -143,7 +145,7 @@ export function continuityProblems(plan: DirectorPlan): string[] {
   const out: string[] = [];
   plan.shots.forEach((s, i) => {
     const vis = s.visible ?? [];
-    if (s.speaker && s.dialogue?.trim() && !/off[- ]?screen/i.test(`${s.dialogue} ${s.action}`) && !vis.some((v) => lower(first(v)) === lower(first(s.speaker)))) {
+    if (s.speaker && s.dialogue?.trim() && !s.offscreenSpeaker && !/off[- ]?screen/i.test(`${s.dialogue} ${s.action}`) && !vis.some((v) => lower(first(v)) === lower(first(s.speaker)))) {
       out.push(`shot ${i + 1}: speaker ${s.speaker} not listed as visible`);
     }
     for (const name of vis) {

@@ -52,7 +52,8 @@ export function lipsyncInput(provider: LipsyncProvider, videoUrl: string, audioU
  * (no schema change): null | "retry" | "done" | "failed" | "<call>" | "r:<call>"
  * (voice swap / its retry) | "sc:<call>" (sync check) | "tts:<call>" (dub line)
  * | "ls:<provider>:<request>" (lip-sync) | "mx:<call>" (mix over room sound)
- * | "vc:<call>" (checking the dubbed result).
+ * | "vc:<call>" (checking the dubbed result) | "line:<url>" (a reaction shot
+ * filmed silent; the off-screen speaker's recorded line is laid in at the stitch).
  */
 export type VoiceState =
   | { kind: "new" }
@@ -64,11 +65,13 @@ export type VoiceState =
   | { kind: "dub"; id: string }
   | { kind: "lipsync"; id: string; provider: LipsyncProvider }
   | { kind: "mix"; id: string }
-  | { kind: "verify"; id: string };
+  | { kind: "verify"; id: string }
+  | { kind: "line"; url: string };
 
 export function parseVoiceState(state: string | null | undefined): VoiceState {
   if (!state) return { kind: "new" };
   if (state === "retry" || state === "done" || state === "failed") return { kind: state };
+  if (state.startsWith("line:")) return { kind: "line", url: state.slice(5) };
   const m = /^(sc|tts|mx|vc):(.+)$/.exec(state);
   if (m) {
     const kind = ({ sc: "check", tts: "dub", mx: "mix", vc: "verify" } as const)[m[1] as "sc" | "tts" | "mx" | "vc"];
@@ -89,6 +92,7 @@ export const voiceState = {
   lipsync: (provider: LipsyncProvider, id: string) => `ls:${provider}:${id}`,
   mix: (id: string) => `mx:${id}`,
   verify: (id: string) => `vc:${id}`,
+  line: (url: string) => `line:${url}`,
 };
 
 const words = (t: string) =>
@@ -116,17 +120,33 @@ export function lineRecall(heard: string, script: string): number {
   return hit / want.length;
 }
 
-export type SyncResult = { ok?: boolean | null; score?: number; lag_s?: number; text?: string; words?: number };
+/**
+ * What the sync check can flag (2026-09-30 coverage grammar):
+ *   mouth_on_non_speaker - lips moving in time with the speech on someone who
+ *     isn't the speaker (a listener in an over-the-shoulder, or anyone in a
+ *     reaction shot);
+ *   speaker_mouth_closed - the speaker's mouth barely opens during their line.
+ */
+export type SyncFlag = "mouth_on_non_speaker" | "speaker_mouth_closed";
+export type SyncResult = { ok?: boolean | null; score?: number; lag_s?: number; text?: string; words?: number; flags?: unknown };
+
+export function syncFlags(r: SyncResult | null | undefined): SyncFlag[] {
+  const raw = Array.isArray(r?.flags) ? r.flags : [];
+  return raw.filter((f): f is SyncFlag => f === "mouth_on_non_speaker" || f === "speaker_mouth_closed");
+}
 
 /**
  * Is the take as filmed good enough to keep its lips? Out of sync (the check
  * says so) or the wrong words (under 60% of the scripted words heard -
  * gibberish or an invented line) -> no. Unknown (no face / no speech found)
- * -> yes: never dub on a guess.
+ * -> yes: never dub on a guess. A speaker whose mouth stays shut -> no (a dub
+ * re-syncs their lips); lips moving on a listener alone -> yes, since a dub
+ * can't fix someone else's mouth (the shot is flagged for a retake instead).
  */
 export function takeIsGood(r: SyncResult | null | undefined, script: string): boolean {
   if (!r) return true;
-  if (r.ok === false) return false;
+  if (syncFlags(r).includes("speaker_mouth_closed")) return false;
+  if (r.ok === false && !syncFlags(r).length) return false;
   if (typeof r.text === "string" && script.trim() && lineRecall(r.text, script) < 0.6) return false;
   return true;
 }
