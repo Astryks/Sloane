@@ -11,7 +11,8 @@
 import { ANGLES as ANGLE_NOTES, EMBEDDING_RULES, OBJECT_REALISM, OBJECT_SHOT_SIZES, SHOT_SIZES, realismForShot, type ShotSizeId } from "./filmScience";
 import { CAMERA_FORMATS, type DirectorPlan, type DirectorShot } from "./plan";
 import { isReactionShot, setupCamera } from "./coverage";
-import { castLookOf, formatShotPrompt, hasPerson, steadyHands, visibleCast, type FormatOptions, type RefFlags } from "./formatters";
+import { castLookOf, formatShotPrompt, hasPerson, visibleCast, type FormatOptions, type RefFlags } from "./formatters";
+import { safeText } from "./playbooks";
 import { lookDirection } from "./grammar";
 
 // Angle notes carry "physical description - why a director uses it"; models
@@ -160,7 +161,7 @@ export function compileSetupKeyframePrompt(plan: DirectorPlan, setup: string, sh
     castInFrameLine(plan, shot, refs),
     shot?.setting ? sentence(`Setting: ${shot.setting}`) : plan.location ? sentence(`Setting: ${plan.location}`) : "",
     sentence(`Light: ${plan.look.timeOfDay}, ${plan.look.keyLight}, staying within the same grade (${plan.look.grade})`),
-    shot ? sentence(`Moment: ${steadyHands(shot.action)}`) : "",
+    shot ? sentence(`Moment: ${safeText(shot.action, { size: shot.size })}`) : "",
     shot?.expression ? sentence(`Expression: ${shot.expression}`) : "",
     sentence(`Detail: ${realismText(plan, refs, setup === "master" ? "wide" : "medium_close_up")}`),
     sentence(`It looks like ${formatOf(plan).still}`),
@@ -184,7 +185,7 @@ export function compileKeyframePrompt(plan: DirectorPlan, shotIndex: number, ref
     castInFrameLine(plan, shot, refs),
     shot.setting ? sentence(`Setting for this shot: ${shot.setting}`) : "",
     shot.lighting ? sentence(`Light for this shot: ${shot.lighting}, staying within the same grade (${plan.look.grade})`) : "Keep the lighting identical to the reference.",
-    sentence(`Moment: ${steadyHands(shot.action)}`),
+    sentence(`Moment: ${safeText(shot.action, { size: shot.size })}`),
     person && shot.expression ? sentence(`Expression: ${shot.expression}`) : "",
     sentence(`Detail: ${realismText(plan, refs, shot.size)}`),
     sentence(`It looks like ${formatOf(plan).still}`),

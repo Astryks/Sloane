@@ -1,5 +1,33 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-30 - Cinematic engine: beats, shot choice, scene recipes, model playbooks, Director's review (PR `director-cinematic-engine`)
+
+Lucy now picks each camera shot for what the moment does, the way a director would. The research, with a cited source for every rule, is in `docs/cinematic-grammar-playbook.md`. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Shot counts and spoken lines never change.
+
+- **Beats and shot choice (`beats.ts`):**
+  - Every shot is tagged with a beat function (setup, tension_rise, power_shift, reveal, emotional_peak, release, button) and an intensity from 0 to 1. Values the planner gives win.
+  - A deterministic engine maps each beat to size, angle, lens feel, a motivated move (or none), a duration range and a cut to a reaction or insert. It draws on Murch, Katz, Bordwell's intensified continuity and angle/power studies.
+  - The dominant character gets a slightly low camera and the other a slightly high one, kept per character.
+  - The camera travels only when someone travels, and pushes in only on rising or peak beats.
+  - Runs in `planFilm` before `withCoverageGrammar`, which stays the final validator. On revisions, beats are re-tagged but shots aren't re-framed.
+- **Scene recipes (`recipes.ts`), stored as data:** power two-person (the *Wall Street* pattern), group meeting, walk-and-talk, phone call, reveal, chase/action, selfie vlog (the *Chloe vs History* pattern), monologue/confession, product/insert. The planner prompt lists them and returns `plan.recipe`; otherwise it's picked from the idea's keywords.
+- **Model playbooks (`playbooks.ts`):**
+  - Each formatter writes the camera move in its model's own vocabulary: the Vertex terms for Veo, fal's reliable list for Seedance, and motion phrased over time for Kling.
+  - `safeStaging` swaps failure-prone actions (clasped or fidgeting hands, crowds of faces, readable text/screens except on Kling, eating or drinking in close, fast full-body action) for safer staging in every prompt and still.
+  - There's a per-shot engine suggestion in the studio. It is suggest-only and never switches the engine or price.
+- **Director's review (`review.ts`, `DirectorReview.tsx`):**
+  - A free score out of 100 with a grade, covering grammar, the 180-degree rule, beats and framing, rhythm against genre ASL, risky actions and the prompt word budget, with specific fixes.
+  - **Apply fixes** is one click: it re-frames only the flagged shots, uses reliable moves, trims, swaps staging and then re-runs the grammar. It's idempotent.
+- **Grammar tweaks:**
+  - Cutting back to an already-established place (a phone call intercut) needs no second master.
+  - Reaction shots keep their listener's camera angle and a still camera.
+  - The engine's `cutTo` chooses where the reaction goes.
+- **Rules planner fixes:**
+  - In a SHOT script, only people who speak or act count as cast; "Rome", "Nobody's" and "Why" no longer do.
+  - The look string no longer ends on a dangling word.
+  - Tunics, belts and sandals now count as wardrobe.
+- **Tests:** `cinematic.test.ts` (14 tests). `npm test` passes 63/63; tsc and build are clean; eslint is no worse than main. The Neilson and vlog examples come from `testdata/printCinematicExamples.ts`.
+
 ## Latest update, 2026-09-30 - Coverage grammar: speaker on camera, 180-degree rule, character consistency (PR `director-coverage-grammar`)
 
 Fixes Sid's "a character is speaking but the camera is on someone else" and shoots scenes like a proper movie. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Shot counts never change.

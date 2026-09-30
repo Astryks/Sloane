@@ -66,6 +66,8 @@ export function grammarApplies(plan: DirectorPlan): boolean {
 const wordsOf = (line: string) => line.replace(/\([^)]*\)/g, " ").trim().split(/\s+/).filter(Boolean).length;
 const hasLine = (s: DirectorShot) => !!s.dialogue?.trim();
 
+const settingKey = (s: DirectorShot) => (s.setting || "").trim().toLowerCase();
+
 /** [start, end] index ranges of consecutive shots in the same place. */
 export function sceneRanges(shots: DirectorShot[]): Array<[number, number]> {
   const out: Array<[number, number]> = [];
@@ -272,10 +274,30 @@ function insertReaction(ctx: Ctx, shots: DirectorShot[], a: number, b: number) {
     if (hasLine(s) && hasLine(p) && same(s.speaker, p.speaker) && !isReactionShot(p) && ctx.canon(s.speaker)) candidates.push(i);
   }
   if (!candidates.length) return;
-  const i = candidates.find((c) => shots[c].hero || shots[c - 1].hero) ?? candidates[0];
+  // The shot-choice engine (beats.ts) marks where the edit wants a reaction (cutTo) - after a power shift or a reveal.
+  const i = candidates.find((c) => shots[c - 1].cutTo === "reaction") ?? candidates.find((c) => shots[c].hero || shots[c - 1].hero) ?? candidates[0];
   const speaker = ctx.canon(shots[i].speaker);
   const listener = addresseeOf(ctx, shots, i, speaker);
   if (listener) shots[i] = reactionShot(shots[i], speaker, listener, visibleOf(ctx, shots[i]), true);
+}
+
+// ---- one camera per person ------------------------------------------------------
+
+const TRAVEL_MOVES = new Set(["tracking_follow", "side_tracking", "leading_shot", "handheld_follow", "orbit"]);
+
+/**
+ * A reaction on Liam comes from the same camera as Liam's single (frameKey),
+ * so it keeps that single's angle, and a listener who stays still gets a
+ * still camera (no tracking a person who isn't moving).
+ */
+function sameCameraPerPerson(shots: DirectorShot[], a: number, b: number) {
+  for (let i = a; i <= b; i++) {
+    const s = shots[i];
+    if (!isReactionShot(s)) continue;
+    const who = parseSetup(s.setup).who[0];
+    const single = shots.slice(a, b + 1).find((x) => !isReactionShot(x) && parseSetup(x.setup).kind === "single" && same(parseSetup(x.setup).who[0], who));
+    shots[i] = { ...s, angle: single?.angle ?? "eye_level", ...(TRAVEL_MOVES.has(s.move) ? { move: "locked_off" as const } : {}) };
+  }
 }
 
 // ---- jump cuts ------------------------------------------------------------------
@@ -404,15 +426,21 @@ export function withCoverageGrammar(input: DirectorPlan, opts: GrammarOptions = 
   if (!grammarApplies(plan)) return opts.withPhotos ? flagMissingRefs(plan, opts.withPhotos) : plan;
   const ctx = makeCtx(plan);
   const shots = plan.shots.map((s) => ({ ...s }));
+  const established = new Set<string>();
   for (const [a, b] of sceneRanges(shots)) {
     for (let i = a; i <= b; i++) shots[i] = enforceSpeaker(ctx, shots, i);
-    shots[a] = establish(ctx, shots, a, b);
+    // Cutting BACK to a place we've already seen (a phone call's intercut, a
+    // return to the office) needs no second establishing wide.
+    const place = settingKey(shots[a]);
+    if (!established.has(place)) shots[a] = establish(ctx, shots, a, b);
+    established.add(place);
     progressSizes(shots, a, b);
     insertReaction(ctx, shots, a, b);
     resolveJumps(ctx, shots, a, b);
     // Lines keep fitting their shot.
     for (let i = a; i <= b; i++) if (hasLine(shots[i])) shots[i] = { ...shots[i], durationSeconds: durationForLine(shots[i].dialogue, shots[i].durationSeconds) };
   }
+  for (const [a, b] of sceneRanges(shots)) sameCameraPerPerson(shots, a, b);
   const sides = resolveScreenSides(plan, shots);
   const sided = shots.map((_, i) => withSidesAndEyeline(ctx, shots, i, sides));
   plan = { ...plan, screenSides: sides, shots: sided };
@@ -475,9 +503,12 @@ export function validateCoverage(plan: DirectorPlan, people?: CastPerson[]): Gra
     }
   });
   if (!multi) return out;
+  const established = new Set<string>();
   for (const [a, b] of sceneRanges(plan.shots)) {
     const opener = plan.shots[a];
-    if (parseSetup(opener.setup).kind !== "master" || sizeBucket(opener.size) !== "wide") add(a, "no_establishing", "the scene doesn't open on a wide master that shows the room");
+    const place = settingKey(opener);
+    if (!established.has(place) && (parseSetup(opener.setup).kind !== "master" || sizeBucket(opener.size) !== "wide")) add(a, "no_establishing", "the scene doesn't open on a wide master that shows the room");
+    established.add(place);
     for (let i = a + 1; i <= b; i++) {
       const prev = plan.shots[i - 1];
       const cur = plan.shots[i];

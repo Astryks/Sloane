@@ -2,6 +2,7 @@
 // credits), falling back to the rule-based planner. See plan.ts.
 import { MAX_SHOTS } from "./plan";
 import { withCoverageGrammar } from "./grammar";
+import { tagBeats, withShotChoices } from "./beats";
 import { geminiJson } from "../gemini";
 import {
   PLANNER_SYSTEM,
@@ -20,7 +21,9 @@ export async function planFilm(inputs: PlanInputs): Promise<{ plan: DirectorPlan
   // 180-degree sides are fixed and there are no back-to-back identical setups.
   // Everyone from Your cast has reference photos.
   const withPhotos = (inputs.cast ?? []).map((c) => c.name);
-  const grade = (plan: DirectorPlan) => withCoverageGrammar(plan, withPhotos.length ? { withPhotos } : {});
+  // Cinematic engine (2026-09-30, beats.ts): pick the scene recipe, tag each
+  // beat and choose its shot BEFORE the grammar, which stays the final validator.
+  const grade = (plan: DirectorPlan) => withCoverageGrammar(withShotChoices(plan, { idea: inputs.idea }), withPhotos.length ? { withPhotos } : {});
   if (raw) return { plan: grade(sanitizePlan(raw, inputs)), source: "ai" };
   return { plan: grade(ruleBasedPlan(inputs)), source: "rules" };
 }
@@ -57,5 +60,7 @@ export async function revisePlan(plan: DirectorPlan, instruction: string, shotIn
     const graded = withCoverageGrammar(merged);
     return { ...merged, shots: merged.shots.map((s, i) => (i === shotIndex ? graded.shots[i] ?? s : s)), ...(graded.screenSides ? { screenSides: graded.screenSides } : {}) };
   }
-  return withCoverageGrammar(next);
+  // The customer's instruction decides the framing on a revision; beats are
+  // re-tagged for the Director's review, which suggests (never forces) changes.
+  return withCoverageGrammar(tagBeats({ ...next, ...(plan.recipe && !sanitized.recipe ? { recipe: plan.recipe } : {}) }));
 }
