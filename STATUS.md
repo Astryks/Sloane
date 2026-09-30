@@ -1,5 +1,49 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-30 - Realism pass (PR `lucy-realism-v1`, NOT merged, nothing deployed)
+
+Implements the realism diagnosis (§6 checklist) and Sid's Neilson review. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Every new paid path is off by default.
+
+- **Voices:**
+  - Voice lock is **off by default**. It only runs for cast members with a real, consented uploaded recording (`/api/director/voice-sample`). Synthetic preset VC targets are retired (410).
+  - Chatterbox 0.1.2 → **0.1.7 with Turbo** in `director_voice.py`. The new `speak` mode works zero-shot from the real recording, with `[chuckle]`/`[sigh]`… tags mapped from the acting intent.
+  - Expressive defaults: exaggeration 0.7 / cfg 0.3, widened ranges.
+  - Takes are joined with room tone and crossfades; atempo ≤1.1; scripted "um"s are no longer rejected.
+- **LoRA:**
+  - `07_finetune_new_voices.sh` is paused.
+  - Corrected recipe: `12_finetune_expressive_lora.py`.
+  - Guides: `docs/voice-lora-recipe.md` and `docs/voice-reference-recording.md`.
+- **Prompts:**
+  - Per-model formatters (Veo / Seedance 2.x / Kling 3.0) with word budgets, the line in the first third, and no brand stacks.
+  - Gemini shortening only when clauses had to be trimmed.
+  - A new director planner with a per-shot JSON schema (`shotSchema.ts`).
+  - A continuity pass: every visible cast member on every shot, wardrobe held in `keep`, props carried over.
+  - Steady hands (no clasped hands).
+  - "Nobody speaks" on silent shots.
+- **Vertex:**
+  - `enhancePrompt:false` (with a retry without it), `negativePrompt`, and per-shot seeds.
+  - Draft/Final quality: Final = 1080p on GA Veo 3.1, owner-only unless `DIRECTOR_FINAL_FOR_VEO31=1`.
+  - Automatic Veo 3.1 ingredients for 2+ cast dialogue shots.
+  - Opt-in hero multi-takes with a Take picker.
+  - Opt-in lossless master.
+- **Stitch:**
+  - One film-level loudnorm (-16 LUFS).
+  - Per-location room-tone beds from the model's own ambience.
+  - Soft cuts, and L-cuts where a clip was trimmed.
+  - Long 8s clips trimmed to the planned length.
+- **Lip-sync (opt-in):**
+  - `DIRECTOR_LIPSYNC=kling|latentsync|sync2pro`, plus a free sync check (`DIRECTOR_SYNC_CHECK=1`: Whisper word timing vs MediaPipe mouth-open, plus a gibberish check).
+- **Seedance:**
+  - Bug fixed: the reference audio never reached direct ModelArk.
+  - Opt-in cast/set reference images (`DIRECTOR_SEEDANCE_REFS=1`).
+  - Opt-in owner 2.x (`DIRECTOR_OWNER_SEEDANCE_2=1`).
+- **Sid to do:**
+  - Redeploy Modal (`python3 -m modal deploy scripts/director_voice.py`, `python3 -m modal deploy scripts/director_stitch.py`; `scripts/modal_app.py` for the `lucy_tts_engine` changes).
+  - Record 60–120s acted reference voices.
+  - Verify Veo 1080p pricing.
+  - A/B test the expressive TTS settings (0.7/0.3 vs 0.6/0.4 - an old note says Brad distorted at extremes).
+  - Choose which opt-in flags to enable.
+
 ## Latest update, 2026-09-29 (late) - Script clarity, speaker/off-screen, continuing lines; queued work
 
 - **Shipped:**
