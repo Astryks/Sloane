@@ -63,9 +63,14 @@ image = (
     # 2026-09-30: chatterbox-tts 0.1.2 -> 0.1.7 (adds Chatterbox-Turbo with
     # paralinguistic tags; same torch 2.6 pin). faster-whisper + MediaPipe
     # power the free lip-sync check.
+    # fastapi<0.142 (2026-09-30): fastapi 0.142.0 (released 2026-09-29) added
+    # OpenTelemetry to the [standard] extra, which needs protobuf>=5, while
+    # mediapipe 0.10.14 needs protobuf<5. pip then backtracked all the way to a
+    # source-only numba that refuses Python 3.11, and the image build failed.
+    # numba>=0.60 keeps pip on prebuilt wheels if it ever backtracks again.
     .pip_install(
-        "chatterbox-tts==0.1.7", "demucs==4.0.1", "soundfile", "numpy<2", "fastapi[standard]",
-        "faster-whisper==1.2.1", "mediapipe==0.10.14", "opencv-python-headless<4.11",
+        "chatterbox-tts==0.1.7", "demucs==4.0.1", "soundfile", "numpy<2", "fastapi[standard]<0.142",
+        "faster-whisper==1.2.1", "mediapipe==0.10.14", "opencv-python-headless<4.11", "numba>=0.60",
     )
     # Bake the models into the image so a cold start doesn't re-download them.
     .run_commands(
