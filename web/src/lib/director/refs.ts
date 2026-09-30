@@ -27,8 +27,15 @@ export type CastPerson = {
   name: string;
   description: string;
   photos: string[];
-  /** Lucy voice to lock to ("" = keep the voice from their first speaking shot). */
+  /** Lucy voice the customer picked (voice-first TTS on Seedance 2.x only; never a voice-conversion target). */
   voiceId?: string;
+  /**
+   * A REAL recording of this person's voice the customer uploaded with
+   * consent (/api/director/voice-sample). The voice lock converts to this and
+   * nothing else - never to a Lucy preset render or a clip made by the video
+   * model (2026-09-30 realism pass).
+   */
+  voiceSampleUrl?: string;
   /** Locked reference voice (WAV) once known; "none" = couldn't make one. */
   voiceRef?: string;
   voiceJob?: string;

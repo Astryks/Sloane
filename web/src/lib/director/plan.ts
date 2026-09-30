@@ -97,7 +97,14 @@ export type DirectorPlan = {
   fromPhotos?: boolean;
   /** Coverage (2026-09-30): film like a real crew - a few camera setups, each drawn once and reused. */
   coverage?: boolean;
-  /** 2026-09-30: skip the voice swap and keep the video model's own (more natural) voices. */
+  /**
+   * Keep the video model's own voices (2026-09-30). Default TRUE since the
+   * realism pass: the old voice lock converted Veo's natural speech onto a
+   * synthetic target (a TTS render or a looped Veo clip) and was the main
+   * reason voices sounded robotic. `false` = the customer opted into the
+   * voice lock, which now only runs for cast members with a real uploaded
+   * voice recording (see voiceLockRequested / CastPerson.voiceSampleUrl).
+   */
   modelVoices?: boolean;
   /** 2026-09-30: one continuous take - every shot starts on the previous shot's last frame (vlogs, walk-and-talks). */
   chain?: boolean;
@@ -114,6 +121,11 @@ export type DirectorPlan = {
   product: string; // "" if no product
   shots: DirectorShot[];
 };
+
+/** True only when the customer explicitly opted into the voice lock (older plans without the field keep the model's voices). */
+export function voiceLockRequested(plan: Pick<DirectorPlan, "modelVoices">): boolean {
+  return plan.modelVoices === false;
+}
 
 export type PlanInputs = {
   idea: string;
@@ -327,7 +339,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
     },
     ...(r.fromPhotos === true ? { fromPhotos: true } : {}),
     ...(typeof r.coverage === "boolean" ? { coverage: r.coverage } : {}),
-    ...(r.modelVoices === true ? { modelVoices: true } : {}),
+    modelVoices: r.modelVoices !== false,
     ...(typeof r.chain === "boolean" ? { chain: r.chain } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),

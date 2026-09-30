@@ -17,10 +17,13 @@ Modes (POST /start, Bearer MODAL_SHARED_SECRET):
   {"mode": "extract", "video_url": ...}
       -> the separated speech of a shot, uploaded as a WAV. The first shot a
          character speaks in becomes their locked voice this way.
-  {"mode": "preset", "voice_id": "voice_tech", "text": "..."}
-      -> a reference WAV spoken by a Lucy voice (calls the lucy-tts app).
   {"mode": "convert", "video_url": ..., "reference_url": ...}
-      -> the shot re-voiced to the reference, as an MP4.
+      -> the shot re-voiced to the reference, as an MP4. Since the
+         2026-09-30 realism pass the reference is always a REAL recording
+         the customer uploaded (with consent). The old "preset" mode (a
+         Chatterbox TTS render of a fixed sentence used as the conversion
+         target) is refused: converting natural speech onto a synthetic
+         target was the main reason voices sounded robotic.
 GET /result?call_id=... -> {status: running|done|failed, url?, error?}
 
 Deploy:  python3 -m modal deploy scripts/director_voice.py
@@ -329,20 +332,6 @@ def tts_acted(voice_id, segments, seconds):
         return _upload(out, "audio/wav", "line.wav", os.environ["FAL_KEY"])
 
 
-@app.function(image=image, secrets=[fal_key_secret], timeout=300)
-def preset_reference(voice_id, text):
-    """A reference clip in a Lucy voice, made by the lucy-tts app."""
-    tts = modal.Cls.from_name("lucy-tts", "LucyTTS")()
-    r = tts.run_generate_preset.remote(text, voice_id)
-    if not isinstance(r, dict) or not r.get("audio_base64"):
-        raise RuntimeError((r or {}).get("error", "no audio"))
-    with tempfile.TemporaryDirectory() as tmp:
-        p = os.path.join(tmp, "ref.wav")
-        with open(p, "wb") as f:
-            f.write(base64.b64decode(r["audio_base64"]))
-        return _upload(p, "audio/wav", "ref.wav", os.environ["FAL_KEY"])
-
-
 @app.function(image=image, secrets=[auth_secret])
 @modal.asgi_app()
 def web():
@@ -373,9 +362,9 @@ def web():
             call = tts_line.spawn(body["voice_id"], body["text"][:400], float(body.get("seconds") or 8), str(body.get("delivery") or "")[:120])
         elif mode == "mix" and _https(body.get("video_url")) and _https(body.get("bed_video_url")):
             call = Voice().mix.spawn(body["video_url"], body["bed_video_url"])
-        elif mode == "preset" and isinstance(body.get("voice_id"), str):
-            text = str(body.get("text") or "Hello there. This is how I sound when I talk, nice and natural, every single time.")[:300]
-            call = preset_reference.spawn(body["voice_id"], text)
+        elif mode == "preset":
+            # 2026-09-30: synthetic (TTS) conversion targets are no longer allowed.
+            raise fastapi.HTTPException(status_code=410, detail="Preset voice references are retired - upload a real recording")
         else:
             raise fastapi.HTTPException(status_code=400, detail="Bad request")
         return {"call_id": call.object_id}

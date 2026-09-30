@@ -1726,7 +1726,7 @@ export async function failProductAdJob(jobId: string, error: string): Promise<bo
 // --- Consent / audit trail ---
 
 export type ConsentContentType = "voice_reference" | "character_image" | "product_image";
-export type ConsentFeature = "clone-voice" | "product-ad" | "ad-studio";
+export type ConsentFeature = "clone-voice" | "product-ad" | "ad-studio" | "director-voice";
 
 // Best-effort by design: a DB hiccup here should never block a real,
 // paying generation the way a failed quota/payment check should - this is

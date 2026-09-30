@@ -5,7 +5,6 @@ import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy"
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan } from "@/lib/director/plan";
-import { PRESET_VOICES } from "@/lib/presetVoices";
 import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
@@ -15,14 +14,23 @@ import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
 export const maxDuration = 60;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
-/** A Lucy voice for someone who didn't pick one: their namesake voice, else one matching their gender. */
-function autoVoiceFor(name: string, description: string): string {
-  const first = name.trim().split(/\s+/)[0].toLowerCase();
-  const namesake = PRESET_VOICES.find((v) => v.label.toLowerCase() === first);
-  if (namesake) return namesake.id;
-  const d = `${description} ${name}`.toLowerCase();
-  if (/\b(woman|women|girl|she|her|female|lady|mother|mum|mom)\b/.test(d)) return "harper";
-  return /\b(old|older|grey|gray|silver|senior|elderly|50s|60s|fifties|sixties)\b/.test(d) ? "voice_tech" : "liam";
+/**
+ * Real voice recordings per saved-character id, from /api/director/voice-sample
+ * (2026-09-30). Only our own media links are accepted.
+ */
+function parseVoiceSamples(raw: FormDataEntryValue | null): Record<string, string> {
+  try {
+    const parsed = JSON.parse(String(raw ?? "{}")) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [id, url] of Object.entries(parsed as Record<string, unknown>).slice(0, 3)) {
+      const resolved = resolveMediaUrl(String(url ?? ""));
+      if (isVendorMediaUrl(resolved)) out[String(id).slice(0, 80)] = resolved;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 const FREE_BOARDS_PER_DAY = 3;
 const STORYBOARD_FEE_CENTS = 100;
@@ -89,10 +97,19 @@ export async function POST(req: NextRequest) {
     const links = parseRefLinks(form.get("refs"));
     let people: CastPerson[] | undefined;
     if (savedCast.length) {
-      // Everyone who talks gets a fixed Lucy voice (2026-09-30) - without one,
-      // a person's voice came from their first shot, so one shot where the
-      // model used the wrong voice spread to all their lines.
-      const named: CastPerson[] = savedCast.map((c) => ({ name: c!.name, description: c!.description, photos: savedCharacterPhotos(c!), voiceId: c!.voice_id || autoVoiceFor(c!.name, c!.description) }));
+      // Realism pass (2026-09-30): nobody is auto-assigned a Lucy preset voice
+      // any more - the video model's own voice (steered by the voice words in
+      // the cast description) is the default. A Lucy voice is only used if the
+      // customer picked one, and the voice lock only converts to a real
+      // recording they uploaded.
+      const samples = parseVoiceSamples(form.get("voiceSamples"));
+      const named: CastPerson[] = savedCast.map((c) => ({
+        name: c!.name,
+        description: c!.description,
+        photos: savedCharacterPhotos(c!),
+        ...(c!.voice_id ? { voiceId: c!.voice_id } : {}),
+        ...(samples[c!.id] ? { voiceSampleUrl: samples[c!.id] } : {}),
+      }));
       // Anyone uploaded alongside the cast becomes one more (unnamed) person.
       if (links.character.length) named.push({ name: "the person in the uploaded photos", description: "", photos: links.character });
       people = allocateCast(named);

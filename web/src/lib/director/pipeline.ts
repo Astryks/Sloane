@@ -37,7 +37,7 @@ import {
 import { getFalJobResult, getFalJobStatus, submitFalJob, IMAGE_EDIT_ENDPOINT, TEXT_TO_IMAGE_ENDPOINT } from "../fal";
 import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
-import type { DirectorPlan } from "./plan";
+import { voiceLockRequested, type DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
 import { MODELARK_ENDPOINT_PREFIX, getModelArkApiKey } from "../modelArk";
 import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt, type CastPerson } from "./refs";
@@ -299,7 +299,8 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       // speaker's Lucy voice, then Seedance acts and lip-syncs to that audio
       // (its reference_audio input) - natural lips AND the same voice every
       // shot, no voice swap afterwards.
-      const voiceFirst = endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) && /seedance-2/.test(endpoint) && !plan.modelVoices ? voiceFirstLine(film, plan, shot.idx) : null;
+      // Opt-in only (the customer turned the voice lock on and picked a Lucy voice for the speaker).
+      const voiceFirst = endpoint.startsWith(MODELARK_ENDPOINT_PREFIX) && /seedance-2/.test(endpoint) && voiceLockRequested(plan) ? voiceFirstLine(film, plan, shot.idx) : null;
       let lineAudio: string | null = null;
       if (voiceFirst) {
         if (!shot.video_request_id) {
@@ -372,12 +373,14 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
   }
 }
 
-// ---- Voice lock (2026-09-29) ----
-// scripts/director_voice.py on Modal: one voice per character across every
-// shot. Each person's reference is a Lucy voice they picked, or else the
-// speech from the first shot they talk in (that shot keeps its audio); every
-// other shot they speak in is re-voiced to it with timing kept, so lip-sync
-// is untouched. Any failure just keeps Veo's original audio.
+// ---- Voice lock (2026-09-29, opt-in since the 2026-09-30 realism pass) ----
+// scripts/director_voice.py on Modal: re-voices each shot a person speaks in
+// to ONE reference with timing kept. The reference must be a real recording
+// the customer uploaded (CastPerson.voiceSampleUrl). It used to be a Lucy
+// preset TTS render or the Veo speech of the person's first shot; converting
+// natural speech onto a synthetic target stripped breath and texture and was
+// the main "robotic voice" cause, so both are gone. Off by default
+// (plan.modelVoices); any failure keeps the model's original audio.
 const VOICE_URL = process.env.MODAL_DIRECTOR_VOICE_URL || "https://mehta-siddharth09--director-voice-web.modal.run";
 
 export async function voiceCall(path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -422,9 +425,14 @@ export function speakerOf(shot: DirectorShot | undefined, people: CastPerson[]):
   return people.length === 1 ? 0 : -1;
 }
 
+/** Whether this film runs the voice lock at all: opted in, and someone has a real voice recording. */
+export function voiceLockActive(plan: DirectorPlan, people: CastPerson[] | undefined): boolean {
+  return voiceLockRequested(plan) && !!people?.some((p) => !!p.voiceSampleUrl);
+}
+
 async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
   const people = film.refs.people ?? [];
-  if (!people.length || plan.modelVoices || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
+  if (!voiceLockActive(plan, people) || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
   if (!(await claimDirectorFilm(film.id))) return;
   try {
     const refs = JSON.parse(JSON.stringify(film.refs)) as typeof film.refs;
@@ -436,35 +444,23 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
       .filter((x) => x.who >= 0)
       .sort((a, b) => a.s.idx - b.s.idx);
 
-    // 1. Everyone who speaks gets a locked reference voice.
+    // 1. The reference is the person's own uploaded recording - nobody else is re-voiced.
     for (const i of new Set(speaking.map((x) => x.who))) {
       const p = cast[i];
-      if (p.voiceRef) continue;
-      if (!p.voiceJob) {
-        const firstShot = speaking.find((x) => x.who === i)!.s;
-        const body = p.voiceId ? { mode: "preset", voice_id: p.voiceId } : { mode: "extract", video_url: firstShot.video_url };
-        const r = await voiceCall("/start", body);
-        if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
-        p.voiceJob = r.call_id;
-        if (!p.voiceId) p.voiceShot = firstShot.idx;
-      } else {
-        const r = await voiceCall(`/result?call_id=${encodeURIComponent(p.voiceJob)}`);
-        if (r.status === "done" && typeof r.url === "string") p.voiceRef = r.url;
-        else if (r.status === "failed") {
-          console.error("[director] voice reference failed", p.name, r.error);
-          p.voiceRef = "none";
-        }
-      }
+      const want = p.voiceSampleUrl || "none";
+      if (p.voiceRef === want) continue;
+      p.voiceRef = want;
+      delete p.voiceJob;
+      delete p.voiceShot;
       refsChanged = true;
     }
     if (refsChanged) await setDirectorFilmRefs(film.id, refs);
 
     // 2. Re-voice every other shot each person speaks in.
-    let pending = cast.some((p, i) => speaking.some((x) => x.who === i) && !p.voiceRef);
+    let pending = false;
     for (const { s, who } of speaking) {
       const p = cast[who];
-      if (!p.voiceRef) continue;
-      if (p.voiceRef === "none" || p.voiceShot === s.idx || s.voice_request_id === "done" || s.voice_request_id === "failed") continue;
+      if (!p.voiceRef || p.voiceRef === "none" || s.voice_request_id === "done" || s.voice_request_id === "failed") continue;
       // 2026-09-30: a failed swap is retried once (the retry is marked "r:"),
       // and the voice service now rejects a result whose pitch doesn't match
       // the speaker (e.g. a woman's voice left on Lawrence's line).
@@ -565,8 +561,8 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await Promise.all(shots.map((s) => advanceVideo(film, plan, s, shots)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.status === "completed" || s.status === "failed")) {
-      // Named cast -> lock each person's voice before joining the shots.
-      await updateDirectorFilm(film.id, { status: film.refs.people?.length ? "voicing" : "stitching" });
+      // Voice lock (opt-in, real recordings only) before joining the shots.
+      await updateDirectorFilm(film.id, { status: voiceLockActive(plan, film.refs.people) ? "voicing" : "stitching" });
     }
     return shots;
   }

@@ -34,7 +34,7 @@ export async function revisePlan(plan: DirectorPlan, instruction: string, shotIn
     ...(plan.coverage !== undefined ? { coverage: plan.coverage } : {}),
     ...(plan.chain !== undefined ? { chain: plan.chain } : {}),
     ...(plan.fromPhotos ? { fromPhotos: true } : {}),
-    ...(plan.modelVoices ? { modelVoices: true } : {}),
+    modelVoices: plan.modelVoices !== false,
   };
   // A single-shot edit must not touch the other shots or the locked bibles.
   if (shotIndex != null) {

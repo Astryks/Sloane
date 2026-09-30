@@ -29,6 +29,7 @@ import {
 import type { DirectorRecipe } from "./DirectorRecipes";
 import { ScriptHelp } from "./ScriptHelp";
 import { coverageByDefault } from "@/lib/director/coverage";
+import { VOICE_SAMPLE_CONSENT } from "@/lib/director/voiceSample";
 import { CopyClip } from "./CopyClip";
 import { CharacterGuide } from "./CharacterGuide";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
@@ -124,6 +125,9 @@ export function DirectorStudio({
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedCast, setSelectedCast] = useState<CastPick[]>([]);
+  // Real voice recordings per cast id, for the opt-in voice lock (2026-09-30).
+  const [voiceSamples, setVoiceSamples] = useState<Record<string, string>>({});
+  const [voiceConsent, setVoiceConsent] = useState(false);
   const [presets, setPresets] = useState<MoviePreset[]>([]);
   const [presetId, setPresetId] = useState<string | null>(null);
   const [movieNotes, setMovieNotes] = useState("");
@@ -402,6 +406,7 @@ export function DirectorStudio({
       form.append("idea", idea);
       form.append("plan", JSON.stringify(plan));
       if (selectedCast.length) form.append("savedCharacterIds", JSON.stringify(selectedCast.map((c) => c.id)));
+      if (plan.modelVoices === false && Object.keys(voiceSamples).length) form.append("voiceSamples", JSON.stringify(voiceSamples));
       form.append("refs", JSON.stringify(refLinks));
       if (opts.auto) form.append("autoApprove", "1");
       const res = await fetch("/api/director/create", { method: "POST", body: form });
@@ -813,11 +818,20 @@ export function DirectorStudio({
                   </span>
                 </label>
                 <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
-                  <input type="checkbox" className="mt-0.5" checked={!!plan.modelVoices} onChange={(e) => editPlan({ modelVoices: e.target.checked || undefined })} />
+                  <input type="checkbox" className="mt-0.5" checked={plan.modelVoices !== false} onChange={(e) => editPlan({ modelVoices: e.target.checked })} />
                   <span>
-                    🗣 Keep the video model&apos;s own voices (most natural - describe each voice in the cast, e.g. &quot;deep, calm, husky&quot;). Off = Lucy swaps in each person&apos;s chosen Lucy voice so it never changes between shots.
+                    🗣 Keep the video model&apos;s own voices (recommended - most natural; describe each voice in the cast, e.g. &quot;deep, calm, husky, British&quot;). Off = lock each person to a real recording of their voice that you upload below.
                   </span>
                 </label>
+                {plan.modelVoices === false && (
+                  <VoiceSamplePicker
+                    cast={selectedCast}
+                    samples={voiceSamples}
+                    setSamples={setVoiceSamples}
+                    consent={voiceConsent}
+                    setConsent={setVoiceConsent}
+                  />
+                )}
                 {engine === "veo31" && !(plan.coverage ?? coverageByDefault(plan)) && (
                   <label className="flex items-start gap-2 text-[11px] font-semibold text-muted sm:col-span-2">
                     <input type="checkbox" className="mt-0.5" checked={!!plan.fromPhotos} onChange={(e) => editPlan({ fromPhotos: e.target.checked || undefined })} />
@@ -1068,6 +1082,76 @@ export function DirectorStudio({
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Opt-in voice lock (2026-09-30): one real recording per cast member, with
+ * consent. Nobody without a recording is re-voiced - their shots keep the
+ * video model's own voice.
+ */
+function VoiceSamplePicker({
+  cast,
+  samples,
+  setSamples,
+  consent,
+  setConsent,
+}: {
+  cast: CastPick[];
+  samples: Record<string, string>;
+  setSamples: (fn: (prev: Record<string, string>) => Record<string, string>) => void;
+  consent: boolean;
+  setConsent: (v: boolean) => void;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  async function upload(c: CastPick, file: File) {
+    setErr(null);
+    setBusyId(c.id);
+    try {
+      const form = new FormData();
+      form.append("audio", file);
+      form.append("speaker", c.name);
+      form.append("consent", VOICE_SAMPLE_CONSENT);
+      const res = await fetch("/api/director/voice-sample", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok || typeof data.url !== "string") throw new Error(data.error || "Upload failed");
+      setSamples((prev) => ({ ...prev, [c.id]: data.url }));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+  if (!cast.length) {
+    return <p className="text-[11px] text-muted sm:col-span-2">Add people from Your cast first - the voice lock needs a named person and a recording of their voice.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-cream p-3 text-[11px] text-muted sm:col-span-2">
+      <p>
+        Upload 30-120 seconds of each person talking naturally (a quiet room, expressive, not read in a flat voice). Only people with a recording are re-voiced; everyone else keeps the model&apos;s voice.
+      </p>
+      <label className="flex items-start gap-2 font-semibold">
+        <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+        <span>{VOICE_SAMPLE_CONSENT}</span>
+      </label>
+      {cast.map((c) => (
+        <label key={c.id} className="flex flex-wrap items-center gap-2 font-semibold">
+          <span className="min-w-24">{c.name}</span>
+          <input
+            type="file"
+            accept="audio/*"
+            disabled={!consent || busyId === c.id}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void upload(c, f);
+            }}
+          />
+          {busyId === c.id ? <span>Uploading…</span> : samples[c.id] ? <span>✓ recording added</span> : null}
+        </label>
+      ))}
+      {err && <p className="text-coral-dark">{err}</p>}
+    </div>
   );
 }
 
