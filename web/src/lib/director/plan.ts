@@ -50,7 +50,28 @@ export type DirectorShot = {
   durationSeconds: number;
   /** Coverage (2026-09-30): which camera setup films this shot, e.g. "master", "single:Liam", "two:Jess+Liam". */
   setup?: string;
+  // ---- Director JSON (2026-09-30 realism pass; all optional, older plans fall back) ----
+  /** EVERY cast member visible in frame (exact names), so nobody vanishes or changes between cuts. */
+  visible?: string[];
+  /** Physical blocking: who stands where, what the hands do, one prop interaction. */
+  blocking?: string;
+  /** Where the speaker looks ("at Liam, camera-left of lens", "straight into the lens"). */
+  eyeline?: string;
+  /** How the line is said: a subtext verb + pace/volume ("testing him, slow then clipped, low"). */
+  delivery?: string;
+  /** How each silent person in frame reacts. */
+  listeners?: Array<{ name: string; reaction: string }>;
+  /** Room tone for this shot's location ("HVAC hum, distant traffic 40 floors down"). */
+  ambience?: string;
+  /** Motivated sound effects (1-2). */
+  sfx?: string[];
+  /** Continuity to hold from the previous shot: wardrobe, props, positions, light. */
+  keep?: string[];
+  /** Vertex seed for this shot, stored so a retake can reproduce or vary it. */
+  seed?: number;
 };
+
+export type FilmQuality = "draft" | "final";
 
 export type DirectorLook = {
   timeOfDay: string;
@@ -108,6 +129,10 @@ export type DirectorPlan = {
   modelVoices?: boolean;
   /** 2026-09-30: one continuous take - every shot starts on the previous shot's last frame (vlogs, walk-and-talks). */
   chain?: boolean;
+  /** Draft = 720p on the chosen tier (today's behaviour); Final = 1080p on the GA model (see videoQuality.ts for who may use it). */
+  quality?: FilmQuality;
+  /** The scene's room tone, used when a shot has no ambience of its own. */
+  roomTone?: string;
   title: string;
   logline: string;
   goal: DirectorGoal; // what the user is really trying to do - drives the structure
@@ -283,6 +308,37 @@ function fitToDialogue(dialogue: string, planned: number): number {
 
 // ---- validation ------------------------------------------------------------
 
+const textList = (v: unknown, maxItems: number, maxLen: number): string[] =>
+  (Array.isArray(v) ? v : []).map((x) => clampText(x, maxLen)).filter(Boolean).slice(0, maxItems);
+
+/** The optional director-JSON fields of one shot, validated (2026-09-30). */
+function directorFields(s: Record<string, unknown>): Partial<DirectorShot> {
+  const out: Partial<DirectorShot> = {};
+  const visible = textList(s.visible, 4, 60);
+  if (visible.length) out.visible = visible;
+  const blocking = clampText(s.blocking, 300);
+  if (blocking) out.blocking = blocking;
+  const eyeline = clampText(s.eyeline, 120);
+  if (eyeline) out.eyeline = eyeline;
+  const delivery = clampText(s.delivery, 120);
+  if (delivery) out.delivery = delivery;
+  const listeners = (Array.isArray(s.listeners) ? s.listeners : [])
+    .map((l) => (l && typeof l === "object" ? (l as Record<string, unknown>) : {}))
+    .map((l) => ({ name: clampText(l.name, 60), reaction: clampText(l.reaction, 120) }))
+    .filter((l) => l.name && l.reaction)
+    .slice(0, 3);
+  if (listeners.length) out.listeners = listeners;
+  const ambience = clampText(s.ambience, 160);
+  if (ambience) out.ambience = ambience;
+  const sfx = textList(s.sfx, 3, 60);
+  if (sfx.length) out.sfx = sfx;
+  const keep = textList(s.keep, 6, 100);
+  if (keep.length) out.keep = keep;
+  const seed = Number(s.seed);
+  if (Number.isInteger(seed) && seed >= 0 && seed <= 4294967295) out.seed = seed;
+  return out;
+}
+
 export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): DirectorPlan {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const style = pick(r.style, ALL_STYLE_IDS, inputs.style && inputs.style !== "auto" ? inputs.style : "cinematic");
@@ -315,6 +371,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
       durationSeconds: fitToDialogue(clampText(s.dialogue, 240), Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds),
       ...(typeof s.setup === "string" && s.setup.trim() ? { setup: clampText(s.setup, 120) } : {}),
+      ...directorFields(s),
     });
   }
   const aspect =
@@ -341,6 +398,8 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
     ...(typeof r.coverage === "boolean" ? { coverage: r.coverage } : {}),
     modelVoices: r.modelVoices !== false,
     ...(typeof r.chain === "boolean" ? { chain: r.chain } : {}),
+    ...(r.quality === "final" ? { quality: "final" as const } : {}),
+    ...(clampText(r.roomTone, 200) ? { roomTone: clampText(r.roomTone, 200) } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),
     location: clampText(r.location, 300),

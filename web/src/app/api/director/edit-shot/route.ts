@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getDirectorShots, initSchema, setDirectorFilmPlan, setDirectorShotPrompts } from "@/lib/db";
 import { publicJson } from "@/lib/mediaProxy";
-import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
+import { compileKeyframePrompt, compileShotPrompt, promptModelFor } from "@/lib/director/compile";
 import { loadOwnedFilm, refFlags } from "@/lib/director/filmAccess";
 import { sanitizePlan } from "@/lib/director/plan";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     const shots = await getDirectorShots(film.id);
     const refs = refFlags(film);
     const nativeAudio = VIDEO_PAYGO_ENGINES[film.engine as VideoEngine]?.supportsNativeAudio ?? false;
-    await setDirectorShotPrompts(shots[idx].id, compileShotPrompt(merged, idx, refs, { nativeAudio }), compileKeyframePrompt(merged, idx, refs));
+    await setDirectorShotPrompts(shots[idx].id, compileShotPrompt(merged, idx, refs, { nativeAudio, model: promptModelFor(film.engine) }), compileKeyframePrompt(merged, idx, refs));
     return publicJson({ plan: merged });
   } catch (err) {
     console.error("[director/edit-shot] failed", err);

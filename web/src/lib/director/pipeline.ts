@@ -284,17 +284,8 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         if (isOwner(await getUserById(film.user_id))) endpoint = `${MODELARK_ENDPOINT_PREFIX}${ownerModel}`;
       }
       const d = plan.shots[shot.idx]?.durationSeconds ?? null;
-      // Rebuild the prompt from the (possibly edited) plan with the current
-      // compiler, so fixes like naming the speaker apply to films that were
-      // planned earlier too. Falls back to the stored prompt.
       const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio || endpoint.startsWith(MODELARK_ENDPOINT_PREFIX);
       let prompt = shot.prompt;
-      try {
-        const { compileShotPrompt } = await import("./compile");
-        if (plan.shots[shot.idx]) prompt = compileShotPrompt(plan, shot.idx, refFlags(film), { nativeAudio });
-      } catch (err) {
-        console.error("[director] prompt rebuild failed - using the stored prompt", err);
-      }
       // Voice first (2026-09-30), Seedance 2.x only: record the line in the
       // speaker's Lucy voice, then Seedance acts and lip-syncs to that audio
       // (its reference_audio input) - natural lips AND the same voice every
@@ -314,9 +305,29 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
           if (r?.status === "running") return updateDirectorShot(shot.id, {});
           if (r?.status === "done" && typeof r.url === "string") lineAudio = r.url;
         }
-        if (lineAudio) prompt = `${voiceFirst.speaker} says: "${voiceFirst.words}" - the voice, timing, pauses and delivery follow Audio 1 exactly, lips perfectly in sync with Audio 1. ${prompt}`;
       }
-      if (chainFrame) prompt = `ONE CONTINUOUS TAKE: this shot starts exactly on the given first frame, which is the last frame of the previous shot - same camera, same moment, same people in the same places; carry straight on with no cut and no reset. ${prompt}`;
+      // Rebuild the prompt from the (possibly edited) plan with the current
+      // formatter for the model actually being called (Veo / Seedance 2.x /
+      // Kling 3), so fixes apply to films planned earlier too. The continuous-
+      // take and Audio 1 notes are clauses inside the budget now, not prefixes
+      // stacked on top. Falls back to the stored prompt.
+      try {
+        if (plan.shots[shot.idx]) {
+          const { formatShotPrompt, promptModelFor, visibleCast } = await import("./formatters");
+          const { shortenIfNeeded } = await import("./shortenPrompt.server");
+          const formatted = formatShotPrompt(plan, shot.idx, refFlags(film), {
+            nativeAudio,
+            model: promptModelFor(engine, endpoint),
+            continuousTake: !!chainFrame,
+            firstFrame: !!imageUrl,
+            audioRef: !!lineAudio,
+            ingredients: ingredients.length > 0,
+          });
+          prompt = await shortenIfNeeded(formatted, visibleCast(plan, plan.shots[shot.idx]));
+        }
+      } catch (err) {
+        console.error("[director] prompt rebuild failed - using the stored prompt", err);
+      }
       const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
       if (lineAudio) input.reference_audio_urls = [lineAudio];
       if (ingredients.length) {

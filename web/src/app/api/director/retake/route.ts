@@ -3,7 +3,7 @@ import { addVideoCredits, getDirectorShots, getUserById, initSchema, resetDirect
 import { publicJson } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { formatUsd } from "@/lib/videoEngines";
-import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
+import { compileKeyframePrompt, compileShotPrompt, promptModelFor } from "@/lib/director/compile";
 import { loadOwnedFilm, refFlags } from "@/lib/director/filmAccess";
 import { sanitizePlan } from "@/lib/director/plan";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       next = sanitizePlan({ ...plan, shots: plan.shots.map((s, i) => (i === idx ? { ...s, action: `${s.action} ${note.replace(/[.\s]*$/, ".")}` } : s)) }, { shotCount: plan.shots.length });
       await setDirectorFilmPlan(film.id, next);
       const nativeAudio = VIDEO_PAYGO_ENGINES[film.engine as VideoEngine]?.supportsNativeAudio ?? false;
-      await setDirectorShotPrompts(shot.id, compileShotPrompt(next, idx, refFlags(film), { nativeAudio }), compileKeyframePrompt(next, idx, refFlags(film)));
+      await setDirectorShotPrompts(shot.id, compileShotPrompt(next, idx, refFlags(film), { nativeAudio, model: promptModelFor(film.engine) }), compileKeyframePrompt(next, idx, refFlags(film)));
     }
     if (!(await resetDirectorShotForRetake(film.id, shot.id))) {
       await addVideoCredits(film.user_id, price);

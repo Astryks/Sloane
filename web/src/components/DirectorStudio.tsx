@@ -1158,9 +1158,9 @@ function VoiceSamplePicker({
 function PromptPreview({ plan, engine, photos, castCount }: { plan: DirectorPlan; engine: VideoEngine; photos: RefPhotos; castCount: number }) {
   const [prompts, setPrompts] = useState<string[]>([]);
   useEffect(() => {
-    import("@/lib/director/compile").then(({ compileShotPrompt }) => {
+    import("@/lib/director/formatters").then(({ compileShotPrompt, promptModelFor }) => {
       const refs = { character: photos.character.length > 0 || castCount > 0, product: photos.product.length > 0, location: photos.location.length > 0 };
-      setPrompts(plan.shots.map((_, i) => compileShotPrompt(plan, i, refs, { nativeAudio: VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio })));
+      setPrompts(plan.shots.map((_, i) => compileShotPrompt(plan, i, refs, { nativeAudio: VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio, model: promptModelFor(engine) })));
     });
   }, [plan, engine, photos, castCount]);
   return (

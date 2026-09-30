@@ -7,7 +7,7 @@ import { uploadInputMedia } from "@/lib/mediaUpload";
 import { sanitizePlan } from "@/lib/director/plan";
 import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
-import { compileKeyframePrompt, compileShotPrompt } from "@/lib/director/compile";
+import { compileKeyframePrompt, compileShotPrompt, promptModelFor } from "@/lib/director/compile";
 import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "@/lib/videoPaygo";
 import { directorShotPriceCents, formatUsd } from "@/lib/videoEngines";
 
@@ -183,7 +183,7 @@ export async function POST(req: NextRequest) {
         castStatus: autoCast ? "pending" : "done",
         paidCents,
         shots: plan.shots.map((_, i) => ({
-          prompt: compileShotPrompt(plan, i, refFlags, { nativeAudio }),
+          prompt: compileShotPrompt(plan, i, refFlags, { nativeAudio, model: promptModelFor(engine) }),
           keyframePrompt: compileKeyframePrompt(plan, i, { ...refFlags, character: refFlags.character || autoCast }),
           priceCents: perShot,
         })),
