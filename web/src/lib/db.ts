@@ -2611,7 +2611,7 @@ export async function setDirectorShotTakes(shotId: string, urls: string[]) {
  * The customer picked another take: it becomes the shot's video (voice work is
  * redone on it) and the film is re-joined. Free - the takes were already paid for.
  */
-export async function useDirectorShotTake(filmId: string, shotId: string, url: string): Promise<boolean> {
+export async function switchDirectorShotTake(filmId: string, shotId: string, url: string): Promise<boolean> {
   const rows = await sql`
     UPDATE director_films SET status = 'shots', final_video_url = NULL, stitch_request_id = NULL, error = NULL, claimed_at = NULL
     WHERE id = ${filmId} AND status IN ('completed', 'failed', 'shots', 'voicing', 'stitching')
