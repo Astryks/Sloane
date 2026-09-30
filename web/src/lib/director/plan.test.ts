@@ -1,7 +1,7 @@
 // Fallback planner tests (2026-09-30). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { peopleInIdea, ruleBasedPlan, sanitizePlan } from "./plan";
+import { PLANNER_SYSTEM, durationForLine, peopleInIdea, ruleBasedPlan, sanitizePlan } from "./plan";
 import { compileAnchorPrompt, compileKeyframePrompt } from "./compile";
 import { formatShotPrompt, hasPerson } from "./formatters";
 
@@ -56,4 +56,18 @@ test("sanitizePlan keeps director fields and voices default on", () => {
   assert.deepEqual(plan.shots[0].keep, ["navy tie"]);
   assert.equal(plan.shots[0].seed, 42);
   assert.equal(plan.modelVoices, true);
+});
+
+test("durations come from the line plus a beat, not a 4-8s clamp", () => {
+  assert.equal(durationForLine("", 6), 6, "no line: planned length");
+  assert.equal(durationForLine("Come back with something I can use.", 8), 7, "7 words: 2.8s + 2s beat = 5s; planned 8 trimmed to need + 2");
+  assert.equal(durationForLine("Yes.", 3), 3);
+  const twenty = Array.from({ length: 20 }, () => "word").join(" ");
+  assert.equal(durationForLine(twenty, 6), 11, "a long line gets the time it needs (engine snaps later)");
+  assert.equal(durationForLine("(quietly) We need to talk.", 4), 4, "stage directions aren't words");
+});
+
+test("director system prompt asks for the continuity fields", () => {
+  for (const k of ['"visible"', '"keep"', '"blocking"', '"eyeline"', '"delivery"', '"listeners"', '"roomTone"', '"sfx"', "UGC / selfie vlog"]) assert.ok(PLANNER_SYSTEM.includes(k), k);
+  assert.doesNotMatch(PLANNER_SYSTEM, /says:"\)/);
 });

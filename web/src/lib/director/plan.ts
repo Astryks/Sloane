@@ -385,12 +385,18 @@ export function ruleBasedPlan(inputs: PlanInputs): DirectorPlan {
   );
 }
 
-// A spoken line sets the shot's length (~2.6 words a second + a beat), so a
-// short line isn't stretched over 8 seconds - that reads as slow motion.
-function fitToDialogue(dialogue: string, planned: number): number {
-  const words = dialogue.trim() ? dialogue.trim().split(/\s+/).length : 0;
+// A spoken line sets the shot's length: the time to say it (~2.5 words a
+// second) plus a beat before and after (2026-09-30). A short line isn't
+// stretched over 8 seconds (reads as slow motion), and a longer planned shot
+// keeps up to ~2.5s of extra room for a reaction. The old formula clamped
+// every shot to 4-8s, which squeezed long lines; engines snap to their own
+// allowed lengths later (Veo 4/6/8s, Seedance 2.x up to 15s).
+export function durationForLine(dialogue: string, planned: number): number {
+  const words = dialogue.replace(/\([^)]*\)/g, " ").trim() ? dialogue.replace(/\([^)]*\)/g, " ").trim().split(/\s+/).length : 0;
   if (!words) return planned;
-  return Math.min(8, Math.max(4, Math.ceil(words / 2.6 + 1.5)));
+  const beat = words <= 6 ? 1.5 : words <= 14 ? 2 : 2.5;
+  const needed = Math.ceil(words / 2.5 + beat);
+  return Math.min(15, Math.max(3, needed, Math.min(planned, needed + 2)));
 }
 
 // ---- validation ------------------------------------------------------------
@@ -438,7 +444,11 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
   const want = Math.min(MAX_SHOTS, Math.max(MIN_SHOTS, inputs.shotCount ?? (shotsRaw.length || DEFAULT_SHOTS)));
   // No person in the film (e.g. a pure product ad): never invent a human
   // micro-expression - the video model would add a person to perform it.
-  const hasPerson = !!clampText(r.character, 400) || !!inputs.hasCharacterPhoto;
+  const hasPerson =
+    !!clampText(r.character, 400) ||
+    !!inputs.hasCharacterPhoto ||
+    !!inputs.cast?.length ||
+    shotsRaw.some((x) => !!x && typeof x === "object" && (!!clampText((x as Record<string, unknown>).dialogue, 240) || !!clampText((x as Record<string, unknown>).speaker, 60)));
   const shots: DirectorShot[] = [];
   for (let i = 0; i < want; i++) {
     const s = (shotsRaw[i] && typeof shotsRaw[i] === "object" ? shotsRaw[i] : {}) as Record<string, unknown>;
@@ -456,7 +466,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
       dialogue: clampText(s.dialogue, 240),
       speaker: clampText(s.speaker, 60),
       sound: clampText(s.sound, 160, EMOTIONS[emotion].sound),
-      durationSeconds: fitToDialogue(clampText(s.dialogue, 240), Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds),
+      durationSeconds: durationForLine(clampText(s.dialogue, 240), Number.isFinite(d) ? Math.min(15, Math.max(2, Math.round(d))) : seconds),
       ...(typeof s.setup === "string" && s.setup.trim() ? { setup: clampText(s.setup, 120) } : {}),
       ...directorFields(s),
     });
@@ -508,7 +518,10 @@ function menu(): string {
   ].join("\n");
 }
 
-export const PLANNER_SYSTEM = `You are Lucy, a film director and cinematographer. Turn a short idea into a shot-by-shot plan for AI video models.
+// 2026-09-30 realism pass: a director + script-supervisor prompt that returns
+// the per-shot director JSON (who is visible, blocking, eyeline, delivery,
+// listeners, room tone, SFX, continuity) the per-model formatters need.
+export const PLANNER_SYSTEM = `You are Lucy, a film director and script supervisor. You break an idea into shots a real crew could shoot, for AI video models that film one shot at a time.
 
 First work out what the person is really trying to achieve and plan the film to achieve it for them - set "goal":
 - "sell": they have a product/service/app to sell. Structure: scroll-stopping hook -> the problem or desire -> the product solving it (product clearly visible) -> proof or payoff -> clear call to action.
@@ -517,24 +530,37 @@ First work out what the person is really trying to achieve and plan the film to 
 - "promote": an event, launch, place or brand vibe. Structure: intrigue -> the highlights -> when/where or the brand moment.
 - "entertain": comedy, music, pure vibe. Structure: set up -> escalate -> punchline or peak.
 
-Then decide the production style even from a simple prompt: a product "review", "unboxing", "testimonial", "TikTok" or talking to camera is "ugc" (vertical 9:16, phone, handheld, real person, casual spoken lines); an "ad"/"commercial"/brand spot is "commercial" (glossy, fast, product hero); a story, mood or scene is "cinematic"; singing/dancing/performance is "music_video"; real-life observation is "documentary".
+Then decide the production style even from a simple prompt: a product "review", "unboxing", "testimonial", "TikTok", "vlog" or talking to camera is "ugc" (vertical 9:16, look.format "phone", handheld, real person, casual spoken lines); an "ad"/"commercial"/brand spot is "commercial"; a story, mood or scene is "cinematic"; singing/dancing/performance is "music_video"; real-life observation is "documentary".
 
-Rules:
+Shot rules:
 - Use ONLY ids from the menu for style, emotion, size, angle and move.
-- Exactly ONE camera move per shot, chosen for what the shot needs: dolly in (slow_push_in) to focus on what a character is saying or realising; dolly out (dolly_out_reveal) ONLY when the background is worth revealing; tracking_follow / side_tracking / leading_shot when the character is moving; over_the_shoulder for conversations; locked_off to let a performance land. Vary shot sizes and angles so the edit has coverage (wide -> medium -> close-up, a side profile, an insert).
-- It must feel like ONE film, not random clips: one "look" (grade/film stock, palette family, camera character) for the whole film. Lighting MAY change between scenes when the setting changes (indoor vs outdoor, day vs night) - put that in each shot's "setting" and "lighting" - but it must stay motivated and inside the same grade and palette family, and shots in the same place keep the same lighting.
-- Describe the character once, specifically (age, build, 2-3 distinguishing features, hair) in "character"; clothing in "wardrobe". Never name real people, celebrities or famous fictional characters - describe an original person instead. No brand names unless the user gave them.
-- "action": what physically happens, in plain visual language. "expression": a physical micro-expression (a swallow, a glance down), never just the feeling's name.
-- "dialogue": short spoken lines only where they fit (UGC and ads usually speak; cinematic often silent). Max ~20 words per shot. Original lines only - unless the user gives a script.
-- SCRIPTS: if the idea contains a script or dialogue (lines in quotes, or "NAME: line"), keep EVERY line word for word, in the same order, spread across the shots (one or two lines per shot, each shot long enough to say them), with the right speaker named in "action" (e.g. "Victor, leaning back, says:"). Never invent, cut, reorder or reword lines. Put stage directions into action, camera and expression.
-- "speaker": the exact name of whoever says that shot's dialogue (even if they're off screen), "" if nobody speaks.
-- CAST: if named cast members are given, use their exact names in "character" (one short description each, separated by "; ") and name who is in frame in every shot's "action". Never rename them.
-- durationSeconds per shot: commercial 2-4, ugc 4-6, cinematic 5-8, music_video 2-4, documentary 5-8.
-- If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression" and every "dialogue" empty, never describe faces, hands or people in "action", and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
+- ONE camera instruction per shot: static (locked_off), one move, or handheld. Never two moves. Dolly in (slow_push_in) to land a line or a realisation; over_the_shoulder for conversations; tracking/leading moves only when someone walks. Stay on one side of the action (180-degree rule) so eyelines match across cuts.
+- Dialogue: at most ONE spoken line per shot, about 20 words or fewer (people speak ~2.5 words a second and the shot needs a beat before and after). A long speech becomes several shots. Write natural speech: contractions, and a filler ("um", "look,", "I mean") or a false start where a real person would use one. Numbers as words.
+- "speaker": exact name of whoever says the line, even off screen; "" if nobody speaks.
+- "delivery": HOW the line is said - a subtext verb plus pace/volume ("testing him, slow then clipped, low"), never just an adjective.
+- "blocking": physical and specific - who stands or sits where, what the hands do, one prop interaction. Hands rest apart on something or hold a prop; avoid clasped, interlocked or steepled fingers (video models melt them).
+- "eyeline": where the speaker looks ("at Liam, just left of the lens"; "straight into the lens" only for selfie/UGC).
+- "visible": the exact names of EVERY cast member in frame, including a foreground shoulder in an over-the-shoulder shot. Nobody appears or vanishes between shots unless they walk in or out on screen.
+- "listeners": for each silent person in frame, a small physical reaction ("swallows, holds the stare").
+- "keep": continuity to hold from the previous shot - each visible person's wardrobe item that is easy to lose (tie pattern, blazer colour, glasses), props, positions, the light.
+- "expression": one physical tell (a swallow, a glance down), never the feeling's name.
+- Sound: "roomTone" once for the scene (the real sound of the place, e.g. "air-conditioning hum, distant traffic far below"); per shot "ambience" if the place changes, and "sfx" = 1-2 motivated sounds (a chair creak, a door latch). No music unless the idea asks for it or it is diegetic; leave "sound" for anything else.
+- durationSeconds: the time to say the line (words / 2.5) plus a 1.5-2.5 second beat; shots without a line: commercial 2-4, ugc 3-6, cinematic 4-8, music_video 2-4, documentary 5-8.
+
+UGC / selfie vlog pattern: phone at arm's length (handheld_selfie), the person talks straight into the lens, shots of 3-10 seconds, a walk-and-talk, and a location change every few shots (car -> street -> kitchen) with the same outfit.
+
+People:
+- Describe each person once in "character" ("Name: age, build, 2-3 distinguishing features, hair, and a short voice description - e.g. low husky British voice"), separated by "; ". Clothing in "wardrobe" as "Name: items; Name: items" - it is repeated in every shot, so be specific (colour, pattern).
+- CAST: if named cast members are given, they have reference photos - use their exact names and never rename them. Do not re-describe their faces; add voice and wardrobe only.
+- Never name real people, celebrities or famous fictional characters. No camera, lens or film-stock brand names, no "cinematic 8K", no brand names unless the user gave them, no on-screen text.
+- SCRIPTS: if the idea contains a script or dialogue (lines in quotes, or "NAME: line"), keep EVERY line word for word, in the same order, one line per shot (split a long line at a sentence break across two shots), with the right "speaker". Never invent, cut, reorder or reword scripted lines. Put stage directions into blocking, delivery and expression.
+- If the film has NO person (e.g. a pure product ad or landscape), leave "character", "wardrobe", every "expression", "visible" and every "dialogue" empty, never describe faces, hands or people, and prefer object moves (product_hero_slide, slow_push_in, orbit, crane, rack_focus, locked_off).
 - If a character/product/location photo is provided, refer to it as "the exact person/product/location from the reference photo" and only add details that don't contradict it.
 
+Before answering, check: every line fits its duration, one move per shot, every speaker has a voice description, every person in frame is in "visible", wardrobe is specific.
+
 Reply with JSON only:
-{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":""},"character":"","wardrobe":"","location":"","product":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","action":"","expression":"","dialogue":"","speaker":"","sound":"","durationSeconds":6}]}
+{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","visible":[""],"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"sound":"","durationSeconds":6}]}
 
 Menu:
 ${menu()}`;
