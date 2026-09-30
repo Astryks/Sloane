@@ -197,6 +197,13 @@ export type VertexVeoParams = {
   generateAudio?: boolean;
   negativePrompt?: string | null;
   seed?: number | null;
+  /**
+   * Google's Gemini prompt rewriter. `false` asks Vertex to use the prompt as
+   * written (director films send carefully budgeted prompts). Google's docs say
+   * Veo 3/3.1 may not allow turning it off; submitVertexVeoJob drops the field
+   * and retries if a model rejects it. Omitted = Google's default.
+   */
+  enhancePrompt?: boolean | null;
 };
 
 // Veo 3.x accepts 4/6/8s; snap anything else down to the nearest valid value.
@@ -227,6 +234,7 @@ export async function buildVertexVeoBody(p: VertexVeoParams): Promise<Record<str
   if (p.aspectRatio === "16:9" || p.aspectRatio === "9:16") parameters.aspectRatio = p.aspectRatio;
   if (p.negativePrompt) parameters.negativePrompt = p.negativePrompt;
   if (typeof p.seed === "number") parameters.seed = p.seed;
+  if (typeof p.enhancePrompt === "boolean") parameters.enhancePrompt = p.enhancePrompt;
   return { instances: [instance], parameters };
 }
 
@@ -244,20 +252,43 @@ export function vertexParamsFromFalShapedInput(input: Record<string, unknown>): 
     generateAudio: input.generate_audio === undefined ? true : Boolean(input.generate_audio),
     negativePrompt: typeof input.negative_prompt === "string" ? input.negative_prompt : null,
     seed: typeof input.seed === "number" ? input.seed : null,
+    enhancePrompt: typeof input.enhance_prompt === "boolean" ? input.enhance_prompt : null,
   };
 }
 
 // --- submit / poll ---
 
+// Models that rejected enhancePrompt in this process (so we stop sending it).
+const ENHANCE_PROMPT_REJECTED = new Set<string>();
+
 export async function submitVertexVeoJob(model: string, body: Record<string, unknown>): Promise<string> {
+  let params = { ...((body.parameters as Record<string, unknown> | undefined) ?? {}) };
+  if ("enhancePrompt" in params && ENHANCE_PROMPT_REJECTED.has(model)) delete params.enhancePrompt;
+  const post = (p: Record<string, unknown>) => vertexPost(modelUrl(model, "predictLongRunning"), { ...body, parameters: p });
+  const withAdultFallback = async (p: Record<string, unknown>, err: unknown) => {
+    if (p.personGeneration !== "allow_all") throw err;
+    console.warn("[vertexVeo] allow_all rejected, retrying with allow_adult");
+    return post({ ...p, personGeneration: "allow_adult" });
+  };
   let data: Record<string, unknown>;
   try {
-    data = await vertexPost(modelUrl(model, "predictLongRunning"), body);
+    data = await post(params);
   } catch (err) {
-    const params = body.parameters as Record<string, unknown> | undefined;
-    if (params?.personGeneration !== "allow_all") throw err;
-    console.warn("[vertexVeo] allow_all rejected, retrying with allow_adult");
-    data = await vertexPost(modelUrl(model, "predictLongRunning"), { ...body, parameters: { ...params, personGeneration: "allow_adult" } });
+    if ("enhancePrompt" in params) {
+      // 2026-09-30: Veo 3/3.1 may refuse to turn the prompt rewriter off - drop it and retry.
+      const rest = { ...params };
+      delete rest.enhancePrompt;
+      try {
+        data = await post(rest);
+        ENHANCE_PROMPT_REJECTED.add(model);
+        console.warn(`[vertexVeo] ${model} rejected enhancePrompt=false - sending without it`);
+      } catch (err2) {
+        params = rest;
+        data = await withAdultFallback(params, err2);
+      }
+    } else {
+      data = await withAdultFallback(params, err);
+    }
   }
   if (typeof data.name !== "string") throw new Error("Video engine returned no job id");
   return data.name;

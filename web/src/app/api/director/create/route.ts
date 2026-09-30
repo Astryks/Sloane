@@ -4,7 +4,8 @@ import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, sav
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
-import { sanitizePlan } from "@/lib/director/plan";
+import { sanitizePlan, withShotSeeds } from "@/lib/director/plan";
+import { finalAllowedFor } from "@/lib/director/videoQuality";
 import { assignSetups, coverageByDefault } from "@/lib/director/coverage";
 import { AUTO_CAST_MAX_EXISTING, REF_LIMITS, allocateCast, buildRefs, type CastPerson, type RefKind } from "@/lib/director/refs";
 import { compileKeyframePrompt, compileShotPrompt, promptModelFor } from "@/lib/director/compile";
@@ -125,6 +126,10 @@ export async function POST(req: NextRequest) {
     // Selfie vlogs play as one continuous take (each shot starts on the last frame of the one before).
     if (plan.chain === undefined) plan = { ...plan, chain: plan.style === "ugc" || plan.look.format === "phone" };
     plan = assignSetups(plan);
+    // Per-shot seeds (stored, so a retake can reproduce a take) and the
+    // Draft/Final choice - Final only where allowed (see videoQuality.ts).
+    plan = withShotSeeds(plan);
+    if (plan.quality === "final" && !finalAllowedFor(engine, user)) plan = { ...plan, quality: undefined };
     // Lucy makes the character sheet herself when there's a person and the
     // customer hasn't already given several angles.
     const characterPhotos = links.character.length + (files.character ? 1 : 0);

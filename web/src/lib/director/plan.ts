@@ -147,6 +147,16 @@ export type DirectorPlan = {
   shots: DirectorShot[];
 };
 
+/** A fresh Vertex seed (uint32) - stored per shot so retakes can reproduce or vary a take. */
+export function newShotSeed(): number {
+  return Math.floor(Math.random() * 4294967296);
+}
+
+/** Gives every shot without a seed a fresh one. */
+export function withShotSeeds(plan: DirectorPlan): DirectorPlan {
+  return { ...plan, shots: plan.shots.map((s) => (s.seed === undefined ? { ...s, seed: newShotSeed() } : s)) };
+}
+
 /** True only when the customer explicitly opted into the voice lock (older plans without the field keep the model's voices). */
 export function voiceLockRequested(plan: Pick<DirectorPlan, "modelVoices">): boolean {
   return plan.modelVoices === false;

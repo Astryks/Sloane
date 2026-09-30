@@ -34,7 +34,11 @@ export async function revisePlan(plan: DirectorPlan, instruction: string, shotIn
     ...(plan.coverage !== undefined ? { coverage: plan.coverage } : {}),
     ...(plan.chain !== undefined ? { chain: plan.chain } : {}),
     ...(plan.fromPhotos ? { fromPhotos: true } : {}),
+    ...(plan.quality ? { quality: plan.quality } : {}),
+    ...(!sanitized.roomTone && plan.roomTone ? { roomTone: plan.roomTone } : {}),
     modelVoices: plan.modelVoices !== false,
+    // Keep each shot's stored seed so a revised plan can reproduce earlier takes.
+    shots: sanitized.shots.map((s, i) => (plan.shots[i]?.seed !== undefined && s.seed === undefined ? { ...s, seed: plan.shots[i].seed } : s)),
   };
   // A single-shot edit must not touch the other shots or the locked bibles.
   if (shotIndex != null) {

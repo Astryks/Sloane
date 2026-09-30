@@ -128,6 +128,18 @@ export function DirectorStudio({
   // Real voice recordings per cast id, for the opt-in voice lock (2026-09-30).
   const [voiceSamples, setVoiceSamples] = useState<Record<string, string>>({});
   const [voiceConsent, setVoiceConsent] = useState(false);
+  // Draft / Final (2026-09-30): Final (1080p, GA Veo 3.1) only shows where the server allows it.
+  const [finalOk, setFinalOk] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/director/quality?engine=${encodeURIComponent(engine)}`)
+      .then((r) => r.json())
+      .then((j: { final?: boolean }) => live && setFinalOk(!!j.final))
+      .catch(() => live && setFinalOk(false));
+    return () => {
+      live = false;
+    };
+  }, [engine]);
   const [presets, setPresets] = useState<MoviePreset[]>([]);
   const [presetId, setPresetId] = useState<string | null>(null);
   const [movieNotes, setMovieNotes] = useState("");
@@ -823,6 +835,15 @@ export function DirectorStudio({
                     🗣 Keep the video model&apos;s own voices (recommended - most natural; describe each voice in the cast, e.g. &quot;deep, calm, husky, British&quot;). Off = lock each person to a real recording of their voice that you upload below.
                   </span>
                 </label>
+                {finalOk && (
+                  <label className="text-[11px] font-semibold text-muted sm:col-span-2">
+                    Quality
+                    <select className={inputCls} value={plan.quality ?? "draft"} onChange={(e) => editPlan({ quality: e.target.value === "final" ? "final" : undefined })}>
+                      <option value="draft">Draft - 720p, quickest</option>
+                      <option value="final">Final - 1080p on Veo 3.1 (slower)</option>
+                    </select>
+                  </label>
+                )}
                 {plan.modelVoices === false && (
                   <VoiceSamplePicker
                     cast={selectedCast}

@@ -39,6 +39,7 @@ import { getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl,
 import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import { voiceLockRequested, type DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
+import { isVertexEndpoint } from "../vertexVeo";
 import { MODELARK_ENDPOINT_PREFIX, getModelArkApiKey } from "../modelArk";
 import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextPrompt, orderedRefs, refList, sheetAnglePrompt, type CastPerson } from "./refs";
 import type { DirectorShot } from "./plan";
@@ -283,6 +284,18 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
         const { isOwner } = await import("../owner");
         if (isOwner(await getUserById(film.user_id))) endpoint = `${MODELARK_ENDPOINT_PREFIX}${ownerModel}`;
       }
+      // Draft / Final (2026-09-30): Final = 1080p on the GA Veo 3.1 model,
+      // only where allowed (owner, or veo31 with DIRECTOR_FINAL_FOR_VEO31=1).
+      let final = false;
+      if (plan.quality === "final") {
+        const { finalAllowed, FINAL_ENDPOINT } = await import("./videoQuality");
+        const { getUserById } = await import("../db");
+        const { isOwner } = await import("../owner");
+        if (finalAllowed(engine, isOwner(await getUserById(film.user_id)))) {
+          final = true;
+          endpoint = FINAL_ENDPOINT;
+        }
+      }
       const d = plan.shots[shot.idx]?.durationSeconds ?? null;
       const nativeAudio = VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio || endpoint.startsWith(MODELARK_ENDPOINT_PREFIX);
       let prompt = shot.prompt;
@@ -330,6 +343,18 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       }
       const input = buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio);
       if (lineAudio) input.reference_audio_urls = [lineAudio];
+      // Director Vertex jobs (2026-09-30): ask Veo to use our prompt as written,
+      // keep captions/watermarks/score out via negativePrompt, and pin the
+      // shot's stored seed so a retake can reproduce it. sampleCount stays 1.
+      const draftResolution = typeof input.resolution === "string" ? input.resolution : null;
+      if (isVertexEndpoint(endpoint)) {
+        const { veoNegativePrompt } = await import("./formatters");
+        input.enhance_prompt = false;
+        input.negative_prompt = veoNegativePrompt(plan);
+        const seed = plan.shots[shot.idx]?.seed;
+        if (typeof seed === "number") input.seed = seed;
+        if (final) input.resolution = "1080p";
+      }
       if (ingredients.length) {
         delete input.image_url;
         input.reference_image_urls = ingredients;
@@ -342,7 +367,18 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       }
       let requestId: string;
       try {
-        requestId = await submitVideoInferenceJob(endpoint, input);
+        try {
+          requestId = await submitVideoInferenceJob(endpoint, input);
+        } catch (err) {
+          // Final refused (e.g. 1080p not allowed for this length/input)? Film the draft instead of failing the shot.
+          if (!final) throw err;
+          console.error("[director] final quality refused - filming at draft settings", shot.id, err);
+          final = false;
+          endpoint = resolveVideoEndpoint(engine, !!imageUrl);
+          if (draftResolution) input.resolution = draftResolution;
+          else delete input.resolution;
+          requestId = await submitVideoInferenceJob(endpoint, input);
+        }
       } catch (err) {
         // Photo references refused (e.g. a safety check on real-looking faces)? Film from the drawn frame instead.
         if (ingredients.length && shot.keyframe_url) {
