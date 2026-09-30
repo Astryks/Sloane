@@ -200,13 +200,16 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
 const TTS_PREFIX = "tts:";
 
 /** The spoken words + the speaker's Lucy voice, if this shot's speaker has one. */
-function voiceFirstLine(film: DirectorFilmRow, plan: DirectorPlan, idx: number): { speaker: string; voiceId: string; words: string; delivery: string } | null {
+function voiceFirstLine(film: DirectorFilmRow, plan: DirectorPlan, idx: number): { speaker: string; voiceId?: string; sampleUrl?: string; words: string; delivery: string } | null {
   const shot = plan.shots[idx];
   const words = shot?.dialogue.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
   if (!shot || !words) return null;
   const who = speakerOf(shot, film.refs.people ?? []);
   const person = who >= 0 ? film.refs.people?.[who] : undefined;
   const delivery = [...shot.dialogue.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(", ") || shot.expression;
+  // 2026-09-30: the customer's own consented recording (Chatterbox-Turbo,
+  // zero-shot) wins over a Lucy preset voice.
+  if (person?.voiceSampleUrl) return { speaker: person.name, sampleUrl: person.voiceSampleUrl, words, delivery };
   return person?.voiceId ? { speaker: person.name, voiceId: person.voiceId, words, delivery } : null;
 }
 
@@ -298,10 +301,17 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       let lineAudio: string | null = null;
       if (voiceFirst) {
         if (!shot.video_request_id) {
-          const { planLineActing } = await import("./voiceActing");
+          const { planLineActing, heuristicActing } = await import("./voiceActing");
           const person = (film.refs.people ?? []).find((p) => p.name === voiceFirst.speaker);
-          const segments = await planLineActing({ speaker: voiceFirst.speaker, character: person?.description, line: voiceFirst.words, delivery: voiceFirst.delivery, context: `${plan.logline} ${plan.shots[shot.idx]?.action ?? ""}` }).catch(() => []);
-          const r = await voiceCall("/start", { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, segments, seconds: Math.min(15, Math.max(4, d ?? 8)) }).catch(() => null);
+          const acted = await planLineActing({ speaker: voiceFirst.speaker, character: person?.description, line: voiceFirst.words, delivery: voiceFirst.delivery, context: `${plan.logline} ${plan.shots[shot.idx]?.action ?? ""}` }).catch(() => []);
+          const segments = acted.length ? acted : heuristicActing(voiceFirst.words, voiceFirst.delivery);
+          const seconds = Math.min(15, Math.max(4, d ?? 8));
+          const r = await voiceCall(
+            "/start",
+            voiceFirst.sampleUrl
+              ? { mode: "speak", reference_url: voiceFirst.sampleUrl, segments, seconds, engine: process.env.DIRECTOR_TTS_ENGINE === "standard" ? "standard" : "turbo" }
+              : { mode: "tts", voice_id: voiceFirst.voiceId, text: voiceFirst.words, delivery: voiceFirst.delivery, segments, seconds },
+          ).catch(() => null);
           if (r && typeof r.call_id === "string") return updateDirectorShot(shot.id, { video_request_id: `${TTS_PREFIX}${r.call_id}` });
         } else {
           const r = await voiceCall(`/result?call_id=${encodeURIComponent(shot.video_request_id.slice(TTS_PREFIX.length))}`).catch(() => null);
