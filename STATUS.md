@@ -1,5 +1,18 @@
 # Sloane Project Status
 
+## Latest update, 2026-09-30 (evening) - Review of PRs #40-#43 (realism, coverage grammar, cinematic engine)
+
+Reviewed after merge. `npm test` passes 64/64 and tsc is clean. The design is sound and was kept (beats, recipes, playbooks, grammar, per-model formatters, automatic Veo ingredients that skip chained takes and pass the coverage still as the set ref, Director's review, takes, stitch L-cuts and room-tone beds). Changes made in this review:
+- **Deployed what had never been deployed.** Modal `director-stitch`, `director-voice` (Chatterbox 0.1.7/Turbo, sync check) and `lucy-tts` (room-tone gaps, scripted "um"s) are now live. Before this, the site ran the new web code against the old Modal apps. Nothing broke, but the new sound editing, sync check and Turbo speak were inactive.
+- **lucy-tts smoke test:** Brad, Harper and Lawrence lines generate. Right after a deploy, the first minute of requests can fail while all ~17 voice LoRAs load (they share one swapped T3), so don't judge a deploy in its first minute. Brad reliably fails one sentence ("Holding thirty percent cash is not an option. I need my money to work for me.", 8/8 retries); this is a known model weakness, not a regression (it fails on the rolled-back engine too).
+- **Lucy preset voices keep a safe acting window** (exaggeration 0.48-0.72, cfg 0.36-0.48) inside `tts_acted`. The PR widened it to 0.35-0.95 / 0.25-0.5, but Sid's ear test found Brad distorted there. Turbo `speak()` from real recordings is not clamped. Turn it off with `DIRECTOR_PRESET_SAFE=0`.
+- **Free sync check is ON by default** (`DIRECTOR_SYNC_CHECK=0` turns it off). It is free, on our Modal CPU.
+- **New wrong-voice check** (the Neilson v2 bug: Lawrence's lines in a woman's voice, 171-239 Hz):
+  - `voiceRegister()` guesses "low" or "high" from the cast description.
+  - `sync_check` measures the line's median F0 and flags `voice_mismatch` (a man's line above 175 Hz, or a woman's below 150 Hz). The shot then shows "This line came out in the wrong person's voice - tap Retake".
+  - Tested live on Jess's shot: 193 Hz is flagged when she is expected low, and passes when expected high.
+- **Product decision taken by the PR, flagged for Sid:** voices now default to the video model's own, and Lucy preset voices (Brad/Harper) are no longer used as voice-swap targets (only a real uploaded recording is). This matches Sid's "the voices are better", but it means the Brad/Harper casting he picked is not applied unless a real recording is uploaded. Seedance 2.x voice-first can still use a preset voice when the voice lock is on.
+
 ## Latest update, 2026-09-30 - Cinematic engine: beats, shot choice, scene recipes, model playbooks, Director's review (PR `director-cinematic-engine`)
 
 Lucy now picks each camera shot for what the moment does, the way a director would. The research, with a cited source for every rule, is in `docs/cinematic-grammar-playbook.md`. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Shot counts and spoken lines never change.
@@ -62,7 +75,7 @@ Fixes Sid's "a character is speaking but the camera is on someone else" and shoo
   - Flagged shots show "Lip-sync looks off … tap Retake".
 - **Tests:** `grammar.test.ts` (13 tests) plus the Neilson idea fixture. `npm test` passes 49/49; tsc, build and py_compile are clean; eslint is no worse than main.
 
-## Latest update, 2026-09-30 - Realism pass (PR `lucy-realism-v1`, NOT merged, nothing deployed)
+## Latest update, 2026-09-30 - Realism pass (PR `lucy-realism-v1`, merged as #40; Modal apps redeployed 2026-09-30 by the review below)
 
 Implements the realism diagnosis (§6 checklist) and Sid's Neilson review. No paid calls were made, and there are no credit, pricing, Stripe or claiming changes. Every new paid path is off by default.
 
