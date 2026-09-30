@@ -3,6 +3,7 @@
 // Everything here is OFF by default:
 //   DIRECTOR_LIPSYNC=off|kling|latentsync|sync2pro   (paid fal call per shot; default off)
 //   DIRECTOR_SYNC_CHECK=1                             (free: our own Modal CPU; default off)
+//   DIRECTOR_TTS_ENGINE=standard                      (rollback: Chatterbox standard instead of Turbo; default turbo)
 //
 // Where it runs: inside the opt-in voice lock only (a cast member uploaded
 // their own voice). For each shot that person speaks in:
@@ -34,6 +35,11 @@ export function lipsyncProvider(value: string | undefined = process.env.DIRECTOR
   if (v === "latentsync") return "latentsync";
   if (v === "sync2pro" || v === "sync2" || v === "sync") return "sync2pro";
   return null;
+}
+
+/** Which Chatterbox model speaks a line from a real recording (director_voice.py "speak" mode). Turbo unless rolled back. */
+export function ttsEngine(value: string | undefined = process.env.DIRECTOR_TTS_ENGINE): "standard" | "turbo" {
+  return value?.trim().toLowerCase() === "standard" ? "standard" : "turbo";
 }
 
 export function syncCheckEnabled(value: string | undefined = process.env.DIRECTOR_SYNC_CHECK): boolean {

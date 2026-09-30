@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lineRecall, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, takeIsGood, voiceState } from "./lipsync";
+import { lineRecall, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, takeIsGood, ttsEngine, voiceState } from "./lipsync";
 
 test("lip-sync and sync check are off unless configured", () => {
   assert.equal(lipsyncProvider(undefined), null);
@@ -40,4 +40,12 @@ test("gibberish or out-of-sync takes are flagged; unknown results never trigger 
   assert.equal(takeIsGood({ ok: false, score: 0.05, text: line }, line), false);
   assert.equal(takeIsGood({ ok: null }, line), true);
   assert.equal(takeIsGood(null, line), true);
+});
+
+test("DIRECTOR_TTS_ENGINE: Turbo by default, 'standard' is the rollback", () => {
+  assert.equal(ttsEngine(undefined), "turbo");
+  assert.equal(ttsEngine(""), "turbo");
+  assert.equal(ttsEngine("turbo"), "turbo");
+  assert.equal(ttsEngine("standard"), "standard");
+  assert.equal(ttsEngine(" Standard "), "standard");
 });

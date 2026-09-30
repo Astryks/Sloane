@@ -11,7 +11,7 @@
 import { ANGLES as ANGLE_NOTES, EMBEDDING_RULES, OBJECT_REALISM, OBJECT_SHOT_SIZES, SHOT_SIZES, realismForShot, type ShotSizeId } from "./filmScience";
 import { CAMERA_FORMATS, type DirectorPlan, type DirectorShot } from "./plan";
 import { isReactionShot, setupCamera } from "./coverage";
-import { castLookOf, formatShotPrompt, hasPerson, visibleCast, type FormatOptions, type RefFlags } from "./formatters";
+import { castLookOf, formatShotPrompt, hasPerson, screenSideOf, visibleCast, type FormatOptions, type RefFlags } from "./formatters";
 import { safeText } from "./playbooks";
 import { lookDirection } from "./grammar";
 
@@ -78,7 +78,7 @@ function castInFrameLine(plan: DirectorPlan, shot: DirectorShot | undefined, ref
   // looking right") so the stills keep the 180-degree line too.
   const who = names.map((n) => {
     const look = castLookOf(plan, n);
-    const side = plan.screenSides?.[n] ?? Object.entries(plan.screenSides ?? {}).find(([k]) => k.split(" ")[0].toLowerCase() === n.split(" ")[0].toLowerCase())?.[1];
+    const side = screenSideOf(plan, n);
     return [look ? `${n} (${look})` : n, side ? `on the ${side} of frame ${lookDirection(side)}` : ""].filter(Boolean).join(" ");
   });
   const listening = isReactionShot(shot) ? names.map((n) => n.split(" ")[0]).join(" and ") : "";

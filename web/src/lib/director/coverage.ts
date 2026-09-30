@@ -115,7 +115,6 @@ function partnerOf(plan: DirectorPlan, who: string): string | undefined {
 
 /** The camera for a setup, in words both stills and video models follow. */
 export function setupCamera(plan: DirectorPlan, setup: string, shot?: DirectorShot): string {
-  const cast = planCast(plan);
   if (setup.startsWith("reaction:")) {
     const who = setup.slice(9);
     const side = plan.screenSides?.[who];

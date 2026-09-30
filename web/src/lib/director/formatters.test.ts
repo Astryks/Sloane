@@ -1,7 +1,7 @@
 // Unit tests for the per-model shot formatters (2026-09-30). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CAMERA_FAMILIES, WORD_BUDGET, castLookOf, countWords, fitClauses, formatShotPrompt, hasPerson, promptModelFor, steadyHands, visibleCast, type PromptModel } from "./formatters";
+import { CAMERA_FAMILIES, WORD_BUDGET, castLookOf, countWords, fitClauses, formatShotPrompt, hasPerson, promptModelFor, screenSideOf, steadyHands, visibleCast, type PromptModel } from "./formatters";
 import { compileAnchorPrompt, compileKeyframePrompt, compileSetupKeyframePrompt } from "./compile";
 import { assignSetups } from "./coverage";
 import type { DirectorPlan } from "./plan";
@@ -160,4 +160,13 @@ test("Seedance voice-first refers to Audio 1 and Image 1", () => {
   const f = formatShotPrompt(neilsonDirectedPlan, 1, REFS, { nativeAudio: true, model: "seedance2", audioRef: true, firstFrame: true });
   assert.match(f.prompt, /Audio 1/);
   assert.match(f.prompt, /Image 1/);
+});
+
+test("screenSideOf: exact name first, then first name; nothing when unset", () => {
+  const plan = { screenSides: { "Lawrence Neilson": "left", Liam: "right" } } as Pick<DirectorPlan, "screenSides">;
+  assert.equal(screenSideOf(plan, "Lawrence Neilson"), "left");
+  assert.equal(screenSideOf(plan, "Lawrence"), "left");
+  assert.equal(screenSideOf(plan, "liam"), "right");
+  assert.equal(screenSideOf(plan, "Jess"), undefined);
+  assert.equal(screenSideOf({}, "Liam"), undefined);
 });
