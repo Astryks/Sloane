@@ -22,9 +22,10 @@
 // dropped. The spoken line is never cut. (The server can first ask an LLM to
 // compress it - see shortenPrompt.server.ts.)
 
-import { ANGLES, CAMERA_MOVES, SHOT_SIZES, type CameraMoveId, type ShotSizeId } from "./filmScience";
+import { ANGLES, SHOT_SIZES, type CameraMoveId, type ShotSizeId } from "./filmScience";
 import type { DirectorPlan, DirectorShot } from "./plan";
 import { isReactionShot, onScreen, parseSetup, planCast } from "./coverage";
+import { cameraWords, safeText } from "./playbooks";
 
 export type RefFlags = { character: boolean; product: boolean; location: boolean };
 export type PromptModel = "veo" | "seedance2" | "kling3";
@@ -156,7 +157,7 @@ export function hasPerson(plan: DirectorPlan, refs: RefFlags): boolean {
 type CastInfo = { name: string; look: string; lookShort: string; voice: string; wardrobe: string; wardrobeShort: string };
 
 const VOICE_PART = /\b(voice|accent|tone|speaks?|spoken|drawl|lisp|timbre|baritone|tenor|soprano|raspy|husky|gravelly)\b/i;
-const CLOTHING_PART = /\b(suit|tie|braces|blazer|jacket|sweater|jumper|shirt|blouse|dress|coat|cardigan|hoodie|scarf|earrings|hat|cap|uniform|skirt|trousers|jeans|vest|waistcoat|t-shirt|tee|overalls|apron|necklace|gown)\b/i;
+const CLOTHING_PART = /\b(suit|tie|braces|blazer|jacket|sweater|jumper|shirt|blouse|dress|coat|cardigan|hoodie|scarf|earrings|hat|cap|uniform|skirt|trousers|jeans|vest|waistcoat|t-shirt|tee|overalls|apron|necklace|gown|tunic|toga|robe|cloak|belt|sandals|boots|kimono|sari)\b/i;
 const FEATURE_PART = /\b(hair|bob|bald|beard|moustache|mustache|stubble|glasses|freckles|braids?|curls|curly|ponytail|bun|shaved|scar|tattoo|dreadlocks|fringe|grey|gray|silver|blonde|redhead|auburn)\b/i;
 
 /** "Name: description; Name: description" -> per-person look / voice / wardrobe. */
@@ -202,7 +203,8 @@ export function castLooks(plan: DirectorPlan): Record<string, string> {
     const raw = parts.find((p) => p.split(":")[0].trim() === c.name) ?? "";
     const bits = (raw.includes(":") ? raw.slice(raw.indexOf(":") + 1) : "").split(",").map((b) => b.trim()).filter((b) => b && !VOICE_PART.test(b) && !CLOTHING_PART.test(b));
     const feature = bits.find((b) => FEATURE_PART.test(b)) ?? c.lookShort;
-    const look = [clipWords(feature, 4), c.wardrobeShort].filter(Boolean).join(", ");
+    // Never end the feature on a dangling word ("dark curly hair in").
+    const look = [clipWords(feature, 4).replace(/\s+(?:in|with|a|an|the|of|and|over|on|to)$/i, ""), c.wardrobeShort].filter(Boolean).join(", ");
     if (look) out[c.name] = look;
   }
   return out;
@@ -301,33 +303,15 @@ const SIZE_SHORT: Record<ShotSizeId, string> = {
   insert: "Insert shot",
 };
 
-const MOVE_SHORT: Record<CameraMoveId, string> = {
-  locked_off: "Static camera on a tripod",
-  slow_push_in: "Slow dolly push-in",
-  fast_push_in: "Quick push-in",
-  dolly_out_reveal: "Slow dolly pull-back revealing the room",
-  pull_back_isolation: "Slow pull-back",
-  tracking_follow: "Camera tracks alongside at walking pace",
-  side_tracking: "Camera trucks sideways alongside",
-  leading_shot: "Camera leads backward as they walk toward it",
-  subject_swap_pan: "One smooth pan from one person to the other",
-  whip_pan: "Fast whip pan",
-  rack_focus: "Static camera, focus pulls to the subject",
-  tension_zoom: "Slow creeping zoom in",
-  crash_zoom: "Sudden snap zoom in",
-  dolly_zoom: "Dolly zoom",
-  orbit: "Camera orbits in a half circle",
-  crane_up: "Camera cranes up",
-  crane_down: "Camera cranes down to eye level",
-  tilt_up_reveal: "Slow tilt up",
-  overhead_top_down: "Static overhead camera looking straight down",
-  handheld_follow: "Handheld camera following, natural shake",
-  handheld_selfie: "Selfie video: phone held at arm's length, small natural wobble",
-  over_the_shoulder: "Static camera",
-  pov: "Point-of-view camera through their eyes",
-  product_hero_slide: "Slow lateral slider move",
-  slow_motion_hold: "Camera nearly still, slow motion",
-};
+/** Lens feel -> focal length words (beats.ts picks the feel). */
+const LENS_MM = { wide: "28mm", normal: "50mm", long: "85mm" } as const;
+
+/** "slightly low angle" for a power shot; nothing at eye level (the default). */
+function anglePhrase(shot: DirectorShot): string {
+  if (shot.angle === "low_angle") return "slightly low angle looking up";
+  if (shot.angle === "high_angle") return "slightly high angle looking down";
+  return "";
+}
 
 /** Camera-motion vocabulary families; a good prompt uses words from at most one. */
 export const CAMERA_FAMILIES: Record<string, RegExp> = {
@@ -351,10 +335,12 @@ function framingLine(plan: DirectorPlan, shot: DirectorShot, person: boolean): s
     const size = SIZE_SHORT[shot.size].toLowerCase();
     const subject = first(g.who[0] ?? "");
     if (g.kind === "master") return `${shot.size === "extreme_wide" ? "Extreme wide" : "Wide"} master shot showing the whole room and where everyone is, from the side of the room, eye level, 35mm`;
-    if (g.kind === "reaction") return `Reaction shot on ${subject}, ${size}, 85mm, shallow focus`;
+    const mm = shot.lens && shot.lens !== "wide" ? LENS_MM[shot.lens] : "85mm";
+    const ang = anglePhrase(shot) ? `, ${anglePhrase(shot)}` : "";
+    if (g.kind === "reaction") return `Reaction shot on ${subject}, ${size}${ang}, ${mm}, shallow focus`;
     if (g.kind === "single") {
       const other = visibleCast(plan, shot).find((v) => firstLower(v) !== firstLower(subject));
-      return other ? `Over-the-shoulder ${size} on ${subject} past ${first(other)}'s soft shoulder, 85mm, shallow focus` : `Clean single on ${subject}, ${size}, 85mm, shallow focus`;
+      return other ? `Over-the-shoulder ${size} on ${subject} past ${first(other)}'s soft shoulder${ang}, ${mm}, shallow focus` : `Clean single on ${subject}, ${size}${ang}, ${mm}, shallow focus`;
     }
     const speaking = shot.dialogue.trim() && g.who.find((w) => firstLower(w) === firstLower(shot.speaker));
     return `Two-shot of ${g.who.map(first).join(" and ")}, 50mm, both sharp${speaking ? `, ${first(speaking)} prominent and facing the camera` : ""}`;
@@ -373,16 +359,22 @@ function framingLine(plan: DirectorPlan, shot: DirectorShot, person: boolean): s
     return vis.length >= 2 ? `Over-the-shoulder ${SIZE_SHORT[shot.size].toLowerCase()} on ${first(vis[0])} past ${first(vis[1])}'s soft shoulder` : `Over-the-shoulder ${SIZE_SHORT[shot.size].toLowerCase()}`;
   }
   const angle = shot.angle === "eye_level" ? "eye level" : ANGLES[shot.angle].split(" - ")[0].split(",")[0];
-  return `${SIZE_SHORT[shot.size]}, ${angle}, ${SHOT_SIZES[shot.size].lensHint.split(" ")[0]}`;
+  return `${SIZE_SHORT[shot.size]}, ${angle}, ${shot.lens ? LENS_MM[shot.lens] : SHOT_SIZES[shot.size].lensHint.split(" ")[0]}`;
 }
 
-function movementLine(plan: DirectorPlan, shot: DirectorShot): string {
+/** Moves a coverage setup may make: held, or one motivated move (push in on a beat, pull back, go with a walk). */
+const COVERAGE_MOVES = new Set<CameraMoveId>(["slow_push_in", "pull_back_isolation", "dolly_out_reveal", "tracking_follow", "leading_shot"]);
+
+/** The one camera instruction, in the model's own vocabulary (playbooks.ts). */
+function movementLine(plan: DirectorPlan, shot: DirectorShot, model: PromptModel = "veo"): string {
+  const g = parseSetup(shot.setup);
+  const who = g.who.length === 1 ? g.who[0] : shot.speaker || shot.visible?.[0] || "";
   const phone = (plan.look.format ?? (plan.style === "ugc" ? "phone" : "film35")) === "phone";
-  if (phone) return shot.move === "handheld_follow" ? MOVE_SHORT.handheld_follow : MOVE_SHORT.handheld_selfie;
-  // Coverage setups are held (a real crew re-uses the same locked angle).
-  if (plan.coverage && shot.setup) return shot.setup === "master" && shot.move === "slow_push_in" ? MOVE_SHORT.slow_push_in : MOVE_SHORT.locked_off;
-  if (shot.move === "handheld_selfie") return MOVE_SHORT.handheld_follow;
-  return MOVE_SHORT[shot.move] ?? CAMERA_MOVES.locked_off.label;
+  if (phone) return cameraWords(model, shot.move === "handheld_follow" ? "handheld_follow" : "handheld_selfie", who);
+  // Coverage setups are held (a real crew re-uses the same locked angle) unless the move is motivated.
+  if (plan.coverage && shot.setup) return cameraWords(model, COVERAGE_MOVES.has(shot.move) ? shot.move : "locked_off", who);
+  if (shot.move === "handheld_selfie") return cameraWords(model, "handheld_follow", who);
+  return cameraWords(model, shot.move, who);
 }
 
 // ---- sound -----------------------------------------------------------------
@@ -507,6 +499,10 @@ function positionsOf(plan: DirectorPlan, shot: DirectorShot, visible: CastInfo[]
 
 function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: FormatOptions, withRefs: boolean): Spec {
   const shot = plan.shots[idx];
+  const model = opts.model ?? "veo";
+  // Failure-prone actions (clasped/fidgeting hands, crowds, readable text,
+  // eating in close, fast full-body action) become safer staging (playbooks.ts).
+  const safe = (t: string) => safeText(t, { model, size: shot.size });
   const person = hasPerson(plan, refs);
   const info = castInfo(plan);
   const visNames = person ? visibleCast(plan, shot) : [];
@@ -523,7 +519,7 @@ function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: Format
       : `${andList(silentNames)} ${silentNames.length > 1 ? "stay silent, mouths closed" : "stays silent, mouth closed"}`
     : "";
   const reactions = shot.listeners?.length
-    ? shot.listeners.map((l) => `${first(l.name)} ${l.reaction.replace(/[.\s]+$/, "")}`).join("; ")
+    ? shot.listeners.map((l) => `${first(l.name)} ${safe(l.reaction).replace(/[.\s]+$/, "")}`).join("; ")
     : "";
   const side = line ? sideOf(plan, line.speaker) : undefined;
   const head = wardrobeHead(speakerInfo);
@@ -548,17 +544,17 @@ function buildSpec(plan: DirectorPlan, idx: number, refs: RefFlags, opts: Format
       const words = k.slice(k.indexOf(" ") + 1).toLowerCase().match(/[a-z]+/g) ?? [];
       return words.length > 0 && words.filter((w) => have.has(w)).length / words.length >= 0.8;
     });
-  const keep = steadyHands((shot.keep ?? []).filter((k) => !restatesWardrobe(k)).join("; "));
+  const keep = safe((shot.keep ?? []).filter((k) => !restatesWardrobe(k)).join("; "));
   const positions = positionsOf(plan, shot, visible, withRefs);
   const looker = reaction ? first(parseSetup(shot.setup).who[0] ?? silentNames[0] ?? "") : first(line?.speaker || "");
   return {
     person,
     framing: framingLine(plan, shot, person),
-    movement: movementLine(plan, shot),
+    movement: movementLine(plan, shot, model),
     visible,
-    action: steadyHands(cleanAction(shot.blocking || shot.action)),
-    story: shot.blocking && !shot.blocking.includes(cleanAction(shot.action)) ? steadyHands(cleanAction(shot.action)) : "",
-    ...splitAction(steadyHands(cleanAction(shot.blocking || shot.action))),
+    action: safe(cleanAction(shot.blocking || shot.action)),
+    story: shot.blocking && !shot.blocking.includes(cleanAction(shot.action)) ? safe(cleanAction(shot.action)) : "",
+    ...splitAction(safe(cleanAction(shot.blocking || shot.action))),
     eyeline: shot.eyeline ?? "",
     looker,
     line,

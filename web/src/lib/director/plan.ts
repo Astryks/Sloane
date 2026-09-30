@@ -34,6 +34,7 @@ import {
   type ProductionStyleId,
   type ShotSizeId,
 } from "./filmScience";
+import { recipeMenu } from "./recipes";
 
 export type DirectorShot = {
   beat: string; // what this shot does in the story ("hook", "reveal", "call to action")
@@ -84,7 +85,33 @@ export type DirectorShot = {
   sides?: Record<string, ScreenSide>;
   /** People in frame who have no reference photo - flagged for the customer, never invented. */
   missingRefs?: string[];
+  // ---- Cinematic engine (2026-09-30, beats.ts / recipes.ts) ----
+  /** What this shot does dramatically: setup, tension_rise, power_shift, reveal, emotional_peak, release, button. */
+  beatFunction?: BeatFunction;
+  /** How hard the beat hits, 0 (calm) to 1 (the peak). */
+  intensity?: number;
+  /** Lens feel: wide (geography, energy), normal (neutral), long (isolates a face, compresses the room). */
+  lens?: LensFeel;
+  /** The editor's cut after this beat: hold on a reaction, or an insert of the object that matters. */
+  cutTo?: "reaction" | "insert";
 };
+
+export type BeatFunction = "setup" | "tension_rise" | "power_shift" | "reveal" | "emotional_peak" | "release" | "button";
+export const ALL_BEAT_FUNCTIONS: BeatFunction[] = ["setup", "tension_rise", "power_shift", "reveal", "emotional_peak", "release", "button"];
+export type LensFeel = "wide" | "normal" | "long";
+export const ALL_LENS_FEELS: LensFeel[] = ["wide", "normal", "long"];
+/** Scene-type recipes (recipes.ts). */
+export type RecipeId =
+  | "power_two_person"
+  | "group_meeting"
+  | "walk_and_talk"
+  | "phone_call"
+  | "reveal"
+  | "chase_action"
+  | "selfie_vlog"
+  | "monologue_confession"
+  | "product_insert";
+export const ALL_RECIPE_IDS: RecipeId[] = ["power_two_person", "group_meeting", "walk_and_talk", "phone_call", "reveal", "chase_action", "selfie_vlog", "monologue_confession", "product_insert"];
 
 /** Which side of frame a character holds for the whole scene (180-degree rule). */
 export type ScreenSide = "left" | "right";
@@ -157,6 +184,8 @@ export type DirectorPlan = {
   castLook?: Record<string, string>;
   /** People who appear in frame with no reference photo ("add a photo of Dawn..."). */
   refWarnings?: string[];
+  /** The scene-type recipe the shot list follows (recipes.ts), e.g. "power_two_person". */
+  recipe?: RecipeId;
   title: string;
   logline: string;
   goal: DirectorGoal; // what the user is really trying to do - drives the structure
@@ -305,10 +334,21 @@ const NOT_NAMES = new Set(
 /** Named people in the idea: saved cast first, then capitalised names ("Lawrence Neilson", "Liam"). */
 export function peopleInIdea(idea: string, cast: PlanInputs["cast"] = []): string[] {
   const out: string[] = cast.map((c) => c.name.trim()).filter(Boolean);
-  const quoted = idea.replace(/"[^"]*"|“[^”]*”/g, " ");
+  const script = parseScriptShots(idea);
+  // Spoken lines ("MAYA: Nobody's looking...") never name the cast.
+  const quoted = idea.replace(/"[^"]*"|“[^”]*”/g, " ").replace(script.length ? /^\s*[A-Z][A-Z .'-]{0,30}:.*$/gm : /$^/, " ");
+  // In a SHOT-block script, a capitalised word is a person only if they speak
+  // or act ("Dawn stands") - not "Rome, year eighty" or "the Forum steps".
+  const speakers = new Set(script.map((x) => x.speaker.toLowerCase()).filter(Boolean));
   for (const m of quoted.matchAll(/\b([A-Z][a-z]{2,})(?:\s+([A-Z][a-z]{2,}))?\b/g)) {
     const [firstName, lastName] = [m[1], m[2]];
     if (NOT_NAMES.has(firstName)) continue;
+    if (script.length && !speakers.has(firstName.toLowerCase())) {
+      const at = m.index ?? 0;
+      const before = quoted.slice(Math.max(0, at - 6), at);
+      const after = quoted.slice(at + m[0].length, at + m[0].length + 24);
+      if (/\b(the|a|an|of|in|to|at|from)\s+$/i.test(before) || !/^(?:'s\b|\s+[a-z]+s\b)/.test(after)) continue;
+    }
     const full = lastName && !NOT_NAMES.has(lastName) ? `${firstName} ${lastName}` : firstName;
     if (!out.some((n) => n.split(" ")[0] === firstName)) out.push(full);
     if (out.length >= 3) break;
@@ -485,6 +525,12 @@ function directorFields(s: Record<string, unknown>): Partial<DirectorShot> {
   if (sides) out.sides = sides;
   const missing = textList(s.missingRefs, 4, 60);
   if (missing.length) out.missingRefs = missing;
+  const fn = s.beatFunction ?? s.beat_function;
+  if (typeof fn === "string" && ALL_BEAT_FUNCTIONS.includes(fn as BeatFunction)) out.beatFunction = fn as BeatFunction;
+  const intensity = Number(s.intensity);
+  if (s.intensity !== undefined && s.intensity !== null && s.intensity !== "" && Number.isFinite(intensity)) out.intensity = Math.round(Math.min(1, Math.max(0, intensity)) * 100) / 100;
+  if (typeof s.lens === "string" && ALL_LENS_FEELS.includes(s.lens as LensFeel)) out.lens = s.lens as LensFeel;
+  if (s.cutTo === "reaction" || s.cutTo === "insert") out.cutTo = s.cutTo;
   return out;
 }
 
@@ -578,6 +624,7 @@ export function sanitizePlan(raw: unknown, inputs: Partial<PlanInputs> = {}): Di
     ...(sideMap(r.screenSides) ? { screenSides: sideMap(r.screenSides) } : {}),
     ...(textMap(r.castLook, 160) ? { castLook: textMap(r.castLook, 160) } : {}),
     ...(textList(r.refWarnings, 6, 200).length ? { refWarnings: textList(r.refWarnings, 6, 200) } : {}),
+    ...(typeof r.recipe === "string" && ALL_RECIPE_IDS.includes(r.recipe as RecipeId) ? { recipe: r.recipe as RecipeId } : {}),
     character: clampText(r.character, 400),
     wardrobe: clampText(r.wardrobe, 300),
     location: clampText(r.location, 300),
@@ -640,6 +687,11 @@ Coverage grammar (every scene where two or more people talk) - shoot it like a r
 - Sound: "roomTone" once for the scene (the real sound of the place, e.g. "air-conditioning hum, distant traffic far below"); per shot "ambience" if the place changes, and "sfx" = 1-2 motivated sounds (a chair creak, a door latch). No music unless the idea asks for it or it is diegetic; leave "sound" for anything else.
 - durationSeconds: the time to say the line (words / 2.5) plus a 1.5-2.5 second beat; shots without a line: commercial 2-4, ugc 3-6, cinematic 4-8, music_video 2-4, documentary 5-8.
 
+Beats (every shot): "beatFunction" = what the shot does dramatically - "setup" (where we are, who is who), "tension_rise" (pressure builds), "power_shift" (someone takes control or loses it), "reveal" (new information lands), "emotional_peak" (the moment the scene hangs on), "release" (the pressure lets go), "button" (the closing image) - and "intensity" 0-1 (how hard it hits; build to the peak in the last third). Choose the shot for the beat: setup = wide and still; rising tension = tighter singles, a slow push-in as it peaks; power shift = the one taking control slightly from below ("low_angle"), the one losing ground slightly from above ("high_angle"), camera still, then a reaction; reveal = hold on it, then the face it lands on; emotional peak = close-up with a slow push-in; button = back out to the widest frame. The camera moves only when something motivates it: someone walks (it goes with them), a realisation (push in), a reveal or an ending (pull back). "lens": "wide" for geography, "long" for faces.
+
+Scene recipe: set "recipe" to the ONE pattern below that fits the idea, and follow its shape:
+${recipeMenu()}
+
 UGC / selfie vlog pattern: phone at arm's length (handheld_selfie), the person talks straight into the lens, shots of 3-10 seconds, a walk-and-talk, and a location change every few shots (car -> street -> kitchen) with the same outfit.
 
 People:
@@ -653,7 +705,7 @@ People:
 Before answering, check: every line fits its duration, one move per shot, every speaker has a voice description, every person in frame is in "visible", wardrobe is specific, the speaker is on camera in every shot that isn't a marked reaction shot, each scene opens on a master, nobody changes screen side, and no two shots in a row share the same setup and size.
 
 Reply with JSON only:
-{"title":"","logline":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","screenSides":{"Name":"left|right"},"shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","setup":"master|single:Name|two:A+B|reaction:Name","offscreenSpeaker":false,"visible":[""],"sides":{"Name":"left|right"},"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"continuityFrom":0,"hero":false,"sound":"","durationSeconds":6}]}
+{"title":"","logline":"","recipe":"","goal":"sell|story|explain|promote|entertain","style":"","emotion":"","aspectRatio":"16:9|9:16","look":{"timeOfDay":"","keyLight":"","palette":"","grade":"","format":"film35|film16|digital|phone"},"character":"","wardrobe":"","location":"","product":"","roomTone":"","screenSides":{"Name":"left|right"},"shots":[{"beat":"","setting":"","lighting":"","size":"","angle":"","move":"","setup":"master|single:Name|two:A+B|reaction:Name","offscreenSpeaker":false,"visible":[""],"sides":{"Name":"left|right"},"blocking":"","action":"","eyeline":"","speaker":"","dialogue":"","delivery":"","listeners":[{"name":"","reaction":""}],"expression":"","ambience":"","sfx":[""],"keep":[""],"continuityFrom":0,"hero":false,"beatFunction":"setup|tension_rise|power_shift|reveal|emotional_peak|release|button","intensity":0.5,"lens":"wide|normal|long","sound":"","durationSeconds":6}]}
 
 Menu:
 ${menu()}`;

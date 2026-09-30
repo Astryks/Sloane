@@ -6,7 +6,8 @@
 // model, pay as you go. See lib/director/* and /api/director/*.
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ANGLES,
   CAMERA_MOVES,
@@ -31,6 +32,10 @@ import { ScriptHelp } from "./ScriptHelp";
 import { coverageByDefault } from "@/lib/director/coverage";
 import { VOICE_SAMPLE_CONSENT } from "@/lib/director/voiceSample";
 import { CopyClip } from "./CopyClip";
+
+// Director's review + per-shot direction (2026-09-30): pure, free checks, loaded on demand.
+const DirectorReviewPanel = dynamic(() => import("./DirectorReview").then((m) => m.DirectorReviewPanel), { ssr: false });
+const ShotDirection = dynamic(() => import("./DirectorReview").then((m) => m.ShotDirection), { ssr: false });
 import { CharacterGuide } from "./CharacterGuide";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
 
@@ -397,6 +402,11 @@ export function DirectorStudio({
       setRevising(null);
     }
   }
+
+  const reviewRefs = useMemo(
+    () => ({ character: photos.character.length > 0 || selectedCast.length > 0, product: photos.product.length > 0, location: photos.location.length > 0 }),
+    [photos, selectedCast.length],
+  );
 
   function editShot(i: number, patch: Partial<DirectorShot>) {
     setPlan((p) => (p ? { ...p, shots: p.shots.map((s, j) => (j === i ? { ...s, ...patch } : s)) } : p));
@@ -888,6 +898,16 @@ export function DirectorStudio({
               </div>
             )}
 
+            {!filmId && (
+              <DirectorReviewPanel
+                plan={plan}
+                engine={engine}
+                idea={idea}
+                refs={reviewRefs}
+                onApply={(next) => setPlan(next)}
+              />
+            )}
+
             <ol className="flex flex-col gap-3">
               {plan.shots.map((s, i) => {
                 const st = film?.shots[i];
@@ -904,6 +924,7 @@ export function DirectorStudio({
                       </p>
                       {st && <span className="text-[10px] font-bold uppercase text-muted">{stepLabel[st.status] ?? st.status}</span>}
                     </div>
+                    <ShotDirection plan={plan} index={i} engine={engine} />
                     <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-muted">🎥 Camera</p>
                     <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <label className="text-[10px] font-semibold text-muted">

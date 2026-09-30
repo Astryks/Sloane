@@ -54,6 +54,11 @@ export const SHOT_JSON_SCHEMA = {
     durationSeconds: { type: "number", minimum: 3, maximum: 15 },
     seed: { type: "integer", minimum: 0, maximum: 4294967295 },
     hero: { type: "boolean", description: "the moment the film hangs on (multi-take on Final)" },
+    beatFunction: { type: "string", description: "what the shot does: setup | tension_rise | power_shift | reveal | emotional_peak | release | button" },
+    intensity: { type: "number", minimum: 0, maximum: 1, description: "how hard the beat hits, 0 calm to 1 the peak" },
+    angle: { type: "string", description: "eye_level | low_angle (the one holding power) | high_angle (the one losing ground) | ..." },
+    lens: { type: "string", description: "lens feel: wide | normal | long" },
+    cutTo: { type: "string", description: "the edit after this beat: reaction | insert" },
   },
 } as const;
 
