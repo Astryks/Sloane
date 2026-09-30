@@ -549,16 +549,29 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
   }
 }
 
-async function advanceStitch(film: DirectorFilmRow, shots: DirectorShotRow[]) {
+/**
+ * What the stitcher needs to edit the sound (2026-09-30): each finished shot's
+ * planned length (8s reference-to-video clips for a short line get trimmed)
+ * and its location (one room-tone bed per location, crossfaded on a change).
+ */
+export function stitchShots(plan: DirectorPlan, done: DirectorShotRow[]): Array<{ seconds: number; location: string }> {
+  return done.map((s) => {
+    const shot = plan.shots[s.idx];
+    return { seconds: shot?.durationSeconds ?? 0, location: (shot?.setting || plan.location || "main").slice(0, 80) };
+  });
+}
+
+async function advanceStitch(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
   if (!(await claimDirectorFilm(film.id))) return;
-  const done = shots.filter((s) => s.status === "completed" && s.video_url).map((s) => s.video_url as string);
+  const doneRows = shots.filter((s) => s.status === "completed" && s.video_url).sort((a, b) => a.idx - b.idx);
+  const done = doneRows.map((s) => s.video_url as string);
   try {
     if (done.length === 0) return updateDirectorFilm(film.id, { status: "failed", error: "No shots could be rendered - you have been refunded." });
     if (done.length === 1) return updateDirectorFilm(film.id, { status: "completed", final_video_url: done[0] });
     if (!film.stitch_request_id) {
       if (MODAL_STITCH && process.env.MODAL_SHARED_SECRET) {
         try {
-          const { call_id } = await modalStitch("/start", { method: "POST", body: JSON.stringify({ video_urls: done }) });
+          const { call_id } = await modalStitch("/start", { method: "POST", body: JSON.stringify({ video_urls: done, shots: stitchShots(plan, doneRows) }) });
           if (typeof call_id === "string") return updateDirectorFilm(film.id, { stitch_request_id: `${MODAL_PREFIX}${call_id}` });
         } catch (err) {
           console.error("[director] colour-match stitcher unavailable, using plain merge", err);
@@ -623,6 +636,6 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await advanceVoicing(film, plan, shots);
     return getDirectorShots(film.id);
   }
-  if (film.status === "stitching") await advanceStitch(film, shots);
+  if (film.status === "stitching") await advanceStitch(film, plan, shots);
   return getDirectorShots(film.id);
 }
