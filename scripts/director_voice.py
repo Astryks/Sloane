@@ -32,7 +32,8 @@ Modes (POST /start, Bearer MODAL_SHARED_SECRET):
          2.x reference audio) and as the audio for the optional lip-sync step.
   {"mode": "sync_check", "video_url": ...}
       -> (2026-09-30) a free lip-sync score: faster-whisper word timings vs a
-         MediaPipe mouth-open signal -> {ok, score, lag_s}.
+         MediaPipe mouth-open signal -> {ok, score, lag_s, text} (text = what
+         was actually said, so the caller can spot gibberish).
   {"mode": "mix", "video_url": ..., "bed_video_url": ...}
       -> the (lip-synced) video with its speech over the original room sound.
 GET /result?call_id=... -> {status: running|done|failed, url?, result?, error?}
@@ -525,14 +526,16 @@ def sync_check(video_url):
         model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
         segs, _ = model.transcribe(wav, word_timestamps=True, vad_filter=True)
         words = 0
+        heard = []
         for seg in segs:
+            heard.append(seg.text.strip())
             for w in seg.words or []:
                 words += 1
                 speech[int(w.start * SYNC_FPS): max(int(w.start * SYNC_FPS) + 1, int(w.end * SYNC_FPS))] = 1.0
         mouth = _mouth_openness(v, n, tmp)
         valid = ~np.isnan(mouth)
         if words == 0 or valid.sum() < n * 0.5:
-            return {"ok": None, "reason": "no speech or no face", "words": words, "face_frames": int(valid.sum()), "frames": n}
+            return {"ok": None, "reason": "no speech or no face", "words": words, "face_frames": int(valid.sum()), "frames": n, "text": " ".join(heard)[:600]}
         m = np.where(valid, mouth, np.nanmean(mouth))
         best, best_lag = -1.0, 0
         max_lag = int(0.3 * SYNC_FPS)
@@ -546,7 +549,7 @@ def sync_check(video_url):
                 best, best_lag = c, lag
         lag_s = best_lag / SYNC_FPS
         ok = best >= float(os.environ.get("DIRECTOR_SYNC_MIN_SCORE", "0.2")) and abs(lag_s) <= 0.17
-        return {"ok": ok, "score": round(best, 3), "lag_s": round(lag_s, 3), "words": words, "frames": n}
+        return {"ok": ok, "score": round(best, 3), "lag_s": round(lag_s, 3), "words": words, "frames": n, "text": " ".join(heard)[:600]}
 
 
 def _mouth_openness(video_path, n, tmp):

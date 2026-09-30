@@ -509,36 +509,138 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
     }
     if (refsChanged) await setDirectorFilmRefs(film.id, refs);
 
-    // 2. Re-voice every other shot each person speaks in.
+    // 2. Re-voice every other shot each person speaks in. Optional (off by
+    //    default): a free sync check first, and a lip-synced "dub" from the
+    //    person's real recording when the take is out of sync or the words
+    //    are wrong - see lipsync.ts.
+    const { LIPSYNC_ENDPOINTS, lipsyncInput, lipsyncProvider, parseVoiceState, syncCheckEnabled, takeIsGood, voiceState } = await import("./lipsync");
+    const lip = lipsyncProvider();
+    const check = syncCheckEnabled();
     let pending = false;
     for (const { s, who } of speaking) {
       const p = cast[who];
-      if (!p.voiceRef || p.voiceRef === "none" || s.voice_request_id === "done" || s.voice_request_id === "failed") continue;
-      // 2026-09-30: a failed swap is retried once (the retry is marked "r:"),
-      // and the voice service now rejects a result whose pitch doesn't match
-      // the speaker (e.g. a woman's voice left on Lawrence's line).
-      if (!s.voice_request_id || s.voice_request_id === "retry") {
-        const r = await voiceCall("/start", { mode: "convert", video_url: s.raw_video_url ?? s.video_url, reference_url: p.voiceRef });
+      if (!p.voiceRef || p.voiceRef === "none") continue;
+      const st = parseVoiceState(s.voice_request_id);
+      if (st.kind === "done" || st.kind === "failed") continue;
+      const original = s.raw_video_url ?? s.video_url ?? "";
+      const script = voiceFirstLine(film, plan, s.idx)?.words ?? plan.shots[s.idx]?.dialogue ?? "";
+      const startConvert = async (retry: boolean) => {
+        const r = await voiceCall("/start", { mode: "convert", video_url: original, reference_url: p.voiceRef });
         if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
-        await setDirectorShotVoice(s.id, { voice_request_id: `${s.voice_request_id === "retry" ? "r:" : ""}${r.call_id}` });
+        await setDirectorShotVoice(s.id, { voice_request_id: `${retry ? "r:" : ""}${r.call_id}` });
+      };
+      const startDub = async () => {
+        const { planLineActing, heuristicActing } = await import("./voiceActing");
+        const shot = plan.shots[s.idx];
+        const delivery = shot?.delivery || shot?.expression || "";
+        const acted = await planLineActing({ speaker: p.name, character: p.description, line: script, delivery, context: `${plan.logline} ${shot?.action ?? ""}` }).catch(() => []);
+        const r = await voiceCall("/start", {
+          mode: "speak",
+          reference_url: p.voiceSampleUrl,
+          segments: acted.length ? acted : heuristicActing(script, delivery),
+          seconds: shot?.durationSeconds ?? 8,
+          engine: process.env.DIRECTOR_TTS_ENGINE === "standard" ? "standard" : "turbo",
+        });
+        if (typeof r.call_id !== "string") throw new Error("voice service gave no job");
+        await setDirectorShotVoice(s.id, { voice_request_id: voiceState.dub(r.call_id) });
+      };
+      const keepOriginal = async (why: string, detail?: unknown) => {
+        console.error(`[director] ${why} - keeping the take as filmed`, s.id, detail ?? "");
+        await setDirectorShotVoice(s.id, { voice_request_id: "done" });
+      };
+      const canDub = !!lip && !!p.voiceSampleUrl && !!script.trim();
+
+      if (st.kind === "new" || st.kind === "retry") {
+        if (st.kind === "new" && check) {
+          const r = await voiceCall("/start", { mode: "sync_check", video_url: original });
+          if (typeof r.call_id === "string") {
+            await setDirectorShotVoice(s.id, { voice_request_id: voiceState.check(r.call_id) });
+            pending = true;
+            continue;
+          }
+        }
+        // 2026-09-30: a failed swap is retried once (the retry is marked "r:"),
+        // and the voice service rejects a result whose pitch doesn't match
+        // the speaker (e.g. a woman's voice left on Lawrence's line).
+        await startConvert(st.kind === "retry");
         pending = true;
         continue;
       }
-      const job = s.voice_request_id.replace(/^r:/, "");
-      const r = await voiceCall(`/result?call_id=${encodeURIComponent(job)}`);
-      if (r.status === "done" && typeof r.url === "string") {
-        await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: s.raw_video_url ?? s.video_url ?? undefined, video_url: r.url });
-      } else if (r.status === "failed") {
-        if (!s.voice_request_id.startsWith("r:")) {
-          console.error("[director] re-voice failed - retrying once", s.id, r.error);
-          await setDirectorShotVoice(s.id, { voice_request_id: "retry" });
+      if (st.kind === "lipsync") {
+        // fal job, not a Modal call.
+        const endpoint = LIPSYNC_ENDPOINTS[st.provider];
+        const status = await getFalJobStatus(endpoint, st.id);
+        if (status === "COMPLETED") {
+          const url = getVideoInferenceUrl(await getFalJobResult(endpoint, st.id));
+          if (!url) await keepOriginal("lip-sync returned no video");
+          else {
+            const m = await voiceCall("/start", { mode: "mix", video_url: url, bed_video_url: original });
+            if (typeof m.call_id !== "string") await keepOriginal("mix gave no job");
+            else await setDirectorShotVoice(s.id, { voice_request_id: voiceState.mix(m.call_id) });
+          }
+        } else if (status === "FAILED") await keepOriginal("lip-sync failed");
+        pending = true;
+        continue;
+      }
+      const r = await voiceCall(`/result?call_id=${encodeURIComponent(st.id)}`).catch((err) => ({ status: "failed", error: String(err) }) as Record<string, unknown>);
+      if (r.status !== "done" && r.status !== "failed") {
+        pending = true;
+        continue;
+      }
+      switch (st.kind) {
+        case "check": {
+          const good = r.status === "failed" || takeIsGood(r.result as Record<string, unknown> | undefined, script);
+          if (!good && canDub) await startDub();
+          else await startConvert(false);
           pending = true;
-        } else {
-          console.error("[director] re-voice failed twice - flagging the shot", s.id, r.error);
-          await setDirectorShotVoice(s.id, { voice_request_id: "failed" });
-          await updateDirectorShot(s.id, { error: "voice" });
+          break;
         }
-      } else pending = true;
+        case "dub": {
+          if (r.status === "done" && typeof r.url === "string" && lip) {
+            const job = await submitFalJob(LIPSYNC_ENDPOINTS[lip], lipsyncInput(lip, original, r.url));
+            await setDirectorShotVoice(s.id, { voice_request_id: voiceState.lipsync(lip, job) });
+            pending = true;
+          } else await keepOriginal("dub line failed", r.error);
+          break;
+        }
+        case "mix": {
+          if (r.status === "done" && typeof r.url === "string") {
+            if (check) {
+              const v = await voiceCall("/start", { mode: "sync_check", video_url: r.url });
+              // Park the dubbed take in video_url; verify decides whether it stays.
+              await setDirectorShotVoice(s.id, { voice_request_id: typeof v.call_id === "string" ? voiceState.verify(v.call_id) : "done", raw_video_url: original, video_url: r.url });
+              pending = typeof v.call_id === "string";
+            } else await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: original, video_url: r.url });
+          } else await keepOriginal("mix failed", r.error);
+          break;
+        }
+        case "verify": {
+          const result = r.result as Record<string, unknown> | undefined;
+          if (r.status === "done" && result?.ok === false) {
+            await setDirectorShotVoice(s.id, { voice_request_id: "done", video_url: original });
+            console.error("[director] dubbed take still out of sync - restored the take as filmed", s.id, result);
+          } else await setDirectorShotVoice(s.id, { voice_request_id: "done" });
+          break;
+        }
+        case "convert": {
+          if (r.status === "done" && typeof r.url === "string") {
+            await setDirectorShotVoice(s.id, { voice_request_id: "done", raw_video_url: original || undefined, video_url: r.url });
+          } else if (!st.retry) {
+            console.error("[director] re-voice failed - retrying once", s.id, r.error);
+            await setDirectorShotVoice(s.id, { voice_request_id: "retry" });
+            pending = true;
+          } else if (canDub) {
+            console.error("[director] re-voice failed twice - dubbing from the real recording instead", s.id, r.error);
+            await startDub();
+            pending = true;
+          } else {
+            console.error("[director] re-voice failed twice - flagging the shot", s.id, r.error);
+            await setDirectorShotVoice(s.id, { voice_request_id: "failed" });
+            await updateDirectorShot(s.id, { error: "voice" });
+          }
+          break;
+        }
+      }
     }
     if (pending) return releaseDirectorFilm(film.id);
     return updateDirectorFilm(film.id, { status: "stitching" });
