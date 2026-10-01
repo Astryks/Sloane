@@ -63,7 +63,14 @@ struct EditorView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 5) {
-        Text("Astryks Editor").font(.largeTitle.bold())
+        HStack(spacing: 10) {
+          LucyBrandMark()
+            .frame(width: 42, height: 42)
+          VStack(alignment: .leading, spacing: 1) {
+            Text("Lucy Labs").font(.headline).foregroundStyle(Color(red: 0.56, green: 0.48, blue: 0.72))
+            Text("Astryks Editor").font(.largeTitle.bold())
+          }
+        }
         Text("A private, local Mac editor for long-form lesson cutaways. Your footage stays on this computer.")
           .foregroundStyle(.secondary)
       }
@@ -108,6 +115,19 @@ struct EditorView: View {
         .font(.caption).foregroundStyle(.secondary)
     }
     .padding(28)
+  }
+}
+
+private struct LucyBrandMark: View {
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 13, style: .continuous)
+        .fill(Color(red: 0.56, green: 0.48, blue: 0.72))
+      Image(systemName: "waveform.path.ecg")
+        .font(.system(size: 20, weight: .bold))
+        .foregroundStyle(.white)
+    }
+    .accessibilityLabel("Lucy Labs")
   }
 }
 
