@@ -3109,7 +3109,7 @@ function StitchPageInner() {
             <p className="max-w-2xl text-sm text-muted">The browser editor is lovely for short edits, but a long source reused on the timeline can strain a browser&apos;s memory. Download our free Mac editor for faster, steadier work with large videos — everything stays on your computer.</p>
             <p className="mt-1 text-xs text-muted">No account, uploads, cloud rendering, or subscription. It is a direct beta download, so macOS may show a first-open security notice.</p>
           </div>
-          <a href="https://github.com/Astryks/Sloane/raw/main/desktop/downloads/AstryksEditor-macOS.zip?download=1" className="shrink-0 rounded-full bg-purple px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-purple-dark">Download editor — faster for long videos</a>
+          <a href="https://github.com/Astryks/Sloane/raw/main/desktop/downloads/AstryksEditor-macOS.zip?download=1" className="shrink-0 rounded-full bg-purple px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-purple-dark">Download Free Editor</a>
         </section>
         {/* Real bug found and fixed (follow-up review, 2026-09-17): Undo/Redo
             used to live only inside the preview panel below, which is
