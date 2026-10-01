@@ -87,7 +87,7 @@ test("withShotChoices + grammar: Neilson keeps its lines and shot count, passes 
   assert.equal(plan.shots.length, raw.shots.length);
   assert.deepEqual(lines(plan), lines(raw), "every line and speaker unchanged");
   assert.equal(plan.recipe, "power_two_person");
-  assert.deepEqual(grammarErrors(plan), []);
+  assert.deepEqual(grammarErrors(plan, undefined, "veo"), [], "no hard grammar errors on the engine runExample actually planned for");
   assert.equal(parseSetup(plan.shots[0].setup).kind, "master");
   assert.equal(plan.shots[plan.shots.length - 1].size, "wide");
   for (const s of plan.shots) {
@@ -264,4 +264,29 @@ test("Director's review: rhythm against genre norms, unreliable moves per model,
     assert.ok(ex.review.score >= 90, `${ex.plan.recipe}: ${ex.review.score} ${JSON.stringify(ex.review.issues)}`);
     assert.ok(ex.review.issues.every((x) => x.severity !== "error"), JSON.stringify(ex.review.issues));
   }
+});
+
+// 2026-10-01: a 16-word line plans ~9s (durationForLine), but Veo's clips
+// are hard-capped at 8s - the model then rushes the line. The review used to
+// score these shots 99-100 because it never checked an engine's own cap.
+test("Director's review: a line too long for this engine's cap is flagged and penalized, not scored 99-100", () => {
+  const line16 = "I need you to understand exactly why I kept calling you every single day this week.";
+  const long: DirectorPlan = { ...neilsonLegacyPlan, shots: neilsonLegacyPlan.shots.map((s, i) => (i === 2 ? { ...s, dialogue: line16, speaker: "Liam", durationSeconds: 9 } : s)) };
+  const onVeo = directorReview(long, { engine: "veo" });
+  assert.ok(onVeo.issues.some((x) => x.shot === 3 && /capped at 8s/.test(x.message)), JSON.stringify(onVeo.issues));
+  assert.ok(onVeo.score < 100, `score ${onVeo.score} should be penalized for overrunning Veo's cap`);
+  // Kling v3's longer 10s cap (videoEngines.ts) can actually hold this line -
+  // same plan, no cap complaint on an engine with more room.
+  const onKlingV3 = directorReview(long, { engine: "klingv3" });
+  assert.ok(!onKlingV3.issues.some((x) => /capped at/.test(x.message)), JSON.stringify(onKlingV3.issues));
+});
+
+test("withCoverageGrammar: no shot is left planned past its engine's real cap", () => {
+  const line16 = "I need you to understand exactly why I kept calling you every single day this week.";
+  const plan: DirectorPlan = { ...neilsonLegacyPlan, shots: neilsonLegacyPlan.shots.map((s, i) => (i === 2 ? { ...s, dialogue: line16, speaker: "Liam", durationSeconds: 12 } : s)) };
+  const capped = withCoverageGrammar(plan, { engine: "veo" });
+  assert.ok(capped.shots.every((s) => s.durationSeconds <= 8), JSON.stringify(capped.shots.map((s) => s.durationSeconds)));
+  // An engine with a longer ceiling (klingv3, 10s) keeps more of what the line needs.
+  const onKlingV3 = withCoverageGrammar(plan, { engine: "klingv3" });
+  assert.ok(onKlingV3.shots[2].durationSeconds > 8 && onKlingV3.shots[2].durationSeconds <= 10);
 });

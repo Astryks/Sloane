@@ -52,11 +52,14 @@ Order at plan time: Gemini planner (or `ruleBasedPlan` fallback) → `withShotCh
 - Voice: `docs/voice-reference-recording.md` (how to record the 60–120s acted reference) and `docs/voice-lora-recipe.md` (LoRA paused).
 - The realism diagnosis and its example prompts (measured audio comparison of the gekko / chloe / Neilson clips, ranked root causes) are kept **out of this public repo**. Ask Sid for `lucy-realism-diagnosis.md` and `lucy-realism-example-prompts.md`.
 
-## Open issues found in the 30 Sep review (not fixed here)
-1. **Lines longer than Veo's 8s.** `durationForLine` plans up to 15s (16 words → 9s), and `grammar.MAX_LINE_WORDS` allows 20 words, but Veo clips are capped at 8s. The model then rushes the line. The Director's review doesn't check engine duration caps, so it still scores these shots 99–100.
-2. **Addressee in 3-person scenes.** `grammar.addresseeOf` falls back to the neighbouring speaker. In the Neilson meeting, that puts Liam's "Yes, Mr. Neilson." over **Jess's** shoulder (she's on his side of the line) and has Jess look at Liam instead of Lawrence. It only happens when the plan has no `eyeline: "at <Name>"`. Gemini is told to write one; the rules fallback doesn't.
-3. **The rules fallback lighting can contradict the script** (e.g. "blue hour into night" in a "late afternoon" scene). This only happens when Gemini planning fails.
-4. **Cast-sheet angles are always drawn.** Every film makes 3 extra cast-sheet stills (`AUTO_CAST_ANGLES`) unless it already has 8 character photos, even when every cast member has a photo. That adds about $0.40 of image calls per film.
+## Open issues found in the 30 Sep review
+
+Three of the four fixed on 2026-10-01 (see `STATUS.md`'s "2026-10-01" entry for the detail). Only #3 is still open, left intentionally.
+
+1. ~~**Lines longer than Veo's 8s.**~~ **Fixed 2026-10-01.** `withCoverageGrammar`/`validateCoverage` now take an optional `engine` (`grammar.ts`'s `GrammarOptions.engine`) and clamp every shot to that engine's real cap (`VIDEO_PAYGO_ENGINES[engine].durationSeconds` from `videoEngines.ts`), with a new `engine_duration_cap` review issue when a line needs more time than the engine will ever grant. `grammar.MAX_LINE_WORDS` (20) is unchanged - it's a cross-engine ceiling, not the per-engine one - but the new check catches exactly the Veo-at-8s case regardless of word count.
+2. ~~**Addressee in 3-person scenes.**~~ **Already fixed** (commit `9941949`, 30 Sep, same day as this review - the fix just predates this doc's last edit). `grammar.addresseeOf` now checks for a cast member's name said in the line itself before falling back to the neighbouring speaker. Re-verified 2026-10-01 with the dry run below: Liam's "Yes, Mr. Neilson." resolves to looking at Lawrence, not Jess.
+3. **The rules fallback lighting can contradict the script** (e.g. "blue hour into night" in a "late afternoon" scene). This only happens when Gemini planning fails. **Still open** - left for later; lower priority and harder to verify without forcing a live Gemini failure.
+4. ~~**Cast-sheet angles are always drawn.**~~ **Fixed 2026-10-01.** `AUTO_CAST_MAX_EXISTING` (`refs.ts`) is now 0, not 2: Lucy's auto cast sheet (1 face portrait + 3 `AUTO_CAST_ANGLES` stills) now only runs when the customer gave zero photos of their own - one photo is enough to skip it. The named "Your cast" flow already skipped this entirely (29 Sep), so this specifically fixes the direct-upload path.
 
 ## Neilson v2 test (dry run, free)
 - Script: `web/src/lib/director/testdata/neilsonV2Test.ts`. v2 has 10 lines and a scene holds 8 shots, so it's split into two scenes. The **meeting** (6 shots, all three people, and Jess's MEFEE line that was garbled at 0:50–0:58) is the single test render. The **opening** (Lawrence on the phone, 4 lines) is a second scene for later.

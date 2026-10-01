@@ -88,8 +88,9 @@ function grammarIssue(g: GrammarIssue): ReviewIssue {
     line_too_long: "Split the line across two shots, or give the shot more time.",
     refs_mismatch: "Attach reference photos for exactly the people in frame.",
     missing_ref: "Add a photo of this person to Your cast.",
+    engine_duration_cap: "Cut the line (or split it across two shots) so it fits inside this engine's clip length, or switch to an engine with a longer cap.",
   };
-  const auto = !["refs_mismatch", "missing_ref"].includes(g.rule) && !(g.rule === "line_too_long" && g.severity === "warning");
+  const auto = !["refs_mismatch", "missing_ref", "engine_duration_cap"].includes(g.rule) && !(g.rule === "line_too_long" && g.severity === "warning");
   return { shot: g.shot, check: axis ? "axis" : "grammar", severity: g.severity, message: g.message, fix: fixText[g.rule] ?? "", auto, ...(auto ? { code: "grammar" as const } : {}) };
 }
 
@@ -102,13 +103,13 @@ export function directorReview(plan: DirectorPlan, opts: ReviewOptions = {}): Di
   const n = plan.shots.length;
   const add = (x: ReviewIssue) => issues.push(x);
 
-  // grammar + axis
-  for (const g of validateCoverage(plan)) add(grammarIssue(g));
+  // grammar + axis (duration caps are per-engine - videoEngines.ts)
+  for (const g of validateCoverage(plan, undefined, engine)) add(grammarIssue(g));
 
   // beats: shape + framing fit. The "ideal" is what the engine would choose
   // AFTER the grammar has had its say, so a fixed plan stops being flagged.
   const want = explainShots(plan, opts.idea);
-  const ideal = idealPlan(plan, opts.idea);
+  const ideal = idealPlan(plan, opts.idea, engine);
   const fns = new Set(want.map((w) => w.beatFunction));
   if (n >= 3) {
     if (!fns.has("setup") && plan.recipe !== "selfie_vlog") add({ shot: 1, check: "beats", severity: "warning", message: "no setup beat - the audience never gets its bearings", fix: "Open on a wide that shows where we are.", auto: false });
@@ -196,7 +197,7 @@ export function applyReviewFixes(plan: DirectorPlan, opts: ReviewOptions = {}): 
   const moves = which("move");
   const trims = which("trim");
   const staged: DirectorPlan = { ...plan, shots: plan.shots.map((s) => withSafeStaging(s, model)) };
-  const ideal = idealPlan(staged, opts.idea);
+  const ideal = idealPlan(staged, opts.idea, opts.engine);
   const shots = staged.shots.map((s, i) => {
     const t = ideal.shots[i];
     let out = s;
@@ -210,6 +211,6 @@ export function applyReviewFixes(plan: DirectorPlan, opts: ReviewOptions = {}): 
 }
 
 /** What the engine + grammar would make of this plan (the review's reference). */
-function idealPlan(plan: DirectorPlan, idea?: string): DirectorPlan {
-  return withCoverageGrammar(withShotChoices(plan, { idea }));
+function idealPlan(plan: DirectorPlan, idea?: string, engine?: string): DirectorPlan {
+  return withCoverageGrammar(withShotChoices(plan, { idea }), { engine });
 }

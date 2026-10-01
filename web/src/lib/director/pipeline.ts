@@ -91,8 +91,12 @@ async function pollImage(requestId: string, hadRefs: boolean): Promise<{ done: b
 /**
  * Lucy's own character sheet, before the master still (cast_status):
  * pending -> (no photo) a face portrait from the plan -> face -> three more
- * angles from it -> done. With one or two customer photos it goes straight
- * to the angles. Any failure just moves on - the film never waits on this.
+ * angles from it -> done. Only reached with ZERO customer photos (route.ts's
+ * autoCast gate, AUTO_CAST_MAX_EXISTING) - once the customer has given even
+ * one photo of their own, this step is skipped entirely rather than padding
+ * it out with 3 more angle stills (2026-10-01: that used to run even when
+ * every cast member already had a photo, at ~$0.40/film in wasted calls).
+ * Any failure just moves on - the film never waits on this.
  * Returns true while the cast step is still running.
  */
 async function advanceCast(film: DirectorFilmRow, plan: DirectorPlan): Promise<boolean> {

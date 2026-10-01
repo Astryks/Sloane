@@ -44,7 +44,7 @@ export function runExample(idea: string, cast: Array<{ name: string; description
   // /api/director/create: Your cast descriptions, coverage, setups, grammar, continuity.
   plan = { ...plan, character: cast.map((c) => `${c.name}: ${c.description}`).join("; ") };
   if (plan.coverage === undefined) plan = { ...plan, coverage: coverageByDefault(plan) };
-  plan = withContinuity(withCoverageGrammar(assignSetups(plan), { withPhotos }));
+  plan = withContinuity(withCoverageGrammar(assignSetups(plan), { withPhotos, engine }));
   const review = directorReview(plan, { engine, idea });
   const prompts = plan.shots.map((_, i) => formatShotPrompt(plan, i, { character: true, product: false, location: false }, { nativeAudio: true, model: promptModelFor(engine) }).prompt);
   return { plan, review, prompts };

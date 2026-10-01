@@ -17,7 +17,7 @@ const people: CastPerson[] = NEILSON_CAST.map((c) => ({ ...c, photos: [`https://
 const withPhotos = people.map((p) => p.name);
 const REFS = { character: true, product: false, location: false };
 const first = (n: string) => n.split(" ")[0].toLowerCase();
-const rules = (plan: DirectorPlan, p?: CastPerson[]) => grammarErrors(plan, p).map((x) => `${x.shot}:${x.rule}`);
+const rules = (plan: DirectorPlan, p?: CastPerson[], engine?: string) => grammarErrors(plan, p, engine).map((x) => `${x.shot}:${x.rule}`);
 
 /** The pipeline order: planner fallback -> grammar -> Your cast descriptions -> setups -> grammar. */
 function neilsonAfter(): DirectorPlan {
@@ -145,6 +145,17 @@ test("each line fits its shot", () => {
   const rushed: DirectorPlan = { ...after, shots: after.shots.map((s, i) => (i === 1 ? { ...s, durationSeconds: 2 } : s)) };
   assert.ok(rules(rushed).includes("2:line_too_long"));
   assert.ok(withCoverageGrammar(rushed).shots[1].durationSeconds >= durationForLine(rushed.shots[1].dialogue, 0));
+});
+
+test("line length is also checked against the engine's own cap (2026-10-01: a 16-word line plans ~9s, but Veo clips at 8s)", () => {
+  const line16 = "I need you to understand exactly why I kept calling you every single day this week.";
+  const withLongLine: DirectorPlan = { ...after, shots: after.shots.map((s, i) => (i === 1 ? { ...s, dialogue: line16, durationSeconds: 9 } : s)) };
+  assert.ok(!rules(withLongLine).some((r) => r.endsWith("line_too_long")), "the shot already gives the line the 9s it needs");
+  // engine_duration_cap is a warning (flagged, not a hard grammar error) - checked via validateCoverage, not grammarErrors.
+  assert.ok(validateCoverage(withLongLine, undefined, "veo").some((x) => x.rule === "engine_duration_cap"), "but Veo caps clips at 8s");
+  assert.ok(!validateCoverage(withLongLine, undefined, "klingv3").some((x) => x.rule === "engine_duration_cap"), "Kling v3's 10s cap has room for it");
+  const capped = withCoverageGrammar(withLongLine, { engine: "veo" });
+  assert.ok(capped.shots[1].durationSeconds <= 8, `${capped.shots[1].durationSeconds}s should never exceed Veo's cap`);
 });
 
 test("grammar pass is idempotent", () => {

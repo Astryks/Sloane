@@ -34,6 +34,12 @@ import { pickLabelledRefs } from "./ingredients";
 import { durationForLine, type DirectorPlan, type DirectorShot, type ScreenSide } from "./plan";
 import type { CastPerson } from "./refs";
 import type { ShotSizeId } from "./filmScience";
+import { VIDEO_PAYGO_ENGINES, type VideoEngine } from "../videoEngines";
+
+/** This engine's real hard duration ceiling (videoEngines.ts - the same number the picker and pricing use), or undefined when the engine is unknown/unset. */
+function engineCapSeconds(engine?: VideoEngine | string): number | undefined {
+  return engine && engine in VIDEO_PAYGO_ENGINES ? VIDEO_PAYGO_ENGINES[engine as VideoEngine].durationSeconds : undefined;
+}
 
 const first = (n: string) => n.trim().split(/\s+/)[0] ?? "";
 const fl = (n: string) => first(n).toLowerCase();
@@ -54,7 +60,8 @@ export type GrammarRule =
   | "no_reaction"
   | "line_too_long"
   | "refs_mismatch"
-  | "missing_ref";
+  | "missing_ref"
+  | "engine_duration_cap";
 
 export type GrammarIssue = { shot: number; rule: GrammarRule; severity: "error" | "warning"; message: string };
 
@@ -425,11 +432,20 @@ function flagMissingRefs(plan: DirectorPlan, withPhotos: string[]): DirectorPlan
 export type GrammarOptions = {
   /** Cast names that have reference photos. Omit when unknown (the plan's existing flags are kept). */
   withPhotos?: string[];
+  /** The film's engine id (videoEngines.ts) - when set, no shot is left planned longer than this engine's real hard cap (2026-10-01: a 16-word line could plan 9s even though Veo clips at 8s). */
+  engine?: VideoEngine | string;
 };
+
+/** Clamp every shot's planned length to the engine's real cap (Veo/Kling/Seedance each have their own - videoEngines.ts). A no-op when the engine is unknown. */
+function capToEngine(shots: DirectorShot[], engine?: VideoEngine | string): DirectorShot[] {
+  const cap = engineCapSeconds(engine);
+  if (!cap) return shots;
+  return shots.map((s) => (s.durationSeconds > cap ? { ...s, durationSeconds: cap } : s));
+}
 
 /** Validates and fixes the plan's coverage grammar (see the header). Pure and idempotent. */
 export function withCoverageGrammar(input: DirectorPlan, opts: GrammarOptions = {}): DirectorPlan {
-  let plan: DirectorPlan = { ...input, castLook: castLooks(input) };
+  let plan: DirectorPlan = { ...input, castLook: castLooks(input), shots: capToEngine(input.shots, opts.engine) };
   if (!Object.keys(plan.castLook ?? {}).length) delete plan.castLook;
   if (!grammarApplies(plan)) return opts.withPhotos ? flagMissingRefs(plan, opts.withPhotos) : plan;
   const ctx = makeCtx(plan);
@@ -445,8 +461,13 @@ export function withCoverageGrammar(input: DirectorPlan, opts: GrammarOptions = 
     progressSizes(shots, a, b);
     insertReaction(ctx, shots, a, b);
     resolveJumps(ctx, shots, a, b);
-    // Lines keep fitting their shot.
-    for (let i = a; i <= b; i++) if (hasLine(shots[i])) shots[i] = { ...shots[i], durationSeconds: durationForLine(shots[i].dialogue, shots[i].durationSeconds) };
+    // Lines keep fitting their shot, but never past the engine's own cap.
+    const cap = engineCapSeconds(opts.engine);
+    for (let i = a; i <= b; i++)
+      if (hasLine(shots[i])) {
+        const needed = durationForLine(shots[i].dialogue, shots[i].durationSeconds);
+        shots[i] = { ...shots[i], durationSeconds: cap ? Math.min(cap, needed) : needed };
+      }
   }
   for (const [a, b] of sceneRanges(shots)) sameCameraPerPerson(shots, a, b);
   const sides = resolveScreenSides(plan, shots);
@@ -461,11 +482,12 @@ export function withCoverageGrammar(input: DirectorPlan, opts: GrammarOptions = 
  * Every grammar problem in a plan (for tests, logging and the PR report).
  * `people` (optional) checks each shot's reference photos against who is in frame.
  */
-export function validateCoverage(plan: DirectorPlan, people?: CastPerson[]): GrammarIssue[] {
+export function validateCoverage(plan: DirectorPlan, people?: CastPerson[], engine?: VideoEngine | string): GrammarIssue[] {
   const out: GrammarIssue[] = [];
   const add = (shot: number, rule: GrammarRule, message: string, severity: "error" | "warning" = "error") => out.push({ shot: shot + 1, rule, severity, message });
   const ctx = makeCtx(plan);
   const multi = grammarApplies(plan);
+  const cap = engineCapSeconds(engine);
   plan.shots.forEach((s, i) => {
     const vis = visibleOf(ctx, s);
     const { kind, who } = parseSetup(s.setup);
@@ -473,9 +495,23 @@ export function validateCoverage(plan: DirectorPlan, people?: CastPerson[]): Gra
     // 6. line length
     if (hasLine(s)) {
       const w = wordsOf(s.dialogue);
+      const needed = durationForLine(s.dialogue, 0);
+      // 2026-10-01: once an engine is known, the shot can never actually be
+      // given more than its cap, so "needs more time than planned" has to be
+      // judged against whatever the engine could ever grant - never the raw
+      // uncapped need, or a shot that's already AT the cap gets flagged for
+      // not doing the impossible.
+      const grantable = cap ? Math.min(cap, needed) : needed;
       if (w > MAX_LINE_WORDS) add(i, "line_too_long", `${w} words is too long for one shot - split it across two shots`, "warning");
-      else if (durationForLine(s.dialogue, 0) > s.durationSeconds) add(i, "line_too_long", `the line needs ${durationForLine(s.dialogue, 0)}s but the shot is ${s.durationSeconds}s`);
+      else if (grantable > s.durationSeconds) add(i, "line_too_long", `the line needs ${grantable}s but the shot is ${s.durationSeconds}s`);
+      // A line can need more time than this engine ever allows (e.g. 16 words
+      // needs ~9s, but Veo hard-caps at 8s) - no amount of "give it a longer
+      // shot" fixes that; the line itself has to be cut, or filmed on an
+      // engine with a longer ceiling. The Director's review used to score
+      // these shots 99-100 because it never checked an engine's own cap.
+      if (cap && needed > cap) add(i, "engine_duration_cap", `the line needs ${needed}s to read naturally but this engine's clips are capped at ${cap}s - it will be rushed`, "warning");
     }
+    if (cap && s.durationSeconds > cap) add(i, "engine_duration_cap", `shot is planned ${s.durationSeconds}s but this engine's clips are capped at ${cap}s`, "warning");
     if (!multi) return;
     // 1. speaker on camera / reaction marking
     if (hasLine(s) && speaker) {
@@ -529,4 +565,4 @@ export function validateCoverage(plan: DirectorPlan, people?: CastPerson[]): Gra
   return out;
 }
 
-export const grammarErrors = (plan: DirectorPlan, people?: CastPerson[]) => validateCoverage(plan, people).filter((x) => x.severity === "error");
+export const grammarErrors = (plan: DirectorPlan, people?: CastPerson[], engine?: VideoEngine | string) => validateCoverage(plan, people, engine).filter((x) => x.severity === "error");

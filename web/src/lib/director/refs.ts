@@ -137,13 +137,17 @@ export function sheetAnglePrompt(angleId: SheetAngleId, description: string, out
 }
 
 // Lucy makes the character sheet herself for every film with a person in it
-// (2026-09-27): no photo -> a face portrait from the plan's description,
-// then these angles; one or two photos -> just these angles. Three angles
-// cover what films actually show (both three-quarters + full body) for
-// ~3 Google images per film.
+// (2026-09-27): no photo -> a face portrait from the plan's description, then
+// these angles, for ~3-4 Google images per film. Three angles cover what
+// films actually show (both three-quarters + full body).
+// 2026-10-01 (30 Sep review, open issue #4): this used to also fire whenever
+// a customer had given 1-2 photos of their own (AUTO_CAST_MAX_EXISTING was
+// 2), burning ~$0.40/film in extra image calls even though the cast member
+// already had a photo. It now only runs with ZERO existing photos - once a
+// customer gives even one, Lucy builds nothing extra.
 export const AUTO_CAST_ANGLES: SheetAngleId[] = ["left34", "right34", "full"];
-/** Customers who already added this many character photos have their own sheet. */
-export const AUTO_CAST_MAX_EXISTING = 2;
+/** Customers who already added more than this many character photos skip Lucy's auto cast sheet entirely - they have their own. */
+export const AUTO_CAST_MAX_EXISTING = 0;
 
 export function characterFromTextPrompt(character: string, wardrobe: string): string {
   return [

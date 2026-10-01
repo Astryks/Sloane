@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     // shot, an establishing master, fixed 180-degree screen sides, no jump
     // cuts, fixed look strings; anyone in frame without a photo is flagged.
     // (Without Your cast, Lucy auto-casts a character sheet, so nobody is flagged.)
-    plan = withCoverageGrammar(plan, people ? { withPhotos: people.filter((p) => p.photos.length).map((p) => p.name) } : {});
+    plan = withCoverageGrammar(plan, { engine, ...(people ? { withPhotos: people.filter((p) => p.photos.length).map((p) => p.name) } : {}) });
     // Per-shot seeds (stored, so a retake can reproduce a take) and the
     // Draft/Final choice - Final only where allowed (see videoQuality.ts).
     plan = withShotSeeds(plan);
@@ -141,7 +141,9 @@ export async function POST(req: NextRequest) {
     plan = withContinuity(plan);
     if (plan.quality === "final" && !finalAllowedFor(engine, user)) plan = { ...plan, quality: undefined };
     // Lucy makes the character sheet herself when there's a person and the
-    // customer hasn't already given several angles.
+    // customer hasn't given any photo of their own (2026-10-01: used to also
+    // fire with 1-2 existing photos, wasting ~$0.40/film on extra angle
+    // stills nobody needed - see AUTO_CAST_MAX_EXISTING).
     const characterPhotos = links.character.length + (files.character ? 1 : 0);
     const autoCast = !people && !!plan.character && characterPhotos <= AUTO_CAST_MAX_EXISTING;
     const autoApprove = String(form.get("autoApprove") ?? "") === "1";
