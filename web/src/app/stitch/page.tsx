@@ -116,6 +116,9 @@ type VideoOverlay = {
   // remain on screen while its sound (or the next lesson's sound) starts
   // before the visual cut.
   audioStartSec?: number;
+  // False by default: overlay sound follows its picture. Only becomes true
+  // after the editor explicitly separates/slips the audio.
+  audioDetached?: boolean;
   position: ImageOverlay["position"];
   scalePercent: number;
   muted: boolean;
@@ -1035,7 +1038,7 @@ function StitchPageInner() {
         items: items.map(({ id, file }) => ({ id, file })),
       audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
         imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
-        videoOverlays: videoOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, sourceDuration: overlay.sourceDuration, sourceStart: overlay.sourceStart, sourceEnd: overlay.sourceEnd, startSec: overlay.startSec, endSec: overlay.endSec, audioStartSec: overlay.audioStartSec ?? overlay.startSec, position: overlay.position, scalePercent: overlay.scalePercent, muted: overlay.muted })),
+        videoOverlays: videoOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, sourceDuration: overlay.sourceDuration, sourceStart: overlay.sourceStart, sourceEnd: overlay.sourceEnd, startSec: overlay.startSec, endSec: overlay.endSec, audioStartSec: overlay.audioStartSec ?? overlay.startSec, audioDetached: overlay.audioDetached ?? false, position: overlay.position, scalePercent: overlay.scalePercent, muted: overlay.muted })),
         textOverlays,
         itemTrims,
         aspectPreset,
@@ -1967,7 +1970,7 @@ function StitchPageInner() {
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
     setVideoOverlays((previous) => [...previous, {
       id, file, previewUrl: URL.createObjectURL(file), sourceDuration: meta.duration,
-      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), audioStartSec: 0, sourceStart: 0, sourceEnd: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
+      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), audioStartSec: 0, audioDetached: false, sourceStart: 0, sourceEnd: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
     }]);
     setSelectedVideoOverlayId(id);
   }
@@ -1981,7 +1984,7 @@ function StitchPageInner() {
     const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
     const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
-    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: item.previewUrl, sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, audioStartSec: startSec, position: "center", scalePercent: 100, muted: false }]);
+    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: item.previewUrl, sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, audioStartSec: startSec, audioDetached: false, position: "center", scalePercent: 100, muted: false }]);
     setSelectedVideoOverlayId(id);
   }
 
@@ -2004,7 +2007,8 @@ function StitchPageInner() {
   function placeVideoOverlayAtEnd(overlay: VideoOverlay) {
     const duration = Math.max(0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - overlay.sourceStart));
     const end = Math.max(duration, totalVideoDuration);
-    updateVideoOverlay(overlay.id, { startSec: Math.max(0, end - duration), endSec: end });
+    const startSec = Math.max(0, end - duration);
+    updateVideoOverlay(overlay.id, { startSec, endSec: end, ...(overlay.audioDetached ? {} : { audioStartSec: startSec }) });
     setSelectedVideoOverlayId(overlay.id);
   }
 
@@ -3932,7 +3936,7 @@ function StitchPageInner() {
                   </div>
               <div className="space-y-1">
                 {videoOverlays.map((overlay) => (
-                  <div key={overlay.id} className="relative h-[4.75rem] rounded-lg bg-fuchsia-500/10">
+                  <div key={overlay.id} className={`relative rounded-lg bg-fuchsia-500/10 ${overlay.audioDetached && !overlay.muted ? "h-[4.75rem]" : "h-10"}`}>
                     <div
                       style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }}
                       onContextMenu={(e) => {
@@ -3942,31 +3946,32 @@ function StitchPageInner() {
                       }}
                       title="Drag edges to mask start/end. Right-click to unmask (use full source)."
                       className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
-                      <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
+                      <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, v); const d = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, endSec: nextStart + (overlay.endSec - overlay.startSec), ...(overlay.audioDetached ? {} : { audioStartSec: Math.max(0, (overlay.audioStartSec ?? overlay.startSec) + d) }) }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); attachNextClipToOverlay(overlay); }} title="Attach the next yellow lesson clip to this pink cutaway’s right edge. Moving the cutaway end moves that lesson clip too." className="absolute left-2 top-5 z-30 rounded bg-emerald-800/95 px-1 text-[8px] font-semibold text-white">Attach next clip</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); insertOverlayIntoSequence(overlay); }} title="Make this logo or title a real sequence clip. The next lesson clip snaps directly after it instead of playing below it." className="absolute left-24 top-5 z-30 rounded bg-fuchsia-950/90 px-1 text-[8px] font-semibold text-white">Insert in sequence</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); placeVideoOverlayAtEnd(overlay); }} title="Place this cutaway at the end of the main video" className="absolute right-24 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Place at end</button>
+                      {!overlay.muted && !overlay.audioDetached && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { audioDetached: true, audioStartSec: overlay.startSec }); }} title="Optional: separate the sound from the picture so you can slide it earlier or later." className="absolute right-24 top-5 z-30 rounded bg-emerald-800/95 px-1 text-[8px] font-semibold text-white">Separate audio</button>}
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
-                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this edge right to mask/crop the beginning" className="absolute inset-y-0 left-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
+                      <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, ...(overlay.audioDetached ? {} : { audioStartSec: nextStart }), sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this edge right to mask/crop the beginning" className="absolute inset-y-0 left-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => { const nextEnd = Math.max(overlay.startSec + 0.2, v); const cut = overlay.endSec - nextEnd; updateVideoOverlay(overlay.id, { endSec: nextEnd, sourceEnd: Math.max(overlay.sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - cut)) }); }, clipBoundaries)(e); }} title="Drag this edge left to mask/crop the end" className="absolute inset-y-0 right-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
                     </div>
-                    {!overlay.muted && (
+                    {!overlay.muted && overlay.audioDetached && (
                       <div
                         style={{ marginLeft: (overlay.audioStartSec ?? overlay.startSec) * timelinePixelsPerSecond, width: Math.max(70, (overlay.sourceEnd - overlay.sourceStart) * timelinePixelsPerSecond) }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
                           makeAxisDragHandler(
                             () => overlay.audioStartSec ?? overlay.startSec,
-                            (v) => updateVideoOverlay(overlay.id, { audioStartSec: Math.max(0, v) }),
+                            (v) => updateVideoOverlay(overlay.id, { audioStartSec: Math.max(0, v), audioDetached: true }),
                             clipBoundaries,
                           )(e);
                         }}
                         title="Overlay audio. Drag this green bar left to start its sound before the pink picture appears."
                         className="absolute bottom-1 z-20 h-5 cursor-grab rounded bg-emerald-500/85 px-2 text-[8px] font-bold leading-5 text-emerald-950"
                       >
-                        Overlay audio · drag independently
+                        Overlay audio · slip earlier/later
                       </div>
                     )}
                   </div>
