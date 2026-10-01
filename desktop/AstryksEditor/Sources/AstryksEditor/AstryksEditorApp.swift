@@ -22,7 +22,7 @@ private struct StitchWebEditor: NSViewRepresentable {
     configuration.defaultWebpagePreferences.allowsContentJavaScript = true
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.allowsBackForwardNavigationGestures = true
-    webView.load(URLRequest(url: URL(string: "https://lucylabs.app/stitch")!))
+    webView.load(URLRequest(url: URL(string: "https://lucylabs.app/stitch?desktop=1")!))
     return webView
   }
 

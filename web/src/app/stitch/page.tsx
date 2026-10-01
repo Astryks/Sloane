@@ -791,6 +791,7 @@ async function computeAudioSyncOffsetSeconds(
 
 function StitchPageInner() {
   const searchParams = useSearchParams();
+  const isDesktopApp = searchParams.get("desktop") === "1";
   const [items, setItems] = useState<VideoItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
@@ -3101,9 +3102,12 @@ function StitchPageInner() {
 
   return (
     <div className="min-h-screen bg-cream">
-      <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
+      <SiteHeader
+        title={isDesktopApp ? "Lucy Labs Editor" : "Combine videos"}
+        subtitle={isDesktopApp ? "Your Lucy editing workspace — drag clips, refine the timeline, and export." : "Free. Runs entirely in your browser - your videos are never uploaded to our servers."}
+      />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
-        <section className="rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink">
+        {!isDesktopApp && <section className="rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-display text-lg font-bold">Want Lucy as a desktop app?</p>
@@ -3121,7 +3125,7 @@ function StitchPageInner() {
             </ol>
             <p className="mt-2 text-xs">This is Apple&apos;s security check for directly downloaded apps. The editor is free and runs locally; it does not upload your footage.</p>
           </details>
-        </section>
+        </section>}
         {/* Real bug found and fixed (follow-up review, 2026-09-17): Undo/Redo
             used to live only inside the preview panel below, which is
             itself conditionally rendered on `totalVideoDuration > 0` - the
