@@ -1114,7 +1114,7 @@ function StitchPageInner() {
     return function onPointerDown(e: React.PointerEvent) {
       e.preventDefault();
       e.stopPropagation();
-      const handle = e.currentTarget;
+      const handle = e.currentTarget as HTMLElement;
       const dragScale = timelinePixelsPerSecond;
       setTimelineDragScale(dragScale);
       try {
