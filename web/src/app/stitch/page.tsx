@@ -1634,6 +1634,45 @@ function StitchPageInner() {
       .catch(() => {});
   }
 
+  // The common lesson-cutaway edit: a title is visible immediately before a
+  // resumed lesson clip, while the resumed clip's audio begins a few seconds
+  // earlier beneath that title.  Keep the audio's source in sync with the
+  // picture: if picture begins at source 0:21, audio begins at source 0:18.
+  function startClipAudioEarly(item: VideoItem, requestedLeadSeconds = 3) {
+    const trim = itemTrims[item.id];
+    const entry = videoTimelineEntries.find((candidate) => candidate.item.id === item.id);
+    const sourceDuration = itemDurations[item.id] ?? (trim ? trim.end : 0);
+    if (!trim || !entry || sourceDuration <= 0) return;
+    const leadSeconds = Math.max(0, Math.min(requestedLeadSeconds, entry.timelineStart, trim.start));
+    if (leadSeconds < 0.05) {
+      setError("This clip needs at least 3 seconds before it in the source and timeline to start its audio early.");
+      return;
+    }
+    const sourceStart = Math.max(0, trim.start - leadSeconds);
+    const sourceEnd = Math.max(sourceStart + 0.05, Math.min(trim.end, sourceDuration));
+    const id = `early-audio-${item.id}-${Math.random().toString(36).slice(2)}`;
+    const previewUrl = URL.createObjectURL(item.file);
+    setAudioTracks((prev) => [...prev, {
+      id,
+      file: item.file,
+      previewUrl,
+      sourceDuration,
+      sourceStart,
+      sourceEnd,
+      startSec: entry.timelineStart - leadSeconds,
+      endSec: entry.timelineStart - leadSeconds + (sourceEnd - sourceStart),
+      fadeIn: 0,
+      fadeOut: 0,
+      volume: 1,
+      kind: "dialogue" as const,
+    }]);
+    updateItemTrim(item.id, { muteAudio: true });
+    setSelectedAudioTrackId(id);
+    getAudioPeaks(item.file)
+      .then((peaks) => setTrackWaveforms((prev) => ({ ...prev, [id]: peaks })))
+      .catch(() => {});
+  }
+
   function cycleItemSpeed(item: VideoItem) {
     const trim = itemTrims[item.id];
     if (!trim) return;
@@ -1946,6 +1985,31 @@ function StitchPageInner() {
     const end = Math.max(duration, totalVideoDuration);
     updateVideoOverlay(overlay.id, { startSec: Math.max(0, end - duration), endSec: end });
     setSelectedVideoOverlayId(overlay.id);
+  }
+
+  // Full-screen overlays deliberately do not lengthen the main sequence.
+  // Convert one into a real sequence clip when it should sit BETWEEN two
+  // lesson clips.  This is the "logo/title, then resume" workflow: the next
+  // main clip snaps directly after the inserted title rather than underneath
+  // it. Its audio can then be lifted three seconds early with the adjacent
+  // control on that next clip.
+  function insertOverlayIntoSequence(overlay: VideoOverlay) {
+    const id = `cutaway-${overlay.file.name}-${Math.random().toString(36).slice(2)}`;
+    const item: VideoItem = { id, file: overlay.file, previewUrl: overlay.previewUrl };
+    const sourceStart = Math.max(0, overlay.sourceStart);
+    const sourceEnd = Math.max(sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd));
+    const insertAt = videoTimelineEntries.findIndex((entry) => entry.timelineStart >= overlay.startSec - 0.05);
+    const position = insertAt === -1 ? items.length : insertAt;
+    setItems((previous) => [...previous.slice(0, position), item, ...previous.slice(position)]);
+    setItemDurations((previous) => ({ ...previous, [id]: overlay.sourceDuration }));
+    setItemTrims((previous) => ({
+      ...previous,
+      [id]: { start: sourceStart, end: sourceEnd, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: overlay.muted },
+    }));
+    setVideoOverlays((previous) => previous.filter((candidate) => candidate.id !== overlay.id));
+    setSelectedVideoOverlayId(null);
+    setError("");
+    setMediaPreparationMessage("Inserted cutaway into the main sequence. The following clip now snaps after it.");
   }
 
   function removeVideoOverlay(id: string) {
@@ -3622,6 +3686,17 @@ function StitchPageInner() {
                                 Audio thru
                               </button>
                             )}
+                            {trim && itemIndex > 0 && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); startClipAudioEarly(item, 3); }}
+                                title="Start this clip's audio three seconds before its picture, using the three seconds immediately before this clip's source window. The clip's own audio is muted to prevent a duplicate."
+                                className="flex h-4 items-center justify-center rounded-full bg-sky-700/90 px-1 text-[7px] font-bold text-white"
+                              >
+                                Audio −3s
+                              </button>
+                            )}
                             {trim && fullDuration != null && (
                               <button
                                 type="button"
@@ -3770,6 +3845,7 @@ function StitchPageInner() {
                       className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
                       <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
+                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); insertOverlayIntoSequence(overlay); }} title="Make this logo or title a real sequence clip. The next lesson clip snaps directly after it instead of playing below it." className="absolute left-2 top-5 z-30 rounded bg-fuchsia-950/90 px-1 text-[8px] font-semibold text-white">Insert in sequence</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); placeVideoOverlayAtEnd(overlay); }} title="Place this cutaway at the end of the main video" className="absolute right-24 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Place at end</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
@@ -3778,7 +3854,7 @@ function StitchPageInner() {
                     </div>
                   </div>
                 ))}
-                <p className="px-1 text-[10px] text-fuchsia-100/75">Add a logo or title here, position it over the main video, then choose <strong>Mute overlay</strong> when the original dialogue should keep playing underneath.</p>
+                <p className="px-1 text-[10px] text-fuchsia-100/75">Use an overlay when a logo/title should cover a clip that is already playing. For a real <strong>logo/title → next lesson clip</strong> sequence, choose <strong>Insert in sequence</strong>; the next clip magnetically follows it. On that next clip, choose <strong>Audio −3s</strong> to hear its source three seconds before its picture appears.</p>
                 <label className="flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-fuchsia-300/40 text-[11px] text-fuchsia-100"><input className="sr-only" type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && void addVideoOverlay(e.target.files[0])} />Add logo or title cutaway</label>
               </div>
                 </div>
