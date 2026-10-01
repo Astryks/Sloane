@@ -1114,6 +1114,7 @@ function StitchPageInner() {
     return function onPointerDown(e: React.PointerEvent) {
       e.preventDefault();
       e.stopPropagation();
+      const handle = e.currentTarget;
       const dragScale = timelinePixelsPerSecond;
       setTimelineDragScale(dragScale);
       try {
@@ -1140,12 +1141,23 @@ function StitchPageInner() {
       }
       function onUp() {
         setTimelineDragScale(null);
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
         setDragTooltip(null);
       }
+      // Safari/WebKit can keep captured pointer events on the source handle
+      // rather than forwarding them to window. Listen in both places so the
+      // amber trim sliders behave identically in Lucy's Mac app and browser.
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
     };
   }
 
