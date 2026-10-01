@@ -62,7 +62,7 @@ private struct StitchWebEditor: NSViewRepresentable {
     // WKWebView does not always opt into Finder file drops by default. These
     // pasteboard types let the existing editor drop zones receive local clips
     // as File objects, just as they do in Chrome or Safari.
-    webView.registerForDraggedTypes([.fileURL, .URL, .filenames])
+    webView.registerForDraggedTypes([.fileURL, .URL])
     webView.allowsBackForwardNavigationGestures = true
     context.coordinator.loadBlankProject(in: webView, projectID: projectID)
     return webView
