@@ -431,6 +431,10 @@ type SavedStitchProject = {
   items: Array<{ id: string; file: File }>;
   audioTracks: Array<Omit<AudioTrack, "previewUrl">>;
   imageOverlays: Array<Omit<ImageOverlay, "previewUrl">>;
+  // Full-screen logo/title cutaways are real project media too. Leaving
+  // them out here meant a project looked correct until its next reload,
+  // when every video overlay silently vanished.
+  videoOverlays?: Array<Omit<VideoOverlay, "previewUrl">>;
   textOverlays: TextOverlay[];
   itemTrims: Record<string, ItemTrim>;
   aspectPreset: AspectPreset;
@@ -1019,6 +1023,7 @@ function StitchPageInner() {
         items: items.map(({ id, file }) => ({ id, file })),
       audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
         imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
+        videoOverlays: videoOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, sourceDuration: overlay.sourceDuration, sourceStart: overlay.sourceStart, sourceEnd: overlay.sourceEnd, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent, muted: overlay.muted })),
         textOverlays,
         itemTrims,
         aspectPreset,
@@ -1044,6 +1049,7 @@ function StitchPageInner() {
       setItems(saved.items.map((item) => ({ ...item, previewUrl: URL.createObjectURL(item.file) })));
       setAudioTracks(saved.audioTracks.map((track, index) => ({ ...track, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, kind: track.kind ?? (index === 0 ? "dialogue" : index === 1 ? "music" : "other"), previewUrl: URL.createObjectURL(track.file) })));
       setImageOverlays(saved.imageOverlays.map((overlay) => ({ ...overlay, previewUrl: URL.createObjectURL(overlay.file) })));
+      setVideoOverlays((saved.videoOverlays ?? []).map((overlay) => ({ ...overlay, previewUrl: URL.createObjectURL(overlay.file) })));
       setTextOverlays(saved.textOverlays);
       setItemTrims(saved.itemTrims);
       setAspectPreset(saved.aspectPreset);
@@ -1553,7 +1559,7 @@ function StitchPageInner() {
 
   // Lift a main-sequence clip's embedded audio onto an independent audio lane
   // so picture can continue on later clips while this dialogue keeps playing.
-  function useClipAudioOnTimeline(item: VideoItem, extendThroughTimelineEnd: boolean) {
+  function placeClipAudioOnTimeline(item: VideoItem, extendThroughTimelineEnd: boolean) {
     const trim = itemTrims[item.id];
     const entry = videoTimelineEntries.find((candidate) => candidate.item.id === item.id);
     const sourceDuration = itemDurations[item.id] ?? (trim ? trim.end : 0);
@@ -3536,7 +3542,7 @@ function StitchPageInner() {
                               <button
                                 type="button"
                                 onPointerDown={(e) => e.stopPropagation()}
-                                onClick={(e) => { e.stopPropagation(); useClipAudioOnTimeline(item, false); }}
+                                onClick={(e) => { e.stopPropagation(); placeClipAudioOnTimeline(item, false); }}
                                 title="Use this audio on timeline: creates an independent dialogue bar from this clip's current trim and mutes the clip"
                                 className="flex h-4 items-center justify-center rounded-full bg-emerald-700/90 px-1 text-[7px] font-bold text-white"
                               >
@@ -3547,7 +3553,7 @@ function StitchPageInner() {
                               <button
                                 type="button"
                                 onPointerDown={(e) => e.stopPropagation()}
-                                onClick={(e) => { e.stopPropagation(); useClipAudioOnTimeline(item, true); }}
+                                onClick={(e) => { e.stopPropagation(); placeClipAudioOnTimeline(item, true); }}
                                 title="Keep this audio through next clips: lift audio and extend it through the end of the main sequence"
                                 className="flex h-4 items-center justify-center rounded-full bg-emerald-700/90 px-1 text-[7px] font-bold text-white"
                               >
@@ -3569,10 +3575,10 @@ function StitchPageInner() {
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => { e.stopPropagation(); moveItemToVideoOverlay(item); }}
-                              title="Move this clip into the full-screen overlay lane; its audio stays on unless you mute it"
+                                title="Use this as a full-screen logo or title cutaway. Mute it to keep the underlying audio playing."
                               className="flex h-4 items-center justify-center rounded-full bg-fuchsia-700/90 px-1 text-[7px] font-bold text-white"
                             >
-                              Move to overlay
+                              Use as cutaway
                             </button>
                             <button
                               type="button"
@@ -3685,7 +3691,7 @@ function StitchPageInner() {
               {selectedVideoOverlayId && (
                 <div className="mt-3 rounded-xl border border-fuchsia-300/40 bg-fuchsia-500/10 p-2">
                   <div className="mb-1 flex items-center justify-between">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-fuchsia-200">Video overlay · full screen</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-fuchsia-200">Full-screen cutaways · logos & titles</p>
                     <button type="button" onClick={() => setSelectedVideoOverlayId(null)} className="text-[10px] text-fuchsia-100/70">Hide overlay</button>
                   </div>
               <div className="space-y-1">
@@ -3709,7 +3715,8 @@ function StitchPageInner() {
                     </div>
                   </div>
                 ))}
-                <label className="flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-fuchsia-300/40 text-[11px] text-fuchsia-100"><input className="sr-only" type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && void addVideoOverlay(e.target.files[0])} />Add another full-screen overlay</label>
+                <p className="px-1 text-[10px] text-fuchsia-100/75">Add a logo or title here, position it over the main video, then choose <strong>Mute overlay</strong> when the original dialogue should keep playing underneath.</p>
+                <label className="flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-fuchsia-300/40 text-[11px] text-fuchsia-100"><input className="sr-only" type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && void addVideoOverlay(e.target.files[0])} />Add logo or title cutaway</label>
               </div>
                 </div>
               )}
