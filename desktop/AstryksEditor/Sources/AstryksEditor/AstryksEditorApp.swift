@@ -7,8 +7,34 @@ import WebKit
 struct AstryksEditorApp: App {
   var body: some Scene {
     WindowGroup("Lucy Labs Editor") {
-      StitchWebEditor()
+      DesktopEditorShell()
         .frame(minWidth: 1080, minHeight: 760)
+    }
+  }
+}
+
+private struct DesktopEditorShell: View {
+  @State private var projectID = UUID()
+
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack {
+        Image(systemName: "film.stack")
+          .foregroundStyle(Color(red: 0.56, green: 0.48, blue: 0.72))
+        Text("Lucy Labs Editor").font(.headline)
+        Spacer()
+        Button {
+          projectID = UUID()
+        } label: {
+          Label("New project", systemImage: "plus")
+        }
+        .help("Start a blank timeline. Your original files stay on this Mac.")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 10)
+      .background(.bar)
+      Divider()
+      StitchWebEditor(projectID: projectID)
     }
   }
 }
@@ -17,16 +43,33 @@ struct AstryksEditorApp: App {
 /// instead of a reduced, separate workflow. That keeps all clip, overlay,
 /// trimming, preview, and export controls consistent across web and Mac.
 private struct StitchWebEditor: NSViewRepresentable {
+  let projectID: UUID
+
   func makeNSView(context: Context) -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = true
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.allowsBackForwardNavigationGestures = true
-    webView.load(URLRequest(url: URL(string: "https://lucylabs.app/stitch?desktop=1")!))
+    context.coordinator.loadBlankProject(in: webView, projectID: projectID)
     return webView
   }
 
-  func updateNSView(_ webView: WKWebView, context: Context) {}
+  func updateNSView(_ webView: WKWebView, context: Context) {
+    guard context.coordinator.projectID != projectID else { return }
+    context.coordinator.loadBlankProject(in: webView, projectID: projectID)
+  }
+
+  func makeCoordinator() -> Coordinator { Coordinator() }
+
+  final class Coordinator {
+    var projectID: UUID?
+
+    func loadBlankProject(in webView: WKWebView, projectID: UUID) {
+      self.projectID = projectID
+      let url = URL(string: "https://lucylabs.app/stitch?desktop=1&newProject=\(projectID.uuidString)")!
+      webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+    }
+  }
 }
 
 @MainActor
