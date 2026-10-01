@@ -49,3 +49,8 @@ local_voice_tests/
 .DS_Store
 Thumbs.db
 .secrets/
+
+# Native macOS editor build products. The small release ZIP is deliberately
+# tracked so the web editor can offer a free direct download.
+desktop/AstryksEditor/.build/
+desktop/downloads/Astryks Editor.app/

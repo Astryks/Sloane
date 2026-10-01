@@ -1156,7 +1156,10 @@ function StitchPageInner() {
   // or re-encodes anything) so the trim controls below can show/clamp
   // against a real per-clip length, and defaults each new clip's trim
   // range to a useful 10-second opening window (or the full length when
-  // shorter) the first time it's seen. Existing trims are preserved across
+  // shorter) the first time it's seen. A second upload of the same source
+  // is treated as a continuation: it starts after the earlier clip and uses
+  // the rest of that source, which is the normal long-form cutaway workflow.
+  // Existing trims are preserved across
   // re-runs (e.g. reordering, or
   // adding one more clip) rather than reset - only clips no longer in the
   // list get dropped from the map. Recomputed whenever the clip list
@@ -1188,8 +1191,28 @@ function StitchPageInner() {
       setItemDurations((prev) => ({ ...prev, ...durations }));
       setItemTrims((prev) => {
         const next: Record<string, ItemTrim> = {};
-        for (const item of items) {
-          next[item.id] = prev[item.id] ?? trimsToSeed[item.id] ?? { start: 0, end: 10, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
+        for (const [index, item] of items.entries()) {
+          if (prev[item.id]) {
+            next[item.id] = prev[item.id];
+            continue;
+          }
+          const earlierMatch = items
+            .slice(0, index)
+            .reverse()
+            .find((candidate) => candidate.file.name === item.file.name && candidate.file.size === item.file.size);
+          const earlierTrim = earlierMatch ? (prev[earlierMatch.id] ?? next[earlierMatch.id]) : undefined;
+          const fullDuration = durations[item.id] ?? 10;
+          next[item.id] = earlierTrim
+            ? {
+                start: Math.min(earlierTrim.end, Math.max(0, fullDuration - 0.2)),
+                end: fullDuration,
+                fadeIn: 0,
+                fadeOut: 0,
+                speed: 1,
+                transitionType: "none",
+                muteAudio: false,
+              }
+            : trimsToSeed[item.id] ?? { start: 0, end: 10, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: false };
         }
         return next;
       });
@@ -1903,6 +1926,13 @@ function StitchPageInner() {
 
   function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
     setVideoOverlays((previous) => previous.map((overlay) => overlay.id === id ? { ...overlay, ...patch } : overlay));
+  }
+
+  function placeVideoOverlayAtEnd(overlay: VideoOverlay) {
+    const duration = Math.max(0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - overlay.sourceStart));
+    const end = Math.max(duration, totalVideoDuration);
+    updateVideoOverlay(overlay.id, { startSec: Math.max(0, end - duration), endSec: end });
+    setSelectedVideoOverlayId(overlay.id);
   }
 
   function removeVideoOverlay(id: string) {
@@ -3073,6 +3103,14 @@ function StitchPageInner() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
+        <section className="flex flex-col gap-3 rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-display text-lg font-bold">Editing a long lesson?</p>
+            <p className="max-w-2xl text-sm text-muted">The browser editor is lovely for short edits, but a long source reused on the timeline can strain a browser&apos;s memory. Our free Mac app keeps large files and rendering on your computer for a steadier experience.</p>
+            <p className="mt-1 text-xs text-muted">No account, uploads, cloud rendering, or subscription. It is a direct beta download, so macOS may show a first-open security notice.</p>
+          </div>
+          <a href="https://github.com/Astryks/Sloane/raw/main/desktop/downloads/AstryksEditor-macOS.zip?download=1" className="shrink-0 rounded-full bg-purple px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-purple-dark">Download the free Mac app</a>
+        </section>
         {/* Real bug found and fixed (follow-up review, 2026-09-17): Undo/Redo
             used to live only inside the preview panel below, which is
             itself conditionally rendered on `totalVideoDuration > 0` - the
@@ -3708,6 +3746,7 @@ function StitchPageInner() {
                       className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
                       <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
+                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); placeVideoOverlayAtEnd(overlay); }} title="Place this cutaway at the end of the main video" className="absolute right-24 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Place at end</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this edge right to mask/crop the beginning" className="absolute inset-y-0 left-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
