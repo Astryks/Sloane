@@ -3103,6 +3103,13 @@ function StitchPageInner() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
+        <section className="flex flex-col gap-3 rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-display text-lg font-bold">Want Lucy as a desktop app?</p>
+            <p className="max-w-2xl text-sm text-muted">Download the free Mac editor to open directly into Lucy&apos;s full timeline — drag clips, add overlays, trim, preview, and export as usual.</p>
+          </div>
+          <a href="https://github.com/Astryks/Sloane/raw/main/desktop/downloads/AstryksEditor-macOS.zip?download=1" className="shrink-0 rounded-full bg-purple px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-purple-dark">Download Free Editor</a>
+        </section>
         {/* Real bug found and fixed (follow-up review, 2026-09-17): Undo/Redo
             used to live only inside the preview panel below, which is
             itself conditionally rendered on `totalVideoDuration > 0` - the
