@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "Pricing — AI Video & Stills",
+  title: "Pricing — Pay as You Go",
   description:
-    "Lucy Labs pricing for AI video credits and still packs — straightforward limits, no surprise caps.",
+    "Lucy Labs is pay-as-you-go — pay per video or still, no subscription. Voice/audio subscriptions are no longer offered.",
   alternates: { canonical: "/billing" },
   openGraph: {
-    title: "Pricing — AI Video & Stills | Lucy Labs",
+    title: "Pricing — Pay as You Go | Lucy Labs",
     description:
-      "Plans and pay-as-you-go credits for AI video and stills on Lucy Labs.",
+      "Pay-as-you-go pricing for AI video and stills on Lucy Labs. No subscriptions.",
     url: "/billing",
   },
   robots: { index: true, follow: true },

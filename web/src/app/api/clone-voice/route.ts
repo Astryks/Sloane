@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: "Enter the name of the person whose voice this is." }, { status: 400 });
     }
     if (!accessToken) {
-      return publicJson({ error: "Voice cloning is available on a paid plan - see /billing to subscribe." }, { status: 402 });
+      return publicJson({ error: "Voice cloning requires an active access token." }, { status: 402 });
     }
     const sub = await getSubscriberByToken(accessToken);
     if (!sub) {

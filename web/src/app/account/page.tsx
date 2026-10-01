@@ -183,12 +183,14 @@ function AccountPageInner() {
             data.subscriber.status === "canceled" ? (
               <>
                 <p className="font-semibold text-foreground">Your {data.subscriber.plan} plan was canceled</p>
-                <p className="mt-1 text-muted">You can resubscribe any time - it only takes a minute.</p>
+                <p className="mt-1 text-muted">
+                  Subscriptions are no longer offered - Lucy Labs is now pay-as-you-go for video and stills.
+                </p>
                 <a
                   href="/billing"
                   className="shadow-soft mt-4 inline-block rounded-full bg-coral px-4 py-2 text-xs font-bold text-white transition hover:brightness-105"
                 >
-                  Resubscribe
+                  See pay-as-you-go pricing
                 </a>
               </>
             ) : (

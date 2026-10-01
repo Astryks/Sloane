@@ -1,40 +1,21 @@
-import { NextRequest } from "next/server";
-import { stripe } from "@/lib/stripe";
-import { PLANS, type PlanId } from "@/lib/plans";
-import { getSessionUser } from "@/lib/auth";
 import { publicJson } from "@/lib/mediaProxy";
 
-export async function POST(req: NextRequest) {
-  const { plan } = (await req.json()) as { plan: PlanId };
-  const planDef = PLANS[plan];
-  if (!planDef || !planDef.stripePriceEnvVar) {
-    return publicJson({ error: "Unknown plan" }, { status: 400 });
-  }
-  const priceId = process.env[planDef.stripePriceEnvVar];
-  if (!priceId) {
-    return publicJson({ error: "Plan not configured on the server yet" }, { status: 500 });
-  }
-
-  const origin = req.nextUrl.origin;
-  const sessionUser = await getSessionUser();
-  try {
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/billing?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/billing?canceled=1`,
-      ...(sessionUser ? { client_reference_id: sessionUser.id } : {}),
-      // Stripe's "Managed Payments" (on by default for this account) requires
-      // a tax code on every product before it'll create a session - we
-      // haven't made a tax-classification decision for the product yet, so
-      // disable it for now rather than guess a tax code. Revisit once that's
-      // deliberately decided.
-      managed_payments: { enabled: false },
-    });
-    return publicJson({ url: session.url });
-  } catch (err) {
-    console.error("Stripe checkout session creation failed", err);
-    const message = err instanceof Error ? err.message : "Checkout failed";
-    return publicJson({ error: message }, { status: 500 });
-  }
+// Subscriptions retired 2026-10-01 (see STATUS.md "Pay-as-you-go only:
+// subscriptions retired") - the advertised value of every paid plan
+// (character quota, "clone any voice") is now undeliverable to anyone but
+// the owner, since /api/generate-preset and /api/clone-voice were made
+// owner-only during the Modal cost emergency. Rather than delete this
+// route (and risk a stray client reference 500ing instead of failing
+// clearly), it now always returns 410 Gone - no new Stripe subscription
+// can be created through this endpoint, or anywhere else on the site.
+//
+// Existing subscriptions are untouched by this change - this route never
+// cancels anyone, it only stops creating new ones. lib/plans.ts's PLANS
+// and the Stripe webhook keep working as before for whoever stays
+// subscribed until they cancel via the billing portal (/api/billing/portal).
+export async function POST() {
+  return publicJson(
+    { error: "Subscriptions are no longer offered. Lucy Labs is now pay-as-you-go - see /billing." },
+    { status: 410 },
+  );
 }
