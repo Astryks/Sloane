@@ -3103,13 +3103,24 @@ function StitchPageInner() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
-        <section className="flex flex-col gap-3 rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink sm:flex-row sm:items-center sm:justify-between">
+        <section className="rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-display text-lg font-bold">Want a faster editing experience?</p>
             <p className="max-w-2xl text-sm text-muted">The browser editor is lovely for short edits, but a long source reused on the timeline can strain a browser&apos;s memory. Download our free Mac editor for faster, steadier work with large videos — everything stays on your computer.</p>
-            <p className="mt-1 text-xs text-muted">No account, uploads, cloud rendering, or subscription. It is a direct beta download, so macOS may show a first-open security notice.</p>
+            <p className="mt-1 text-xs text-muted">No account, uploads, cloud rendering, or subscription.</p>
           </div>
           <a href="https://github.com/Astryks/Sloane/raw/main/desktop/downloads/AstryksEditor-macOS.zip?download=1" className="shrink-0 rounded-full bg-purple px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-purple-dark">Download Free Editor</a>
+          </div>
+          <details className="mt-4 border-t border-purple/20 pt-3 text-sm text-muted">
+            <summary className="cursor-pointer font-semibold text-ink">First time opening the Mac app</summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-5">
+              <li>Unzip the download and drag <strong>Astryks Editor.app</strong> into Applications.</li>
+              <li>Try to open it once, then go to <strong>System Settings → Privacy &amp; Security</strong>.</li>
+              <li>Scroll down, select <strong>Open Anyway</strong> next to the Astryks Editor notice, then confirm Open.</li>
+            </ol>
+            <p className="mt-2 text-xs">macOS shows this notice because this free beta is distributed directly, not through the App Store. If “Open Anyway” does not appear, run <code className="rounded bg-white/70 px-1 py-0.5 text-[11px] text-ink">xattr -dr com.apple.quarantine &quot;/Applications/Astryks Editor.app&quot;</code> in Terminal, then open it from Applications.</p>
+          </details>
         </section>
         {/* Real bug found and fixed (follow-up review, 2026-09-17): Undo/Redo
             used to live only inside the preview panel below, which is
