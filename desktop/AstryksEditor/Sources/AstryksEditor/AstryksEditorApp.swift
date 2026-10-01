@@ -15,6 +15,7 @@ struct AstryksEditorApp: App {
 
 private struct DesktopEditorShell: View {
   @State private var projectID = UUID()
+  @State private var importRequest = 0
 
   var body: some View {
     VStack(spacing: 0) {
@@ -23,6 +24,12 @@ private struct DesktopEditorShell: View {
           .foregroundStyle(Color(red: 0.56, green: 0.48, blue: 0.72))
         Text("Lucy Labs Editor").font(.headline)
         Spacer()
+        Button {
+          importRequest += 1
+        } label: {
+          Label("Import clips", systemImage: "square.and.arrow.down")
+        }
+        .help("Choose one or more videos for the timeline.")
         Button {
           projectID = UUID()
         } label: {
@@ -34,7 +41,7 @@ private struct DesktopEditorShell: View {
       .padding(.vertical, 10)
       .background(.bar)
       Divider()
-      StitchWebEditor(projectID: projectID)
+      StitchWebEditor(projectID: projectID, importRequest: importRequest)
     }
   }
 }
@@ -44,31 +51,53 @@ private struct DesktopEditorShell: View {
 /// trimming, preview, and export controls consistent across web and Mac.
 private struct StitchWebEditor: NSViewRepresentable {
   let projectID: UUID
+  let importRequest: Int
 
   func makeNSView(context: Context) -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = true
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.navigationDelegate = context.coordinator
+    webView.uiDelegate = context.coordinator
+    // WKWebView does not always opt into Finder file drops by default. These
+    // pasteboard types let the existing editor drop zones receive local clips
+    // as File objects, just as they do in Chrome or Safari.
+    webView.registerForDraggedTypes([.fileURL, .URL, .filenames])
     webView.allowsBackForwardNavigationGestures = true
     context.coordinator.loadBlankProject(in: webView, projectID: projectID)
     return webView
   }
 
   func updateNSView(_ webView: WKWebView, context: Context) {
-    guard context.coordinator.projectID != projectID else { return }
-    context.coordinator.loadBlankProject(in: webView, projectID: projectID)
+    if context.coordinator.projectID != projectID {
+      context.coordinator.loadBlankProject(in: webView, projectID: projectID)
+    }
+    if context.coordinator.importRequest != importRequest {
+      context.coordinator.importRequest = importRequest
+      context.coordinator.openVideoPicker(in: webView)
+    }
   }
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
-  final class Coordinator: NSObject, WKNavigationDelegate {
+  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     var projectID: UUID?
+    var importRequest = 0
 
     func loadBlankProject(in webView: WKWebView, projectID: UUID) {
       self.projectID = projectID
       let url = URL(string: "https://lucylabs.app/stitch?desktop=1&newProject=\(projectID.uuidString)")!
       webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+    }
+
+    func openVideoPicker(in webView: WKWebView) {
+      webView.evaluateJavaScript("""
+        (() => {
+          const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+          const videoInput = inputs.find((input) => input.accept.includes('video'));
+          videoInput?.click();
+        })();
+      """)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -83,6 +112,20 @@ private struct StitchWebEditor: NSViewRepresentable {
           if (first?.querySelector('nav')) first.remove();
         })();
       """)
+    }
+
+    func webView(
+      _ webView: WKWebView,
+      runOpenPanelWith parameters: WKOpenPanelParameters,
+      initiatedByFrame frame: WKFrameInfo,
+      completionHandler: @escaping ([URL]?) -> Void
+    ) {
+      let panel = NSOpenPanel()
+      panel.canChooseFiles = true
+      panel.canChooseDirectories = false
+      panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+      panel.allowedContentTypes = [.movie]
+      completionHandler(panel.runModal() == .OK ? panel.urls : nil)
     }
   }
 }
