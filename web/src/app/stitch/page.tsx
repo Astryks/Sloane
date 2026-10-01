@@ -1020,8 +1020,39 @@ function StitchPageInner() {
       id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
       previewUrl: URL.createObjectURL(file),
     }));
+    // The natural cutaway workflow is: add a title/logo, then add the
+    // resumed lesson. New main clips therefore snap to the latest pink
+    // cutaway by default. Dragging a yellow block later releases that snap
+    // and gives the editor a real black gap instead.
+    const latestOverlay = videoOverlays.reduce<VideoOverlay | null>(
+      (latest, overlay) => !latest || overlay.endSec > latest.endSec ? overlay : latest,
+      null,
+    );
     if (added.length > 0) setMediaPreparationMessage(`Preparing ${added.length} video clip${added.length === 1 ? "" : "s"} for editing…`);
     setItems((prev) => [...prev, ...added]);
+    if (latestOverlay) {
+      for (const item of added) {
+        void getVideoMeta(item.file).then((meta) => {
+          setItemTrims((previous) => {
+            const current = previous[item.id];
+            return {
+              ...previous,
+              [item.id]: {
+                start: current?.start ?? 0,
+                end: current?.end ?? Math.min(10, meta.duration),
+                fadeIn: current?.fadeIn ?? 0,
+                fadeOut: current?.fadeOut ?? 0,
+                speed: current?.speed ?? 1,
+                transitionType: "none",
+                muteAudio: current?.muteAudio ?? false,
+                attachedOverlayId: latestOverlay.id,
+                timelineStartSec: undefined,
+              },
+            };
+          });
+        }).catch(() => {});
+      }
+    }
     audioFiles.forEach((file) => void addAudioTrack(file));
     imageFiles.forEach((file) => addImageOverlay(file));
     for (const file of textFiles) {
@@ -2002,63 +2033,6 @@ function StitchPageInner() {
 
   function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
     setVideoOverlays((previous) => previous.map((overlay) => overlay.id === id ? { ...overlay, ...patch } : overlay));
-  }
-
-  function placeVideoOverlayAtEnd(overlay: VideoOverlay) {
-    const duration = Math.max(0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - overlay.sourceStart));
-    const end = Math.max(duration, totalVideoDuration);
-    const startSec = Math.max(0, end - duration);
-    updateVideoOverlay(overlay.id, { startSec, endSec: end, ...(overlay.audioDetached ? {} : { audioStartSec: startSec }) });
-    setSelectedVideoOverlayId(overlay.id);
-  }
-
-  function attachNextClipToOverlay(overlay: VideoOverlay) {
-    // Pick the next yellow clip in the current timeline. This is normally
-    // the clip the pink title currently covers; it becomes responsive to the
-    // title's right edge whenever that edge is dragged.
-    const next = videoTimelineEntries.find((entry) => entry.timelineStart >= overlay.startSec - 0.05)
-      ?? videoTimelineEntries[videoTimelineEntries.length - 1];
-    if (!next) return;
-    updateItemTrim(next.item.id, { attachedOverlayId: overlay.id, timelineStartSec: undefined, transitionType: "none" });
-    setMediaPreparationMessage(`Attached the next lesson clip to this cutaway’s right edge (${formatTime(overlay.endSec)}). Drag the pink edge to move it together.`);
-  }
-
-  function freeMoveClip(item: VideoItem) {
-    const entry = videoTimelineEntries.find((candidate) => candidate.item.id === item.id);
-    if (!entry) return;
-    updateItemTrim(item.id, { attachedOverlayId: undefined, timelineStartSec: entry.timelineStart, transitionType: "none" });
-    setMediaPreparationMessage("Free-move enabled. Drag this yellow clip right to create a black gap, or left to place it earlier.");
-  }
-
-  // Full-screen overlays deliberately do not lengthen the main sequence.
-  // Convert one into a real sequence clip when it should sit BETWEEN two
-  // lesson clips.  This is the "logo/title, then resume" workflow: the next
-  // main clip snaps directly after the inserted title rather than underneath
-  // it. Its audio can then be lifted three seconds early with the adjacent
-  // control on that next clip.
-  function insertOverlayIntoSequence(overlay: VideoOverlay) {
-    const id = `cutaway-${overlay.file.name}-${Math.random().toString(36).slice(2)}`;
-    const item: VideoItem = { id, file: overlay.file, previewUrl: overlay.previewUrl };
-    const sourceStart = Math.max(0, overlay.sourceStart);
-    const sourceEnd = Math.max(sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd));
-    // An overlay normally sits *over* the main clip it is intended to
-    // precede. Insert it immediately before that covered clip, rather than
-    // looking only for a later clip boundary. This makes consecutive logo
-    // and title overlays become: lesson → logo → title → resumed lesson.
-    const insertAt = videoTimelineEntries.findIndex(
-      (entry) => overlay.startSec >= entry.timelineStart - 0.05 && overlay.startSec < entry.timelineEnd - 0.05,
-    );
-    const position = insertAt === -1 ? items.length : insertAt;
-    setItems((previous) => [...previous.slice(0, position), item, ...previous.slice(position)]);
-    setItemDurations((previous) => ({ ...previous, [id]: overlay.sourceDuration }));
-    setItemTrims((previous) => ({
-      ...previous,
-      [id]: { start: sourceStart, end: sourceEnd, fadeIn: 0, fadeOut: 0, speed: 1, transitionType: "none", muteAudio: overlay.muted },
-    }));
-    setVideoOverlays((previous) => previous.filter((candidate) => candidate.id !== overlay.id));
-    setSelectedVideoOverlayId(null);
-    setError("");
-    setMediaPreparationMessage("Inserted cutaway into the main sequence. The following clip now snaps after it.");
   }
 
   function removeVideoOverlay(id: string) {
@@ -3643,15 +3617,15 @@ function StitchPageInner() {
                         <div
                           key={item.id}
                           onPointerDown={(e) => {
-                            if (trim?.timelineStartSec != null) {
-                              makeAxisDragHandler(
-                                () => timelineEntry?.timelineStart ?? trim.timelineStartSec ?? 0,
-                                (v) => updateItemTrim(item.id, { timelineStartSec: Math.max(0, v), attachedOverlayId: undefined, transitionType: "none" }),
-                                clipBoundaries,
-                              )(e);
-                              return;
-                            }
-                            handleReorderPointerDown(e, itemIndex);
+                            // Yellow blocks are always directly draggable.
+                            // A drag intentionally releases the default pink
+                            // cutaway attachment, preserving the exact gap
+                            // the editor places on the timeline.
+                            makeAxisDragHandler(
+                              () => timelineEntry?.timelineStart ?? trim?.timelineStartSec ?? 0,
+                              (v) => updateItemTrim(item.id, { timelineStartSec: Math.max(0, v), attachedOverlayId: undefined, transitionType: "none" }),
+                              clipBoundaries,
+                            )(e);
                           }}
                           style={{
                             width: Math.max(48, duration * timelinePixelsPerSecond),
@@ -3712,6 +3686,17 @@ function StitchPageInner() {
                               would leave these permanently unreachable
                               there). */}
                           <div className="absolute inset-x-0 top-3.5 z-10 flex items-center justify-center gap-0.5">
+                            {itemIndex > 0 && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); moveItemToVideoOverlay(item); }}
+                                title="Turn this clip into a pink full-screen overlay."
+                                className="flex h-5 items-center justify-center rounded-full bg-fuchsia-600 px-2 text-[8px] font-bold text-white shadow-sm"
+                              >
+                                Pink overlay
+                              </button>
+                            )}
                             {trim && itemIndex > 0 && (
                               <button
                                 type="button"
@@ -3784,22 +3769,6 @@ function StitchPageInner() {
                                 Audio −3s
                               </button>
                             )}
-                            {trim?.attachedOverlayId && (
-                              <button
-                                type="button"
-                                onPointerDown={(e) => e.stopPropagation()}
-                                onClick={(e) => { e.stopPropagation(); freeMoveClip(item); }}
-                                title="Release this clip from the cutaway edge, then drag the yellow block anywhere on the timeline. Empty space exports as black video."
-                                className="flex h-4 items-center justify-center rounded-full bg-sky-700/90 px-1 text-[7px] font-bold text-white"
-                              >
-                                Free move
-                              </button>
-                            )}
-                            {trim?.timelineStartSec != null && (
-                              <span title="Drag the yellow clip itself to move it freely on the timeline." className="flex h-4 items-center justify-center rounded-full bg-sky-800/90 px-1 text-[7px] font-bold text-sky-100">
-                                Free position
-                              </span>
-                            )}
                             {trim && fullDuration != null && (
                               <button
                                 type="button"
@@ -3811,15 +3780,6 @@ function StitchPageInner() {
                                 Window
                               </button>
                             )}
-                            <button
-                              type="button"
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={(e) => { e.stopPropagation(); moveItemToVideoOverlay(item); }}
-                                title="Use this as a full-screen logo or title cutaway. Mute it to keep the underlying audio playing."
-                              className="flex h-4 items-center justify-center rounded-full bg-fuchsia-700/90 px-1 text-[7px] font-bold text-white"
-                            >
-                              Use as cutaway
-                            </button>
                             <button
                               type="button"
                               onPointerDown={(e) => e.stopPropagation()}
@@ -3948,10 +3908,6 @@ function StitchPageInner() {
                       className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
                       <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, v); const d = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, endSec: nextStart + (overlay.endSec - overlay.startSec), ...(overlay.audioDetached ? {} : { audioStartSec: Math.max(0, (overlay.audioStartSec ?? overlay.startSec) + d) }) }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
-                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); attachNextClipToOverlay(overlay); }} title="Attach the next yellow lesson clip to this pink cutaway’s right edge. Moving the cutaway end moves that lesson clip too." className="absolute left-2 top-5 z-30 rounded bg-emerald-800/95 px-1 text-[8px] font-semibold text-white">Attach next clip</button>
-                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); insertOverlayIntoSequence(overlay); }} title="Make this logo or title a real sequence clip. The next lesson clip snaps directly after it instead of playing below it." className="absolute left-24 top-5 z-30 rounded bg-fuchsia-950/90 px-1 text-[8px] font-semibold text-white">Insert in sequence</button>
-                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); placeVideoOverlayAtEnd(overlay); }} title="Place this cutaway at the end of the main video" className="absolute right-24 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Place at end</button>
-                      {!overlay.muted && !overlay.audioDetached && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { audioDetached: true, audioStartSec: overlay.startSec }); }} title="Optional: separate the sound from the picture so you can slide it earlier or later." className="absolute right-24 top-5 z-30 rounded bg-emerald-800/95 px-1 text-[8px] font-semibold text-white">Separate audio</button>}
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, ...(overlay.audioDetached ? {} : { audioStartSec: nextStart }), sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this edge right to mask/crop the beginning" className="absolute inset-y-0 left-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
@@ -3976,7 +3932,7 @@ function StitchPageInner() {
                     )}
                   </div>
                 ))}
-                <p className="px-1 text-[10px] text-fuchsia-100/75">Use an overlay when a logo/title should cover a clip that is already playing. For a real <strong>logo/title → next lesson clip</strong> sequence, choose <strong>Insert in sequence</strong>; the next clip magnetically follows it. On that next clip, choose <strong>Audio −3s</strong> to hear its source three seconds before its picture appears.</p>
+                <p className="px-1 text-[10px] text-fuchsia-100/75">Pink cutaways stay on this layer. The next lesson clip added will snap to the latest pink cutaway’s right edge. Drag any yellow or pink block to place it freely; any resulting gap exports as a black screen.</p>
                 <label className="flex h-9 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-fuchsia-300/40 text-[11px] text-fuchsia-100"><input className="sr-only" type="file" accept="video/*" onChange={(e) => e.target.files?.[0] && void addVideoOverlay(e.target.files[0])} />Add logo or title cutaway</label>
               </div>
                 </div>
