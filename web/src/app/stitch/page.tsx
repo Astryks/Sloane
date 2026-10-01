@@ -3102,10 +3102,7 @@ function StitchPageInner() {
 
   return (
     <div className="min-h-screen bg-cream">
-      <SiteHeader
-        title={isDesktopApp ? "Lucy Labs Editor" : "Combine videos"}
-        subtitle={isDesktopApp ? "Your Lucy editing workspace — drag clips, refine the timeline, and export." : "Free. Runs entirely in your browser - your videos are never uploaded to our servers."}
-      />
+      {!isDesktopApp && <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />}
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
         {!isDesktopApp && <section className="rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

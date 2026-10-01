@@ -49,6 +49,7 @@ private struct StitchWebEditor: NSViewRepresentable {
     let configuration = WKWebViewConfiguration()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = true
     let webView = WKWebView(frame: .zero, configuration: configuration)
+    webView.navigationDelegate = context.coordinator
     webView.allowsBackForwardNavigationGestures = true
     context.coordinator.loadBlankProject(in: webView, projectID: projectID)
     return webView
@@ -61,13 +62,27 @@ private struct StitchWebEditor: NSViewRepresentable {
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
-  final class Coordinator {
+  final class Coordinator: NSObject, WKNavigationDelegate {
     var projectID: UUID?
 
     func loadBlankProject(in webView: WKWebView, projectID: UUID) {
       self.projectID = projectID
       let url = URL(string: "https://lucylabs.app/stitch?desktop=1&newProject=\(projectID.uuidString)")!
       webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+      // The live site may be on the previous deployment for a few minutes.
+      // Strip its shared marketing header in the native shell immediately;
+      // the app's own compact toolbar supplies the editor identity and New
+      // Project action.
+      webView.evaluateJavaScript("""
+        (() => {
+          const page = document.querySelector('.min-h-screen.bg-cream');
+          const first = page?.firstElementChild;
+          if (first?.querySelector('nav')) first.remove();
+        })();
+      """)
     }
   }
 }
