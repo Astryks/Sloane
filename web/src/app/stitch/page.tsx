@@ -112,6 +112,10 @@ type VideoOverlay = {
   sourceEnd: number;
   startSec: number;
   endSec: number;
+  // Audio is deliberately independent from the picture. This lets a title
+  // remain on screen while its sound (or the next lesson's sound) starts
+  // before the visual cut.
+  audioStartSec?: number;
   position: ImageOverlay["position"];
   scalePercent: number;
   muted: boolean;
@@ -150,6 +154,13 @@ type ItemTrim = {
   speed: number;
   transitionType: TransitionType;
   muteAudio: boolean;
+  // When set, this main-sequence clip begins at the right edge of the named
+  // overlay instead of immediately after the prior yellow clip.
+  attachedOverlayId?: string;
+  // An explicit timeline position is created by "Free move" and lets a
+  // clip sit after a deliberate black gap. Omit it to use normal sequence
+  // flow (or attachedOverlayId when present).
+  timelineStartSec?: number;
 };
 
 // A clip's own real (post-speed) duration on the shared timeline - every
@@ -1024,7 +1035,7 @@ function StitchPageInner() {
         items: items.map(({ id, file }) => ({ id, file })),
       audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
         imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
-        videoOverlays: videoOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, sourceDuration: overlay.sourceDuration, sourceStart: overlay.sourceStart, sourceEnd: overlay.sourceEnd, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent, muted: overlay.muted })),
+        videoOverlays: videoOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, sourceDuration: overlay.sourceDuration, sourceStart: overlay.sourceStart, sourceEnd: overlay.sourceEnd, startSec: overlay.startSec, endSec: overlay.endSec, audioStartSec: overlay.audioStartSec ?? overlay.startSec, position: overlay.position, scalePercent: overlay.scalePercent, muted: overlay.muted })),
         textOverlays,
         itemTrims,
         aspectPreset,
@@ -1391,13 +1402,23 @@ function StitchPageInner() {
       const trimEnd = trim ? trim.end : (itemDurations[item.id] ?? 0);
       const speed = trim?.speed ?? 1;
       const effectiveDuration = effectiveClipDuration({ start: trimStart, end: trimEnd, speed });
-      const transitionType: TransitionType = i === 0 ? "none" : (trim?.transitionType ?? "none");
+      const attachedOverlayEnd = trim?.attachedOverlayId
+        ? videoOverlays.find((overlay) => overlay.id === trim.attachedOverlayId)?.endSec
+        : undefined;
+      // A manually positioned or overlay-attached clip must start at its
+      // explicit point on the final timeline; transitions only make sense
+      // for the ordinary edge-to-edge sequence.
+      const hasExplicitStart = trim?.timelineStartSec != null || attachedOverlayEnd != null;
+      const requestedStart = trim?.timelineStartSec ?? attachedOverlayEnd;
+      const transitionType: TransitionType = i === 0 || hasExplicitStart ? "none" : (trim?.transitionType ?? "none");
       // Clamped so a transition can never eat more than either adjacent
       // clip actually has (a transition longer than the shorter of the two
       // clips it joins is meaningless, and would confuse ffmpeg's xfade).
       const transitionDuration =
         transitionType === "none" ? 0 : Math.max(0, Math.min(TRANSITION_DURATION_SECONDS, prevEffectiveDuration - 0.05, effectiveDuration - 0.05));
-      const timelineStart = Math.max(0, cursor - transitionDuration);
+      const timelineStart = requestedStart == null
+        ? Math.max(0, cursor - transitionDuration)
+        : Math.max(0, requestedStart);
       const timelineEnd = timelineStart + effectiveDuration;
       videoTimelineEntries.push({ item, timelineStart, timelineEnd, trimStart, trimEnd, speed, transitionType, transitionDuration });
       cursor = timelineEnd;
@@ -1946,7 +1967,7 @@ function StitchPageInner() {
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
     setVideoOverlays((previous) => [...previous, {
       id, file, previewUrl: URL.createObjectURL(file), sourceDuration: meta.duration,
-      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), sourceStart: 0, sourceEnd: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
+      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), audioStartSec: 0, sourceStart: 0, sourceEnd: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
     }]);
     setSelectedVideoOverlayId(id);
   }
@@ -1960,7 +1981,7 @@ function StitchPageInner() {
     const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
     const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
-    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: item.previewUrl, sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, position: "center", scalePercent: 100, muted: false }]);
+    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: item.previewUrl, sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, audioStartSec: startSec, position: "center", scalePercent: 100, muted: false }]);
     setSelectedVideoOverlayId(id);
   }
 
@@ -1985,6 +2006,24 @@ function StitchPageInner() {
     const end = Math.max(duration, totalVideoDuration);
     updateVideoOverlay(overlay.id, { startSec: Math.max(0, end - duration), endSec: end });
     setSelectedVideoOverlayId(overlay.id);
+  }
+
+  function attachNextClipToOverlay(overlay: VideoOverlay) {
+    // Pick the next yellow clip in the current timeline. This is normally
+    // the clip the pink title currently covers; it becomes responsive to the
+    // title's right edge whenever that edge is dragged.
+    const next = videoTimelineEntries.find((entry) => entry.timelineStart >= overlay.startSec - 0.05)
+      ?? videoTimelineEntries[videoTimelineEntries.length - 1];
+    if (!next) return;
+    updateItemTrim(next.item.id, { attachedOverlayId: overlay.id, timelineStartSec: undefined, transitionType: "none" });
+    setMediaPreparationMessage(`Attached the next lesson clip to this cutaway’s right edge (${formatTime(overlay.endSec)}). Drag the pink edge to move it together.`);
+  }
+
+  function freeMoveClip(item: VideoItem) {
+    const entry = videoTimelineEntries.find((candidate) => candidate.item.id === item.id);
+    if (!entry) return;
+    updateItemTrim(item.id, { attachedOverlayId: undefined, timelineStartSec: entry.timelineStart, transitionType: "none" });
+    setMediaPreparationMessage("Free-move enabled. Drag this yellow clip right to create a black gap, or left to place it earlier.");
   }
 
   // Full-screen overlays deliberately do not lengthen the main sequence.
@@ -2719,8 +2758,14 @@ function StitchPageInner() {
       // it joins is meaningless and would confuse ffmpeg's xfade/
       // acrossfade). The very first clip has nothing before it to
       // transition from.
+      const attachedOverlayEnds = items.map((item) => {
+        const overlayId = itemTrims[item.id]?.attachedOverlayId;
+        return overlayId ? videoOverlays.find((overlay) => overlay.id === overlayId)?.endSec : undefined;
+      });
+      const explicitTimelineStarts = items.map((item, i) => itemTrims[item.id]?.timelineStartSec ?? attachedOverlayEnds[i]);
       const transitions = items.map((item, i) => {
         if (i === 0) return { type: "none" as TransitionType, duration: 0 };
+        if (explicitTimelineStarts[i] != null) return { type: "none" as TransitionType, duration: 0 };
         const type = itemTrims[item.id]?.transitionType ?? "none";
         if (type === "none") return { type, duration: 0 };
         const duration = Math.max(0, Math.min(TRANSITION_DURATION_SECONDS, effectiveDurations[i - 1] - 0.05, effectiveDurations[i] - 0.05));
@@ -2730,7 +2775,20 @@ function StitchPageInner() {
       // however much each one overlaps two clips - what audio-track
       // placement and fade math below both need, not the naive sum of
       // individual clip lengths.
-      const totalDuration = effectiveDurations.reduce((sum, d, i) => sum + d - transitions[i].duration, 0);
+      // Explicit/attached starts create a deliberate black-and-silent gap
+      // before the clip. The visual overlay then fills that gap on pass 2.
+      // This is what makes a yellow lesson block genuinely begin at a pink
+      // title's right edge instead of merely looking aligned in the UI.
+      const gapBefore: number[] = [];
+      let exportCursor = 0;
+      for (let i = 0; i < items.length; i++) {
+        const requestedStart = explicitTimelineStarts[i];
+        const ordinaryStart = Math.max(0, exportCursor - transitions[i].duration);
+        const timelineStart = requestedStart == null ? ordinaryStart : Math.max(ordinaryStart, requestedStart);
+        gapBefore[i] = Math.max(0, timelineStart - exportCursor);
+        exportCursor = timelineStart + effectiveDurations[i];
+      }
+      const totalDuration = exportCursor;
 
       const { fetchFile } = await import("@ffmpeg/util");
       exportStep = "loading local FFmpeg";
@@ -2808,7 +2866,8 @@ function StitchPageInner() {
           // faster; by <1 plays later = slower) - the standard ffmpeg
           // speed-ramp idiom, combined into one expression rather than two
           // filter stages.
-          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=(PTS-STARTPTS)/${speeds[i]},${fade}scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=decrease,pad=${outputW}:${outputH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`;
+          const gap = gapBefore[i] > 0 ? `,tpad=start_duration=${gapBefore[i]}:start_mode=add:color=black` : "";
+          return `[${i}:v]trim=start=${trims[i].start}:end=${trims[i].end},setpts=(PTS-STARTPTS)/${speeds[i]},${fade}scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=decrease,pad=${outputW}:${outputH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30${gap}[v${i}]`;
         })
         .join(";");
 
@@ -2820,7 +2879,10 @@ function StitchPageInner() {
       // `loudnorm` filter.
       const audioChains = inputNames
         .map((_, i) => {
-          if (!hasAudio[i]) return `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${effectiveDurations[i]}[a${i}]`;
+          if (!hasAudio[i]) {
+            const delay = gapBefore[i] > 0 ? `,adelay=${Math.round(gapBefore[i] * 1000)}:all=1` : "";
+            return `anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration=${effectiveDurations[i]}${delay}[a${i}]`;
+          }
           const fade = fadeFilterFragment("afade", effectiveDurations[i], fades[i].fadeIn, fades[i].fadeOut);
           // `atempo` is the pitch-preserving speed change for audio (safe
           // in a single instance across ffmpeg's own supported [0.5,2.0]
@@ -2828,7 +2890,8 @@ function StitchPageInner() {
           // after the timestamp reset, before fade/loudnorm operate on
           // what's now this clip's real POST-speed audio.
           const loudness = skipLoudnorm ? "" : "loudnorm=I=-16:TP=-1.5:LRA=11,";
-          return `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,atempo=${speeds[i]},${fade}${loudness}aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100[a${i}]`;
+          const delay = gapBefore[i] > 0 ? `,adelay=${Math.round(gapBefore[i] * 1000)}:all=1` : "";
+          return `[${i}:a]atrim=start=${trims[i].start}:end=${trims[i].end},asetpts=PTS-STARTPTS,atempo=${speeds[i]},${fade}${loudness}aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100${delay}[a${i}]`;
         })
         .join(";");
 
@@ -2848,7 +2911,7 @@ function StitchPageInner() {
       let combineChain = "";
       let videoLabel = "[v0]";
       let audioLabel = "[a0]";
-      let cumulative = effectiveDurations[0];
+      let cumulative = gapBefore[0] + effectiveDurations[0];
       for (let i = 1; i < inputNames.length; i++) {
         const isLast = i === inputNames.length - 1;
         const nextVideoLabel = isLast ? "[outv]" : `[vout${i}]`;
@@ -2857,7 +2920,7 @@ function StitchPageInner() {
         if (tr.type === "none" || tr.duration <= 0) {
           combineChain += `;${videoLabel}[v${i}]concat=n=2:v=1:a=0${nextVideoLabel}`;
           combineChain += `;${audioLabel}[a${i}]concat=n=2:v=0:a=1${nextAudioLabel}`;
-          cumulative += effectiveDurations[i];
+          cumulative += gapBefore[i] + effectiveDurations[i];
         } else {
           // `offset` is where in the RUNNING combined stream (input 1's own
           // timeline) the transition should start - the last `duration`
@@ -2866,7 +2929,7 @@ function StitchPageInner() {
           const offset = Math.max(0, cumulative - tr.duration);
           combineChain += `;${videoLabel}[v${i}]xfade=transition=${tr.type}:duration=${tr.duration}:offset=${offset}${nextVideoLabel}`;
           combineChain += `;${audioLabel}[a${i}]acrossfade=d=${tr.duration}${nextAudioLabel}`;
-          cumulative += effectiveDurations[i] - tr.duration;
+          cumulative += gapBefore[i] + effectiveDurations[i] - tr.duration;
         }
         videoLabel = nextVideoLabel;
         audioLabel = nextAudioLabel;
@@ -3057,7 +3120,8 @@ function StitchPageInner() {
             pass2VideoLabel = nextLabel;
             if (!overlay.muted && await hasAudioStream(ffmpeg, name)) {
               const audioLabel = `[vidaudio${i}]`;
-              const delayMs = Math.round(start * 1000);
+              const audioStart = Math.max(0, Math.min(overlay.audioStartSec ?? start, totalDuration));
+              const delayMs = Math.round(audioStart * 1000);
               pass2FilterComplex += `;[${inputIndex}:a]atrim=start=0:end=${overlayWindow},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=44100${audioLabel}`;
               pass2AudioLabels.push(audioLabel);
             }
@@ -3568,17 +3632,30 @@ function StitchPageInner() {
                       const thumb = itemThumbnails[item.id];
                       const fullDuration = itemDurations[item.id];
                       const timelineEntry = videoTimelineEntries[itemIndex];
+                      const previousTimelineEnd = itemIndex > 0 ? videoTimelineEntries[itemIndex - 1]?.timelineEnd ?? 0 : 0;
+                      const blankGapBefore = Math.max(0, (timelineEntry?.timelineStart ?? 0) - previousTimelineEnd);
                       const isDragging = reorderDrag?.id === item.id;
                       return (
                         <div
                           key={item.id}
-                          onPointerDown={(e) => handleReorderPointerDown(e, itemIndex)}
+                          onPointerDown={(e) => {
+                            if (trim?.timelineStartSec != null) {
+                              makeAxisDragHandler(
+                                () => timelineEntry?.timelineStart ?? trim.timelineStartSec ?? 0,
+                                (v) => updateItemTrim(item.id, { timelineStartSec: Math.max(0, v), attachedOverlayId: undefined, transitionType: "none" }),
+                                clipBoundaries,
+                              )(e);
+                              return;
+                            }
+                            handleReorderPointerDown(e, itemIndex);
+                          }}
                           style={{
                             width: Math.max(48, duration * timelinePixelsPerSecond),
+                            marginLeft: blankGapBefore * timelinePixelsPerSecond,
                             transform: isDragging ? `translateX(${reorderDrag!.offsetPx}px)` : undefined,
                             zIndex: isDragging ? 20 : undefined,
                           }}
-                          title={`Video ${itemIndex + 1}: ${formatTime(timelineEntry?.timelineStart ?? 0)}–${formatTime(timelineEntry?.timelineEnd ?? duration)}. Drag amber edges to mask start/end. Right-click to unmask (use full source).`}
+                          title={`${trim?.timelineStartSec != null ? "Free-positioned" : trim?.attachedOverlayId ? "Attached to a pink cutaway" : "Video"} ${itemIndex + 1}: ${formatTime(timelineEntry?.timelineStart ?? 0)}–${formatTime(timelineEntry?.timelineEnd ?? duration)}. Drag amber edges to mask start/end. Right-click to unmask (use full source).`}
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -3702,6 +3779,22 @@ function StitchPageInner() {
                               >
                                 Audio −3s
                               </button>
+                            )}
+                            {trim?.attachedOverlayId && (
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); freeMoveClip(item); }}
+                                title="Release this clip from the cutaway edge, then drag the yellow block anywhere on the timeline. Empty space exports as black video."
+                                className="flex h-4 items-center justify-center rounded-full bg-sky-700/90 px-1 text-[7px] font-bold text-white"
+                              >
+                                Free move
+                              </button>
+                            )}
+                            {trim?.timelineStartSec != null && (
+                              <span title="Drag the yellow clip itself to move it freely on the timeline." className="flex h-4 items-center justify-center rounded-full bg-sky-800/90 px-1 text-[7px] font-bold text-sky-100">
+                                Free position
+                              </span>
                             )}
                             {trim && fullDuration != null && (
                               <button
@@ -3839,7 +3932,7 @@ function StitchPageInner() {
                   </div>
               <div className="space-y-1">
                 {videoOverlays.map((overlay) => (
-                  <div key={overlay.id} className="relative h-10 rounded-lg bg-fuchsia-500/10">
+                  <div key={overlay.id} className="relative h-[4.75rem] rounded-lg bg-fuchsia-500/10">
                     <div
                       style={{ marginLeft: overlay.startSec * timelinePixelsPerSecond, width: Math.max(70, (overlay.endSec - overlay.startSec) * timelinePixelsPerSecond) }}
                       onContextMenu={(e) => {
@@ -3851,13 +3944,31 @@ function StitchPageInner() {
                       className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
                       <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const d = overlay.endSec - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: Math.max(0, v), endSec: Math.max(0, v) + d }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
-                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); insertOverlayIntoSequence(overlay); }} title="Make this logo or title a real sequence clip. The next lesson clip snaps directly after it instead of playing below it." className="absolute left-2 top-5 z-30 rounded bg-fuchsia-950/90 px-1 text-[8px] font-semibold text-white">Insert in sequence</button>
+                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); attachNextClipToOverlay(overlay); }} title="Attach the next yellow lesson clip to this pink cutaway’s right edge. Moving the cutaway end moves that lesson clip too." className="absolute left-2 top-5 z-30 rounded bg-emerald-800/95 px-1 text-[8px] font-semibold text-white">Attach next clip</button>
+                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); insertOverlayIntoSequence(overlay); }} title="Make this logo or title a real sequence clip. The next lesson clip snaps directly after it instead of playing below it." className="absolute left-24 top-5 z-30 rounded bg-fuchsia-950/90 px-1 text-[8px] font-semibold text-white">Insert in sequence</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); placeVideoOverlayAtEnd(overlay); }} title="Place this cutaway at the end of the main video" className="absolute right-24 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Place at end</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this edge right to mask/crop the beginning" className="absolute inset-y-0 left-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.endSec, (v) => { const nextEnd = Math.max(overlay.startSec + 0.2, v); const cut = overlay.endSec - nextEnd; updateVideoOverlay(overlay.id, { endSec: nextEnd, sourceEnd: Math.max(overlay.sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd - cut)) }); }, clipBoundaries)(e); }} title="Drag this edge left to mask/crop the end" className="absolute inset-y-0 right-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
                     </div>
+                    {!overlay.muted && (
+                      <div
+                        style={{ marginLeft: (overlay.audioStartSec ?? overlay.startSec) * timelinePixelsPerSecond, width: Math.max(70, (overlay.sourceEnd - overlay.sourceStart) * timelinePixelsPerSecond) }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          makeAxisDragHandler(
+                            () => overlay.audioStartSec ?? overlay.startSec,
+                            (v) => updateVideoOverlay(overlay.id, { audioStartSec: Math.max(0, v) }),
+                            clipBoundaries,
+                          )(e);
+                        }}
+                        title="Overlay audio. Drag this green bar left to start its sound before the pink picture appears."
+                        className="absolute bottom-1 z-20 h-5 cursor-grab rounded bg-emerald-500/85 px-2 text-[8px] font-bold leading-5 text-emerald-950"
+                      >
+                        Overlay audio · drag independently
+                      </div>
+                    )}
                   </div>
                 ))}
                 <p className="px-1 text-[10px] text-fuchsia-100/75">Use an overlay when a logo/title should cover a clip that is already playing. For a real <strong>logo/title → next lesson clip</strong> sequence, choose <strong>Insert in sequence</strong>; the next clip magnetically follows it. On that next clip, choose <strong>Audio −3s</strong> to hear its source three seconds before its picture appears.</p>
