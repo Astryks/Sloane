@@ -103,6 +103,16 @@ type ImageOverlay = {
 
 // A full-screen video layer over the main sequence. Its audio is independent
 // so a cutaway can keep its sound, or the editor can mute either source.
+type VideoOverlayLayout = "full" | "bubble-top-right" | "bubble-bottom-right" | "split-left" | "split-right";
+const VIDEO_OVERLAY_LAYOUTS: VideoOverlayLayout[] = ["full", "bubble-top-right", "bubble-bottom-right", "split-left", "split-right"];
+const VIDEO_OVERLAY_LAYOUT_LABELS: Record<VideoOverlayLayout, string> = {
+  full: "Full screen",
+  "bubble-top-right": "Bubble ↗",
+  "bubble-bottom-right": "Bubble ↘",
+  "split-left": "Split left",
+  "split-right": "Split right",
+};
+
 type VideoOverlay = {
   id: string;
   file: File;
@@ -119,6 +129,7 @@ type VideoOverlay = {
   // False by default: overlay sound follows its picture. Only becomes true
   // after the editor explicitly separates/slips the audio.
   audioDetached?: boolean;
+  layout?: VideoOverlayLayout;
   position: ImageOverlay["position"];
   scalePercent: number;
   muted: boolean;
@@ -1069,7 +1080,7 @@ function StitchPageInner() {
         items: items.map(({ id, file }) => ({ id, file })),
       audioTracks: audioTracks.map((track) => ({ id: track.id, file: track.file, sourceDuration: track.sourceDuration, sourceStart: track.sourceStart ?? 0, sourceEnd: track.sourceEnd ?? track.sourceDuration, startSec: track.startSec, endSec: track.endSec, fadeIn: track.fadeIn, fadeOut: track.fadeOut, volume: track.volume, kind: track.kind })),
         imageOverlays: imageOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent })),
-        videoOverlays: videoOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, sourceDuration: overlay.sourceDuration, sourceStart: overlay.sourceStart, sourceEnd: overlay.sourceEnd, startSec: overlay.startSec, endSec: overlay.endSec, audioStartSec: overlay.audioStartSec ?? overlay.startSec, audioDetached: overlay.audioDetached ?? false, position: overlay.position, scalePercent: overlay.scalePercent, muted: overlay.muted })),
+        videoOverlays: videoOverlays.map((overlay) => ({ id: overlay.id, file: overlay.file, sourceDuration: overlay.sourceDuration, sourceStart: overlay.sourceStart, sourceEnd: overlay.sourceEnd, audioStartSec: overlay.audioStartSec ?? overlay.startSec, audioDetached: overlay.audioDetached ?? false, layout: overlay.layout ?? "full", startSec: overlay.startSec, endSec: overlay.endSec, position: overlay.position, scalePercent: overlay.scalePercent, muted: overlay.muted })),
         textOverlays,
         itemTrims,
         aspectPreset,
@@ -2001,7 +2012,7 @@ function StitchPageInner() {
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
     setVideoOverlays((previous) => [...previous, {
       id, file, previewUrl: URL.createObjectURL(file), sourceDuration: meta.duration,
-      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), audioStartSec: 0, audioDetached: false, sourceStart: 0, sourceEnd: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
+      startSec: 0, endSec: Math.min(10, meta.duration, totalVideoDuration || 10), audioStartSec: 0, audioDetached: false, layout: "full", sourceStart: 0, sourceEnd: Math.min(10, meta.duration, totalVideoDuration || 10), position: "center", scalePercent: 100, muted: false,
     }]);
     setSelectedVideoOverlayId(id);
   }
@@ -2015,7 +2026,7 @@ function StitchPageInner() {
     const availableDuration = totalVideoDuration > startSec ? totalVideoDuration - startSec : duration;
     const usableDuration = Math.min(duration, maxDuration ?? availableDuration);
     const id = `video-overlay-${++videoOverlayIdRef.current}`;
-    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: item.previewUrl, sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, audioStartSec: startSec, audioDetached: false, position: "center", scalePercent: 100, muted: false }]);
+    setVideoOverlays((previous) => [...previous, { id, file: item.file, previewUrl: item.previewUrl, sourceDuration, sourceStart, sourceEnd: Math.min(sourceEnd, sourceStart + usableDuration), startSec, endSec: startSec + usableDuration, audioStartSec: startSec, audioDetached: false, layout: "full", position: "center", scalePercent: 100, muted: false }]);
     setSelectedVideoOverlayId(id);
   }
 
@@ -2033,6 +2044,12 @@ function StitchPageInner() {
 
   function updateVideoOverlay(id: string, patch: Partial<Omit<VideoOverlay, "id" | "file" | "previewUrl" | "sourceDuration">>) {
     setVideoOverlays((previous) => previous.map((overlay) => overlay.id === id ? { ...overlay, ...patch } : overlay));
+  }
+
+  function cycleVideoOverlayLayout(overlay: VideoOverlay) {
+    const current = overlay.layout ?? "full";
+    const next = VIDEO_OVERLAY_LAYOUTS[(VIDEO_OVERLAY_LAYOUTS.indexOf(current) + 1) % VIDEO_OVERLAY_LAYOUTS.length];
+    updateVideoOverlay(overlay.id, { layout: next });
   }
 
   function removeVideoOverlay(id: string) {
@@ -3092,9 +3109,19 @@ function StitchPageInner() {
             const inputIndex = pass2NextInputIndex++;
             const scaledLabel = `[vidscaled${i}]`;
             const nextLabel = `[vidout${i}]`;
+            const layout = overlay.layout ?? "full";
+            const isSplit = layout === "split-left" || layout === "split-right";
+            const isBubble = layout === "bubble-top-right" || layout === "bubble-bottom-right";
+            const boxW = isSplit ? Math.round(outputW / 2) : isBubble ? Math.round(outputW * 0.3) : outputW;
+            const boxH = isSplit ? outputH : isBubble ? Math.round(outputH * 0.3) : outputH;
+            const scaleFilter = isBubble
+              ? `scale=w=${boxW}:h=${boxH}:force_original_aspect_ratio=decrease,pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black`
+              : `scale=w=${boxW}:h=${boxH}:force_original_aspect_ratio=increase,crop=${boxW}:${boxH}`;
+            const x = layout === "split-right" || layout === "bubble-top-right" || layout === "bubble-bottom-right" ? outputW - boxW - (isBubble ? 36 : 0) : 0;
+            const y = layout === "bubble-bottom-right" ? outputH - boxH - 36 : 0;
             // Source window already extracted — trim relative to the small file.
-            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]trim=start=0:end=${overlayWindow},setpts=PTS-STARTPTS,scale=w=${outputW}:h=${outputH}:force_original_aspect_ratio=increase,crop=${outputW}:${outputH}${scaledLabel}`;
-            pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=0:y=0:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
+            pass2FilterComplex += `${pass2FilterComplex ? ";" : ""}[${inputIndex}:v]trim=start=0:end=${overlayWindow},setpts=PTS-STARTPTS,${scaleFilter}${scaledLabel}`;
+            pass2FilterComplex += `;${pass2VideoLabel}${scaledLabel}overlay=x=${x}:y=${y}:shortest=1:enable='between(t,${start},${end})'${nextLabel}`;
             pass2VideoLabel = nextLabel;
             if (!overlay.muted && await hasAudioStream(ffmpeg, name)) {
               const audioLabel = `[vidaudio${i}]`;
@@ -3353,6 +3380,16 @@ function StitchPageInner() {
               </div>
               {videoOverlays.map((overlay) => {
                 const active = previewTime >= overlay.startSec && previewTime < overlay.endSec;
+                const layout = overlay.layout ?? "full";
+                const layoutClass = layout === "full"
+                  ? "inset-0 h-full w-full object-cover"
+                  : layout === "bubble-top-right"
+                    ? "right-3 top-3 h-auto w-[30%] rounded-lg border-2 border-white/80 object-cover shadow-lg"
+                    : layout === "bubble-bottom-right"
+                      ? "bottom-3 right-3 h-auto w-[30%] rounded-lg border-2 border-white/80 object-cover shadow-lg"
+                      : layout === "split-left"
+                        ? "bottom-0 left-0 top-0 h-full w-1/2 object-cover"
+                        : "bottom-0 right-0 top-0 h-full w-1/2 object-cover";
                 return (
                   <video
                     key={overlay.id}
@@ -3360,7 +3397,7 @@ function StitchPageInner() {
                     src={active ? overlay.previewUrl : undefined}
                     preload="none"
                     muted={previewMuted || overlay.muted} playsInline
-                    className={`absolute inset-0 h-full w-full object-cover ${active ? "block" : "hidden"}`}
+                    className={`absolute ${layoutClass} ${active ? "block" : "hidden"}`}
                   />
                 );
               })}
@@ -3908,6 +3945,7 @@ function StitchPageInner() {
                       className={`group absolute inset-y-0 overflow-hidden rounded-lg border-2 bg-fuchsia-700/80 ${overlay.id === selectedVideoOverlayId ? "border-fuchsia-100 ring-2 ring-fuchsia-300/60" : "border-fuchsia-300"}`}>
                       <div onPointerDown={(e) => { setSelectedVideoOverlayId(overlay.id); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, v); const d = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, endSec: nextStart + (overlay.endSec - overlay.startSec), ...(overlay.audioDetached ? {} : { audioStartSec: Math.max(0, (overlay.audioStartSec ?? overlay.startSec) + d) }) }); }, clipBoundaries)(e); }} className="absolute inset-0 cursor-grab" />
                       <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-bold text-white">Overlay video · full screen</span>
+                      <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); cycleVideoOverlayLayout(overlay); }} title="Cycle layout: full screen, presenter bubble, or split screen." className="absolute left-2 top-5 z-30 rounded bg-fuchsia-950/90 px-1.5 text-[8px] font-semibold text-white">{VIDEO_OVERLAY_LAYOUT_LABELS[overlay.layout ?? "full"]}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); updateVideoOverlay(overlay.id, { muted: !overlay.muted }); }} className="absolute right-12 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">{overlay.muted ? "Unmute overlay" : "Mute overlay"}</button>
                       <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); removeVideoOverlay(overlay.id); }} className="absolute right-1 top-1 z-10 rounded bg-black/70 px-1 text-[8px] font-semibold text-white">Delete</button>
                       <div onPointerDown={(e) => { e.stopPropagation(); makeAxisDragHandler(() => overlay.startSec, (v) => { const nextStart = Math.max(0, Math.min(v, overlay.endSec - 0.2)); const cut = nextStart - overlay.startSec; updateVideoOverlay(overlay.id, { startSec: nextStart, ...(overlay.audioDetached ? {} : { audioStartSec: nextStart }), sourceStart: Math.min(overlay.sourceEnd - 0.2, Math.max(0, overlay.sourceStart + cut)) }); }, clipBoundaries)(e); }} title="Drag this edge right to mask/crop the beginning" className="absolute inset-y-0 left-0 z-20 w-3 cursor-ew-resize bg-fuchsia-300/80" />
