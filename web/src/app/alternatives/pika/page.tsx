@@ -6,11 +6,11 @@ import { CtaRow, FaqSection, SeoCard, faqJsonLd, type SeoFaqItem } from "@/lib/s
 const FAQS: SeoFaqItem[] = [
   {
     q: "Is Lucy the same as Pika?",
-    a: "No. Pika is its own AI video product. Lucy is a creative AI toolkit with multi-model pay-as-you-go video, stills, voice, /ads, and free /stitch. Lucy does not claim to match Pika feature-for-feature.",
+    a: "No. Pika is its own AI video product. Lucy is a creative AI toolkit with multi-model pay-as-you-go video, stills, /ads, and free /stitch. Lucy does not claim to match Pika feature-for-feature.",
   },
   {
     q: "When might Lucy fit as a Pika alternative?",
-    a: "When you want several leading AI video models in one place plus stills, voiceover, storyboard-to-video, and a free browser editor to combine AI clips.",
+    a: "When you want several leading AI video models in one place plus stills, storyboard-to-video, and a free browser editor to combine AI clips.",
   },
 ];
 
@@ -24,7 +24,7 @@ export default function Page() {
           <p>
             Searching for a <strong className="text-foreground">Pika alternative</strong>? Lucy Labs
             is built for makers who want text to video / image to video across leading models,
-            prepaid stills, AI voice for video,{" "}
+            prepaid stills,{" "}
             <Link href="/ads" className="font-semibold text-purple hover:underline">storyboard ads</Link>, and a{" "}
             <Link href="/stitch" className="font-semibold text-purple hover:underline">free browser video editor</Link>.
             Prefer Pika when you specifically want Pika’s product.

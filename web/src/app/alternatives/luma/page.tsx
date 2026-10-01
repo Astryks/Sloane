@@ -6,11 +6,11 @@ import { CtaRow, FaqSection, SeoCard, faqJsonLd, type SeoFaqItem } from "@/lib/s
 const FAQS: SeoFaqItem[] = [
   {
     q: "Is Lucy the same as Luma?",
-    a: "No. Luma (Dream Machine and related products) is its own AI video offering. Lucy Labs is a separate multi-model toolkit with stills, voice, /ads, and /stitch. Lucy does not claim to be identical to Luma.",
+    a: "No. Luma (Dream Machine and related products) is its own AI video offering. Lucy Labs is a separate multi-model toolkit with stills, /ads, and /stitch. Lucy does not claim to be identical to Luma.",
   },
   {
     q: "When might Lucy fit as a Luma alternative?",
-    a: "When you want pay-as-you-go access across several leading models plus stills, voiceover, ad storyboarding, and free in-browser stitch — not only one lab’s stack.",
+    a: "When you want pay-as-you-go access across several leading models plus stills, ad storyboarding, and free in-browser stitch — not only one lab’s stack.",
   },
 ];
 
@@ -24,8 +24,7 @@ export default function Page() {
           <p>
             Searching for a <strong className="text-foreground">Luma alternative</strong>? Lucy Labs
             packages <Link href="/ai-video-generation" className="font-semibold text-purple hover:underline">AI video generation</Link>{" "}
-            across leading models with stills,{" "}
-            <Link href="/text-to-voice" className="font-semibold text-purple hover:underline">voice</Link>, and free stitch.
+            across leading models with stills and free stitch.
             Prefer Luma when you specifically want Luma’s product experience.
           </p>
           <CtaRow primaryHref="/" primaryLabel="Generate on Lucy" secondaryHref="/models" secondaryLabel="AI video models" />

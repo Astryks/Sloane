@@ -6,20 +6,20 @@ import { CtaRow, FaqSection, SeoCard, faqJsonLd, type SeoFaqItem } from "@/lib/s
 const FAQS: SeoFaqItem[] = [
   {
     q: "Is Lucy Labs the same as Runway?",
-    a: "No. Runway is its own creative suite. Lucy is a separate creative AI toolkit: pay-as-you-go multi-model video, prepaid stills, voice, /ads storyboards, and a free browser stitch editor. Lucy does not claim feature parity with Runway.",
+    a: "No. Runway is its own creative suite. Lucy is a separate creative AI toolkit: pay-as-you-go multi-model video, prepaid stills, /ads storyboards, and a free browser stitch editor. Lucy does not claim feature parity with Runway.",
   },
   {
     q: "What about CapCut AI or InVideo?",
-    a: "Those products emphasize template/editor-led workflows. Lucy focuses on generating clips across leading AI video models, then stitching or storyboarding. Prefer CapCut AI / InVideo when you want their template ecosystems; prefer Lucy for multi-model generation + stills + voice + free /stitch.",
+    a: "Those products emphasize template/editor-led workflows. Lucy focuses on generating clips across leading AI video models, then stitching or storyboarding. Prefer CapCut AI / InVideo when you want their template ecosystems; prefer Lucy for multi-model generation + stills + free /stitch.",
   },
   {
     q: "When might someone prefer Lucy as a Runway alternative?",
-    a: "Makers who want multi-model text/image to video plus stills, voice, ad storyboarding, and free in-browser stitch — with pay-as-you-go video tryable without signup.",
+    a: "Makers who want multi-model text/image to video plus stills, ad storyboarding, and free in-browser stitch — with pay-as-you-go video tryable without signup.",
   },
 ];
 
 const ROWS: [string, string, string][] = [
-  ["Focus", "Runway’s own models & suite", "Multi-model toolkit + stills + voice + stitch"],
+  ["Focus", "Runway’s own models & suite", "Multi-model toolkit + stills + stitch"],
   ["Video", "Generate/edit in Runway", "Pay-as-you-go across leading models; try without signup"],
   ["Ads / UGC", "Depends on Runway tools", "/ads storyboard to video; UGC-style short clips"],
   ["Longer cuts", "In-product editing", "Free /stitch browser editor on your device"],
@@ -32,13 +32,13 @@ export default function Page() {
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
         <SiteHeader
           title="Runway alternative for AI video"
-          subtitle="Multi-model video, stills, voice, storyboards, free stitch — not a Runway clone."
+          subtitle="Multi-model video, stills, storyboards, free stitch — not a Runway clone."
         />
         <SeoCard title="Honest take">
           <p>
             Searching for a <strong className="text-foreground">Runway alternative</strong> (or
             comparing CapCut AI / InVideo-style editors)? Lucy Labs helps you generate AI videos and
-            stills, add voice, storyboard ads, and stitch longer cuts in a free browser editor. Lucy
+            stills, storyboard ads, and stitch longer cuts in a free browser editor. Lucy
             is <strong className="text-foreground">not identical</strong> to Runway, CapCut AI, or
             InVideo.
           </p>

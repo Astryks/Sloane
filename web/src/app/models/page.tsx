@@ -10,7 +10,7 @@ const FAQS: SeoFaqItem[] = [
   },
   {
     q: "Is Lucy multi-model?",
-    a: "Yes. Lucy is a creative AI toolkit — not a single-model lab. Pick among leading AI video models for text to video or image to video, then use stills, voice, /ads, and /stitch in the same workflow.",
+    a: "Yes. Lucy is a creative AI toolkit — not a single-model lab. Pick among leading AI video models for text to video or image to video, then use stills, /ads, and /stitch in the same workflow.",
   },
   {
     q: "Where are Seedance, Veo, and Kling explained?",
@@ -37,7 +37,7 @@ export default function Page() {
             including <strong className="text-foreground">Seedance 2.0</strong>,{" "}
             <strong className="text-foreground">Seedance 2.5</strong>,{" "}
             <strong className="text-foreground">Veo</strong>, and{" "}
-            <strong className="text-foreground">Kling / Kling AI</strong> — plus stills, voice,
+            <strong className="text-foreground">Kling / Kling AI</strong> — plus stills,
             storyboard ads, and a free browser stitch editor.
           </p>
           <ul className="list-disc space-y-2 pl-5">

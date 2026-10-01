@@ -5,11 +5,11 @@ import { Footer } from "@/components/Footer";
 const FAQS: { q: string; a: string }[] = [
   {
     q: "What is Lucy Labs?",
-    a: "Lucy Labs is a web app at lucylabs.app for AI video, stills, and voice. It is part of the Astryks Group. You can generate short videos from a prompt, make stills on Lucy, use text-to-speech or voice cloning, build ad storyboards, and combine clips in a free browser editor.",
+    a: "Lucy Labs is a web app at lucylabs.app for AI video and stills. It is part of the Astryks Group. You can generate short videos from a prompt, make stills on Lucy, build ad storyboards, and combine clips in a free browser editor. Voice generation and voice cloning are no longer offered.",
   },
   {
     q: "Do I need an account to try it?",
-    a: "No account is required to try pay-as-you-go video on the home page or to use the free stitch editor at /stitch. An account and a paid plan are required for voice cloning. Still packs and video credits use checkout when you buy them.",
+    a: "No account is required to try pay-as-you-go video on the home page or to use the free stitch editor at /stitch. Still packs and video credits use checkout when you buy them.",
   },
   {
     q: "What is the free video editor?",
@@ -25,7 +25,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "Where is pricing?",
-    a: "Plans and credits for AI video, stills, and voice are on /billing. The home page also shows the current pay-as-you-go video price in the generator.",
+    a: "Plans and credits for AI video and stills are on /billing. The home page also shows the current pay-as-you-go video price in the generator.",
   },
 ];
 
@@ -52,7 +52,7 @@ export default function AboutPage() {
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
         <SiteHeader
           title="About Lucy Labs"
-          subtitle="Plain facts about AI video, stills, voice, and the free tools on lucylabs.app."
+          subtitle="Plain facts about AI video, stills, and the free tools on lucylabs.app."
         />
 
         <section className="rounded-[28px] border border-white/60 bg-surface/90 p-6 shadow-soft backdrop-blur-xl sm:p-8">
@@ -63,7 +63,7 @@ export default function AboutPage() {
               <a href="https://lucylabs.app" className="underline decoration-border hover:text-foreground">
                 lucylabs.app
               </a>
-              ) helps you make <strong className="text-foreground">AI video, stills, and voice</strong> in
+              ) helps you make <strong className="text-foreground">AI video and stills</strong> in
               one place. Part of the Astryks Group.
             </p>
             <ul className="list-disc space-y-2 pl-5">
@@ -71,7 +71,7 @@ export default function AboutPage() {
                 <Link href="/" className="font-semibold text-purple hover:underline">
                   Home
                 </Link>{" "}
-                — prompt-to-video with leading models, Prompt Guide, stills on Lucy, and voice tools.
+                — prompt-to-video with leading models, Prompt Guide, and stills on Lucy.
               </li>
               <li>
                 <Link href="/ai-video-generation" className="font-semibold text-purple hover:underline">
@@ -101,7 +101,7 @@ export default function AboutPage() {
                 <Link href="/billing" className="font-semibold text-purple hover:underline">
                   Pricing
                 </Link>{" "}
-                — plans and credits for video, stills, and voice.
+                — plans and credits for video and stills.
               </li>
             </ul>
             <p>

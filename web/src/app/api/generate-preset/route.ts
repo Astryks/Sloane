@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getSubscriberByToken, checkQuota, reserveCharacterUsage, checkFreeQuota, recordFreeUsage, createPendingGeneration, initSchema } from "@/lib/db";
 import { getInferenceBackend, generateViaPod, generateViaCascade, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
+import { isOwner } from "@/lib/owner";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 import { PLANS } from "@/lib/plans";
 import { publicJson } from "@/lib/mediaProxy";
@@ -34,6 +35,14 @@ export async function POST(req: NextRequest) {
   // "Internal S"... is not valid JSON" - reported live 2026-09-09).
   try {
     await initSchema();
+    // Shut down for the public (2026-10-01 Modal cost emergency - see
+    // STATUS.md): the standalone voice generator is owner-only now, checked
+    // before any quota/GPU-touching work below so a non-owner request can
+    // never reach Modal/RunPod.
+    const sessionUser = await getSessionUser();
+    if (!isOwner(sessionUser)) {
+      return publicJson({ error: "Voice generation is no longer offered." }, { status: 403 });
+    }
     const form = await req.formData();
     const text = String(form.get("text") ?? "").trim();
     const accessToken = String(form.get("access_token") ?? "");
@@ -76,7 +85,6 @@ export async function POST(req: NextRequest) {
     const voiceId = String(form.get("voice_id") ?? "");
     const exaggeration = form.get("exaggeration");
     const speed = form.get("speed");
-    const sessionUser = await getSessionUser();
 
     const backend = await getInferenceBackend();
     const jobInput = {

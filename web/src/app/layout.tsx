@@ -13,7 +13,7 @@ const nunito = Nunito({
 const siteUrl = "https://lucylabs.app";
 const defaultTitle = "Lucy Labs";
 const defaultDescription =
-  "Make AI video, stills, and voice on Lucy Labs — generate clips with leading models, stills on Lucy, text-to-speech and voice clone, plus a free browser video editor. No signup required to try video.";
+  "Make AI video and stills on Lucy Labs — generate clips with leading models, stills on Lucy, plus a free browser video editor. No signup required to try video.";
 
 export const metadata: Metadata = {
   verification: {
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "Lucy Labs — AI video, stills & voice",
+        alt: "Lucy Labs — AI video & stills",
       },
     ],
   },

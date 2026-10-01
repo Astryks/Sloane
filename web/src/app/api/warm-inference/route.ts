@@ -1,29 +1,30 @@
 import { warmInferenceBackend } from "@/lib/inferenceBackend";
 import { getSetting, setSetting, initSchema } from "@/lib/db";
+import { getSessionUser } from "@/lib/auth";
+import { isOwner } from "@/lib/owner";
 import { publicJson } from "@/lib/mediaProxy";
 
-// Called by the client the moment someone opens the generation page (see
-// web/src/app/page.tsx and mobile/App.tsx) - fires a background warm-up
-// ping at Modal well before the user finishes typing and hits Generate for
-// real, so the container is often already warm by then instead of paying
-// the full cold-start cost on the request that actually matters. Always
-// returns 200 - a failed warm-up ping should never surface to the user,
-// worst case they just hit the normal cold-start path on Generate.
+// Owner-only now (2026-10-01 Modal cost emergency - see STATUS.md). This
+// used to fire unconditionally from every homepage visit (web/src/app/
+// page.tsx's Home()), which meant any traffic cadence faster than the
+// Modal container's scaledown_window (5 min) - bots, crawlers, ordinary
+// browsing - kept a real L40S GPU billed around the clock for a feature
+// most visitors never used. That auto-fire was removed outright; this
+// gate is defense in depth so the route does nothing for the general
+// public even if something else ever calls it again.
 //
-// Real fix (security audit, 2026-09-16): this is public and unauthenticated
-// by necessity (anonymous visitors need to trigger it too), but each call
-// spins up a real, billed Modal container boot with no rate limit at all -
-// a loop hitting this endpoint could force repeated cold starts for free.
-// A short global cooldown (coarse, not per-user - there's no identity to
-// key on here) means a spam loop only pays for one real warm-up per
-// window, not one per request; legitimate visitors overlapping that same
-// window just ride the container someone else already warmed, which is
-// the correct outcome anyway.
+// Previous fix (security audit, 2026-09-16) kept for the one caller that
+// remains (the owner's own warm-up): the cooldown still avoids a stray
+// double-fire from re-triggering Modal's container boot twice back to back.
 const WARM_COOLDOWN_MS = 20_000;
 const LAST_WARM_SETTING_KEY = "inference_last_warm_at";
 
 export async function POST() {
   await initSchema();
+  const sessionUser = await getSessionUser();
+  if (!isOwner(sessionUser)) {
+    return publicJson({ ok: false, skipped: "owner-only" });
+  }
   const lastWarmAt = await getSetting(LAST_WARM_SETTING_KEY);
   if (lastWarmAt && Date.now() - new Date(lastWarmAt).getTime() < WARM_COOLDOWN_MS) {
     return publicJson({ ok: true, skipped: "cooldown" });

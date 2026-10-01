@@ -10,7 +10,7 @@ const FAQS: SeoFaqItem[] = [
   },
   {
     q: "Is Lucy only Veo?",
-    a: "No. Lucy is multi-model — Veo sits alongside Seedance, Kling, and other options shown on the home page, plus stills, voice, /ads, and /stitch.",
+    a: "No. Lucy is multi-model — Veo sits alongside Seedance, Kling, and other options shown on the home page, plus stills, /ads, and /stitch.",
   },
 ];
 

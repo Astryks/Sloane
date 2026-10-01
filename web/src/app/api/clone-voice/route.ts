@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getSubscriberByToken, checkQuota, reserveCharacterUsage, createPendingGeneration, initSchema, recordConsent } from "@/lib/db";
 import { getInferenceBackend, generateViaPod, generateViaCascade, submitGenerationJob } from "@/lib/inferenceBackend";
 import { getSessionUser } from "@/lib/auth";
+import { isOwner } from "@/lib/owner";
 import { saveGenerationAudio } from "@/lib/generationHistory";
 import { PLANS } from "@/lib/plans";
 import { publicJson } from "@/lib/mediaProxy";
@@ -49,6 +50,14 @@ const MAX_REFERENCE_AUDIO_BYTES = 7 * 1024 * 1024;
 export async function POST(req: NextRequest) {
   try {
     await initSchema();
+    // Shut down for the public (2026-10-01 Modal cost emergency - see
+    // STATUS.md): the standalone voice-cloning tool is owner-only now,
+    // checked before any quota/GPU-touching work below so a non-owner
+    // request can never reach Modal/RunPod.
+    const sessionUser = await getSessionUser();
+    if (!sessionUser || !isOwner(sessionUser)) {
+      return publicJson({ error: "Voice generation is no longer offered." }, { status: 403 });
+    }
     const form = await req.formData();
     const text = String(form.get("text") ?? "").trim();
     const accessToken = String(form.get("access_token") ?? "");
@@ -70,10 +79,8 @@ export async function POST(req: NextRequest) {
     // paid plan (access_token below), and per clone, whose voice it is plus
     // the typed consent statement. Checked before the paid-plan/quota
     // steps so nothing is reserved for someone who can't clone yet.
-    const sessionUser = await getSessionUser();
-    if (!sessionUser) {
-      return publicJson({ error: "Create an account or sign in to clone a voice." }, { status: 401 });
-    }
+    // (sessionUser is already known non-null here - the isOwner gate above
+    // requires a real signed-in account.)
     const voiceOwner = String(form.get("voice_owner") ?? "");
     const speakerName = String(form.get("speaker_name") ?? "").trim().slice(0, 120);
     if (voiceOwner !== "self" && voiceOwner !== "other") {

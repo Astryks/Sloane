@@ -1953,10 +1953,18 @@ export default function Home() {
       }
     }
   }, []);
+  // Voice generation/cloning is owner-only now (2026-10-01 Modal cost
+  // emergency - see STATUS.md): this used to also fire a warm-up ping at
+  // Modal on every single homepage visit here, which kept a real GPU
+  // billed around the clock regardless of actual usage. That ping is gone
+  // outright; this just tells the render below whether to show the
+  // voice tools at all (see /api/me and isOwner in lib/owner.ts).
+  const [isOwnerUi, setIsOwnerUi] = useState(false);
   useEffect(() => {
-    // Fire-and-forget: wakes up Modal well before the visitor finishes
-    // typing and hits Generate for real - see api/warm-inference/route.ts.
-    fetch("/api/warm-inference", { method: "POST" }).catch(() => {});
+    fetch("/api/me")
+      .then((r) => r.json())
+      .then((data) => setIsOwnerUi(!!data.isOwner))
+      .catch(() => {});
   }, []);
 
   // Lets PromptGuideSection hand a prompt/engine into the real pay-as-you-go
@@ -1990,7 +1998,9 @@ export default function Home() {
           <PayAsYouGoVideoSection seedPrompt={seedPrompt} seedImageBlob={seedImageBlob} seedEngine={seedEngine} seedVersion={seedVersion} header={<SiteNav />} modeSwitch={<ModeSwitch mode={mode} onChange={setMode} />} />
         )}
         <details id="more-tools" className="rounded-[28px] border border-white/60 bg-surface/90 p-5 shadow-soft backdrop-blur-xl">
-          <summary className="cursor-pointer text-sm font-bold text-foreground">🧰 More tools <span className="font-normal text-muted">- voices, free editor, prompt guide, examples, model reviews</span></summary>
+          <summary className="cursor-pointer text-sm font-bold text-foreground">
+            🧰 More tools <span className="font-normal text-muted">- free editor, prompt guide, examples, model reviews</span>
+          </summary>
           <div className="mt-4 flex flex-col gap-8">
             <VideoOptionCard
               icon="🧵"
@@ -2000,14 +2010,16 @@ export default function Home() {
               cta="Combine my videos"
               imageSrc="/vintage-camera.jpg"
             />
-            <div id="voice" className="flex scroll-mt-6 flex-col gap-8">
-              <div className="text-center">
-                <h2 className="text-xl font-extrabold tracking-tight">Voice</h2>
-                <p className="text-sm text-muted">Text to speech with our voices, or clone a voice with an account.</p>
+            {isOwnerUi && (
+              <div id="voice" className="flex scroll-mt-6 flex-col gap-8">
+                <div className="text-center">
+                  <h2 className="text-xl font-extrabold tracking-tight">Voice</h2>
+                  <p className="text-sm text-muted">Text to speech with our voices, or clone a voice with an account.</p>
+                </div>
+                <PresetVoiceSection />
+                <CloneVoiceSection />
               </div>
-              <PresetVoiceSection />
-              <CloneVoiceSection />
-            </div>
+            )}
             <DirectorRecipes
               onUse={(r) => {
                 setMode("director");

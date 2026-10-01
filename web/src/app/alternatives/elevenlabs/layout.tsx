@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "Beyond ElevenLabs — Voice + AI Video",
+  title: "AI Video Toolkit (no voice tools)",
   description:
-    "Need more than voice-only? Lucy Labs pairs text to voice and AI voiceover with multi-model AI video, stills, storyboards, and free stitch — not an ElevenLabs clone.",
+    "Lucy Labs no longer offers text to speech or voice cloning. Lucy Labs makes multi-model AI video, stills, storyboards, and free stitch.",
   alternates: { canonical: "/alternatives/elevenlabs" },
   openGraph: {
-    title: "Beyond ElevenLabs — Voice + AI Video | Lucy Labs",
+    title: "AI Video Toolkit (no voice tools) | Lucy Labs",
     description:
-      "Need more than voice-only? Lucy Labs pairs text to voice and AI voiceover with multi-model AI video, stills, storyboards, and free stitch — not an ElevenLabs clone.",
+      "Lucy Labs no longer offers text to speech or voice cloning. Lucy Labs makes multi-model AI video, stills, storyboards, and free stitch.",
     url: "/alternatives/elevenlabs",
   },
   robots: { index: true, follow: true },

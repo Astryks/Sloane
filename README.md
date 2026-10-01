@@ -1,7 +1,7 @@
 # Lucy Labs
 
 [Lucy Labs](https://lucylabs.app) is a browser-based creative toolkit for making
-AI video, stills, and voice content.
+AI video and stills.
 
 ## What you can make
 
@@ -9,7 +9,6 @@ AI video, stills, and voice content.
   workspace.
 - **Prepaid stills** — create still images with prepaid credit packs and use
   them as building blocks for scenes, ads, and videos.
-- **Voice tools** — explore text-to-speech and consent-based voice workflows.
 - **`/ads` storyboard** — plan an ad as a sequence of scenes, gather references,
   and turn a storyboard into a real project.
 - **Prompt guide** — learn a practical workflow for hyper-realistic video,

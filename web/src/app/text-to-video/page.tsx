@@ -29,10 +29,6 @@ export default function Page() {
               AI video models
             </Link>
             , and generate a clip. Add stills,{" "}
-            <Link href="/text-to-voice" className="font-semibold text-purple hover:underline">
-              voice
-            </Link>
-            ,{" "}
             <Link href="/ads" className="font-semibold text-purple hover:underline">
               storyboard ads
             </Link>

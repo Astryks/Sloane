@@ -10,7 +10,7 @@ const FAQS: SeoFaqItem[] = [
   },
   {
     q: "How does Lucy Labs help?",
-    a: "Lucy is a creative AI toolkit: pay-as-you-go video across leading AI video models (including Seedance, Veo, and Kling), prepaid stills (GPT Image and Nano Banana Pro on Lucy), text-to-speech and voice for video, /ads storyboard-to-video, a Prompt Guide, and a free browser stitch editor to combine AI clips. Try pay-as-you-go video without signup.",
+    a: "Lucy is a creative AI toolkit: pay-as-you-go video across leading AI video models (including Seedance, Veo, and Kling), prepaid stills (GPT Image and Nano Banana Pro on Lucy), /ads storyboard-to-video, a Prompt Guide, and a free browser stitch editor to combine AI clips. Try pay-as-you-go video without signup.",
   },
   {
     q: "Is Lucy a single-model lab?",
@@ -22,7 +22,7 @@ const FAQS: SeoFaqItem[] = [
   },
   {
     q: "What about AI ads video, UGC, and storyboards?",
-    a: "Use /ads or /storyboard-to-video for scene-by-scene storyboard to video (stills → animate → combine). UGC path: /ugc-ad. Camera language: /camera-moves. Stitch finished clips in /stitch. Voice tools cover AI voiceover / add voice to AI video.",
+    a: "Use /ads or /storyboard-to-video for scene-by-scene storyboard to video (stills → animate → combine). UGC path: /ugc-ad. Camera language: /camera-moves. Stitch finished clips in /stitch.",
   },
 ];
 
@@ -36,12 +36,12 @@ export default function Page() {
       <main className="mx-auto flex max-w-2xl flex-col gap-8">
         <SiteHeader
           title="AI video generation"
-          subtitle="AI video, stills & voice — make clips on Lucy, stitch free in the browser."
+          subtitle="AI video & stills — make clips on Lucy, stitch free in the browser."
         />
 
         <SeoCard title="What Lucy does for AI video">
           <p>
-            Lucy Labs helps you generate AI videos and stills, add voice, storyboard ads, and
+            Lucy Labs helps you generate AI videos and stills, storyboard ads, and
             stitch longer cuts in a free browser editor. Search intents we cover:{" "}
             <strong className="text-foreground">AI video generator</strong>, AI video generation,
             text to video, image to video, AI clip maker, AI short video, AI ads video, UGC AI
@@ -70,13 +70,6 @@ export default function Page() {
                 Prompt Guide
               </Link>
               .
-            </li>
-            <li>
-              Voice:{" "}
-              <Link href="/text-to-voice" className="font-semibold text-purple hover:underline">
-                text to voice
-              </Link>
-              , AI voiceover, add voice to AI video.
             </li>
             <li>
               Workflow:{" "}

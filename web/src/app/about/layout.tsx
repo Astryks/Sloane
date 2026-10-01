@@ -4,12 +4,12 @@ import type { ReactNode } from "react";
 export const metadata: Metadata = {
   title: "About Lucy Labs",
   description:
-    "What Lucy Labs is: AI video, stills, and voice on lucylabs.app — free browser stitch editor, ad storyboards, pricing, and FAQ.",
+    "What Lucy Labs is: AI video and stills on lucylabs.app — free browser stitch editor, ad storyboards, pricing, and FAQ.",
   alternates: { canonical: "/about" },
   openGraph: {
     title: "About Lucy Labs",
     description:
-      "Plain facts about Lucy Labs — AI video, stills, voice, free stitch editor, and ad storyboards.",
+      "Plain facts about Lucy Labs — AI video, stills, free stitch editor, and ad storyboards.",
     url: "/about",
   },
   robots: { index: true, follow: true },

@@ -10,7 +10,7 @@ const FAQS: SeoFaqItem[] = [
   },
   {
     q: "Why use Kling on Lucy instead of Kling alone?",
-    a: "If you want Kling-quality clips inside a broader workflow — stills on Lucy, Prompt Guide, /ads storyboards, voice, and /stitch — Lucy packages those together. Prefer Kling’s own product when you only want that first-party experience.",
+    a: "If you want Kling-quality clips inside a broader workflow — stills on Lucy, Prompt Guide, /ads storyboards, and /stitch — Lucy packages those together. Prefer Kling’s own product when you only want that first-party experience.",
   },
 ];
 
@@ -34,7 +34,7 @@ export default function Page() {
             <Link href="/models" className="font-semibold text-purple hover:underline">
               AI video models
             </Link>
-            , plus prepaid stills, voice,{" "}
+            , plus prepaid stills,{" "}
             <Link href="/ads" className="font-semibold text-purple hover:underline">
               /ads
             </Link>
