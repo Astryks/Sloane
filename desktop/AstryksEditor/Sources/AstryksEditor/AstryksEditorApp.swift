@@ -1,14 +1,32 @@
 import AVFoundation
+import AppKit
 import SwiftUI
+import WebKit
 
 @main
 struct AstryksEditorApp: App {
   var body: some Scene {
-    WindowGroup("Astryks Editor") {
-      EditorView()
-        .frame(minWidth: 760, minHeight: 620)
+    WindowGroup("Lucy Labs Editor") {
+      StitchWebEditor()
+        .frame(minWidth: 1080, minHeight: 760)
     }
   }
+}
+
+/// The desktop app deliberately presents the same editor as lucylabs.app/stitch
+/// instead of a reduced, separate workflow. That keeps all clip, overlay,
+/// trimming, preview, and export controls consistent across web and Mac.
+private struct StitchWebEditor: NSViewRepresentable {
+  func makeNSView(context: Context) -> WKWebView {
+    let configuration = WKWebViewConfiguration()
+    configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+    let webView = WKWebView(frame: .zero, configuration: configuration)
+    webView.allowsBackForwardNavigationGestures = true
+    webView.load(URLRequest(url: URL(string: "https://lucylabs.app/stitch")!))
+    return webView
+  }
+
+  func updateNSView(_ webView: WKWebView, context: Context) {}
 }
 
 @MainActor
@@ -120,12 +138,17 @@ struct EditorView: View {
 
 private struct LucyBrandMark: View {
   var body: some View {
-    ZStack {
-      RoundedRectangle(cornerRadius: 13, style: .continuous)
-        .fill(Color(red: 0.56, green: 0.48, blue: 0.72))
-      Image(systemName: "waveform.path.ecg")
-        .font(.system(size: 20, weight: .bold))
-        .foregroundStyle(.white)
+    Group {
+      if let url = Bundle.main.url(forResource: "LucyLabsLogo", withExtension: "png"),
+         let image = NSImage(contentsOf: url) {
+        Image(nsImage: image)
+          .resizable()
+          .scaledToFit()
+      } else {
+        Image(systemName: "waveform.circle.fill")
+          .font(.system(size: 38, weight: .bold))
+          .foregroundStyle(Color(red: 0.56, green: 0.48, blue: 0.72))
+      }
     }
     .accessibilityLabel("Lucy Labs")
   }
