@@ -1998,7 +1998,13 @@ function StitchPageInner() {
     const item: VideoItem = { id, file: overlay.file, previewUrl: overlay.previewUrl };
     const sourceStart = Math.max(0, overlay.sourceStart);
     const sourceEnd = Math.max(sourceStart + 0.2, Math.min(overlay.sourceDuration, overlay.sourceEnd));
-    const insertAt = videoTimelineEntries.findIndex((entry) => entry.timelineStart >= overlay.startSec - 0.05);
+    // An overlay normally sits *over* the main clip it is intended to
+    // precede. Insert it immediately before that covered clip, rather than
+    // looking only for a later clip boundary. This makes consecutive logo
+    // and title overlays become: lesson → logo → title → resumed lesson.
+    const insertAt = videoTimelineEntries.findIndex(
+      (entry) => overlay.startSec >= entry.timelineStart - 0.05 && overlay.startSec < entry.timelineEnd - 0.05,
+    );
     const position = insertAt === -1 ? items.length : insertAt;
     setItems((previous) => [...previous.slice(0, position), item, ...previous.slice(position)]);
     setItemDurations((previous) => ({ ...previous, [id]: overlay.sourceDuration }));
