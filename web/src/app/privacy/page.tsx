@@ -37,13 +37,13 @@ export default async function PrivacyPage() {
 
           <Section title="Audio — narration and voice cloning">
             <p>
-              Text you type for narration, any voice recording you upload to clone, and the audio we
-              generate are processed entirely on our own infrastructure — GPU servers we control,
-              rented from RunPod and Modal. We do not send this data to any third-party AI vendor.
-              Generated audio is not stored on our servers — it&apos;s returned directly to your device
-              for playback and download, so save anything you want to keep. Uploaded voice samples are
-              used only to generate your requested audio and are not retained afterward or used to
-              train models for other users.
+              <strong>This feature is no longer offered.</strong> Lucy Labs used to offer standalone
+              text-to-speech narration and voice cloning, processed on our own GPU servers (rented from
+              RunPod and Modal) rather than sent to a third-party AI vendor. We retired this as a public
+              feature on 2026-10-01. We never stored generated audio on our servers, and uploaded voice
+              samples were used only to generate the requested audio, never retained afterward or used
+              to train models — that was true while the feature was live, and no new narration/cloning
+              data is collected now that it&apos;s gone.
             </p>
           </Section>
 
@@ -106,10 +106,12 @@ export default async function PrivacyPage() {
                 emails (access codes, sign-in links, payment-failure notices).
               </li>
               <li>
-                <strong>RunPod, Modal</strong> — audio you submit for narration/voice cloning, and
-                photo/video/audio for video generation before it&apos;s forwarded to the vendors above.
-                These are GPU servers we rent and run our own code on, not third-party AI services
-                that process data on their own terms.
+                <strong>Modal</strong> — runs our own code (not a third-party AI service processing data
+                on its own terms) for part of the spoken-dialogue step inside video generation (see
+                &quot;Video&quot; above). We no longer offer standalone audio narration or voice cloning
+                as a public feature, so Modal no longer receives audio submitted directly for that
+                purpose; RunPod, previously used for that same retired feature, is no longer used at
+                all.
               </li>
               <li>
                 <strong>Vercel</strong> — hosts the site and, for signed-in users, your generation
@@ -132,7 +134,7 @@ export default async function PrivacyPage() {
             <ul className="list-disc pl-5">
               <li>We don&apos;t sell your data.</li>
               <li>We don&apos;t use your uploaded voice, photos, or video to train models — not for anyone else&apos;s benefit, and not for ours.</li>
-              <li>We don&apos;t send audio-only narration/voice-cloning data to any third party — that stays entirely on infrastructure we control (see &quot;Audio&quot; above). Video generation is the one exception, disclosed plainly above, not buried here.</li>
+              <li>We no longer offer standalone audio narration or voice cloning at all (see &quot;Audio&quot; above). Video generation still sends data to third-party model providers, disclosed plainly above, not buried here.</li>
             </ul>
           </Section>
 
