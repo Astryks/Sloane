@@ -3103,12 +3103,24 @@ function StitchPageInner() {
     <div className="min-h-screen bg-cream">
       <SiteHeader title="Combine videos" subtitle="Free. Runs entirely in your browser - your videos are never uploaded to our servers." />
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
-        <section className="flex flex-col gap-3 rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="font-display text-lg font-bold">Want Lucy as a desktop app?</p>
-            <p className="max-w-2xl text-sm text-muted">Download the free Mac editor to open directly into Lucy&apos;s full timeline — drag clips, add overlays, trim, preview, and export as usual.</p>
+        <section className="rounded-2xl border border-purple/30 bg-purple-wash px-5 py-4 text-ink">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-display text-lg font-bold">Want Lucy as a desktop app?</p>
+              <p className="max-w-2xl text-sm text-muted">Download the free Mac editor to open directly into Lucy&apos;s full timeline — drag clips, add overlays, trim, preview, and export as usual.</p>
+            </div>
+            <a href="https://github.com/Astryks/Sloane/raw/main/desktop/downloads/AstryksEditor-macOS.zip?download=1" className="shrink-0 rounded-full bg-purple px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-purple-dark">Download Free Editor</a>
           </div>
-          <a href="https://github.com/Astryks/Sloane/raw/main/desktop/downloads/AstryksEditor-macOS.zip?download=1" className="shrink-0 rounded-full bg-purple px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition hover:bg-purple-dark">Download Free Editor</a>
+          <details className="mt-4 border-t border-purple/20 pt-3 text-sm text-muted">
+            <summary className="cursor-pointer font-semibold text-ink">Mac says it can&apos;t verify the app — how do I open it?</summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-5">
+              <li>Unzip the download and drag <strong>Lucy Labs Editor</strong> into your Applications folder.</li>
+              <li>In Applications, <strong>Control-click</strong> the app and choose <strong>Open</strong>.</li>
+              <li>Choose <strong>Open</strong> once more in the macOS notice.</li>
+              <li>If macOS only offers “Done”, go to <strong>System Settings → Privacy &amp; Security</strong>, scroll down, and select <strong>Open Anyway</strong> for Lucy Labs Editor.</li>
+            </ol>
+            <p className="mt-2 text-xs">This is Apple&apos;s security check for directly downloaded apps. The editor is free and runs locally; it does not upload your footage.</p>
+          </details>
         </section>
         {/* Real bug found and fixed (follow-up review, 2026-09-17): Undo/Redo
             used to live only inside the preview panel below, which is
