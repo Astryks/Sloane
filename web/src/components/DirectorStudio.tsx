@@ -127,6 +127,7 @@ export function DirectorStudio({
   const [creating, setCreating] = useState(false);
   const [filmId, setFilmId] = useState<string | null>(null);
   const [film, setFilm] = useState<FilmStatus | null>(null);
+  const [advancedMode, setAdvancedMode] = useState(false);
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedCast, setSelectedCast] = useState<CastPick[]>([]);
@@ -619,8 +620,10 @@ export function DirectorStudio({
       {header}
       {modeSwitch}
       <div className="mt-4 text-center">
-        <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">🎬 Directed by Lucy</h2>
-        <p className="mx-auto mt-1 max-w-lg text-base text-foreground">Make a movie scene in 3 steps.</p>
+        <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">{advancedMode ? "🎬 Direct your video" : "✨ Create a beautiful video"}</h2>
+        <p className="mx-auto mt-1 max-w-lg text-base text-foreground">
+          {advancedMode ? "Set every scene yourself, with Lucy keeping the look consistent." : "Add what you have and tell Lucy the idea. She handles the directing."}
+        </p>
         <p className="mt-1 text-xs text-muted">
           {formatUsd(perShot)} per shot · pay as you go · failed shots refunded
         </p>
@@ -630,6 +633,96 @@ export function DirectorStudio({
       </div>
 
       <div className="mt-5 flex flex-col gap-4">
+        {!advancedMode ? (
+          <>
+            <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+              <p className="text-sm font-extrabold text-foreground">Upload what matters <span className="font-normal text-muted">(optional)</span></p>
+              <p className="mt-1 text-xs text-muted">Lucy uses these to keep the people, product and place recognisable from shot to shot.</p>
+              <div className="mt-3">
+                <DirectorPhotos
+                  compact
+                  photos={photos}
+                  setPhotos={setPhotos}
+                  selectedCast={selectedCast}
+                  setSelectedCast={setSelectedCast}
+                  onNotice={setNotice}
+                  onError={setError}
+                  presetSetId={presetSetId}
+                  onSetChange={setCurrentSetId}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+              <label className="text-sm font-extrabold text-foreground" htmlFor="lucy-simple-idea">What should Lucy make?</label>
+              <textarea
+                id="lucy-simple-idea"
+                aria-label="Describe the video Lucy should create"
+                className="mt-2 w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
+                rows={5}
+                maxLength={4000}
+                placeholder="For example: A warm 20-second film introducing our new candle. A woman lights it in a quiet apartment at dusk, then we see the label close up. Calm, premium and cinematic."
+                value={idea}
+                onChange={(e) => setIdea(e.target.value)}
+              />
+              <p className="mt-2 text-xs text-muted">Plain English is enough — no JSON, shot list or special prompt language needed.</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-semibold text-muted">
+                  AI model
+                  <select className={`${inputCls} mt-1`} value={engine} onChange={(e) => setEngine(e.target.value as VideoEngine)}>
+                    {engineEntries.map(([id, item]) => <option key={id} value={id}>{item.versionLabel} · {formatUsd(directorShotPriceCents(id))}/shot</option>)}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold text-muted">
+                  Video shape
+                  <select className={`${inputCls} mt-1`} value={aspect} onChange={(e) => setAspect(e.target.value as "auto" | "16:9" | "9:16") }>
+                    <option value="auto">Lucy chooses</option>
+                    <option value="16:9">Landscape (16:9)</option>
+                    <option value="9:16">Vertical (9:16)</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={makeItNow}
+              disabled={planning || creating || idea.trim().length < 3 || isUploading(photos)}
+              className="w-full rounded-2xl bg-purple py-4 text-base font-extrabold text-white shadow-soft disabled:opacity-50"
+            >
+              {creating ? "Lucy is creating your video…" : `✨ Create my video · from ${formatUsd(perShot * (scriptShotCount(idea) || shotCount))}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => planIt()}
+              disabled={planning || idea.trim().length < 3}
+              className="w-full rounded-2xl border border-purple/30 bg-white py-3 text-sm font-bold text-purple disabled:opacity-50"
+            >
+              {planning ? "Lucy is planning…" : "Preview Lucy’s plan first — free"}
+            </button>
+            <p className="text-center text-[11px] text-muted">Lucy turns your idea into a coherent set of shots, then creates and stitches them. You only pay for shots that are filmed.</p>
+            <button type="button" onClick={() => setAdvancedMode(true)} className="self-center text-sm font-bold text-purple underline underline-offset-4">
+              Want to direct yourself?
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-extrabold text-foreground">Your director&apos;s workspace</p>
+                  <p className="mt-1 text-xs text-muted">Build the cast, product and locations once, then Lucy carries them through every scene.</p>
+                </div>
+                <button type="button" onClick={() => setAdvancedMode(false)} className="rounded-xl border border-purple/30 px-3 py-2 text-xs font-bold text-purple">← Simple mode</button>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-muted sm:grid-cols-4">
+                <p><strong className="text-foreground">1. Characters</strong><br />Upload a clear face photo. See the Jess and Liam sheets below; ask ChatGPT or Gemini in normal words — no JSON.</p>
+                <p><strong className="text-foreground">2. Product</strong><br />Add clean front, side and detail angles so the label stays accurate.</p>
+                <p><strong className="text-foreground">3. Locations</strong><br />Add each setting or describe it for Lucy to draw.</p>
+                <p><strong className="text-foreground">4. Scenes</strong><br />Write who is present, what they say, camera, mood and background. Lucy makes the shot sheet.</p>
+              </div>
+              <p className="mt-3 text-xs text-muted">For a detailed scene prompt, use <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">ChatGPT</a> or <a href="https://gemini.google.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-purple underline">Gemini</a>, then paste the result below. <Link href="/ai-prompting" className="font-semibold text-purple underline">Prompt guidelines</Link>.</p>
+            </div>
         <div>
           <p className="mb-1 flex items-center text-sm font-bold text-foreground">
             <StepBadge n={1} /> Your characters (and places)
@@ -649,14 +742,14 @@ export function DirectorStudio({
 
         <div>
           <p className="mb-1 flex items-center text-sm font-bold text-foreground">
-            <StepBadge n={2} /> What&apos;s your movie about? <ScriptHelp />
+            <StepBadge n={2} /> Scene 1: what happens? <ScriptHelp />
           </p>
           <textarea
             aria-label="Describe your film"
             className="w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
             rows={5}
             maxLength={4000}
-            placeholder="Write a simple idea - who, what happens, where, and anything they say. Then ask Claude to turn it into a detailed shot-by-shot script (tap ? for the prompt) and paste it back here."
+            placeholder="Who is in this scene, where are they, what do they do or say, how should it feel, and what should the camera notice? Add another scene underneath if needed."
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
           />
@@ -792,6 +885,8 @@ export function DirectorStudio({
             </button>
             <p className="text-center text-[11px] text-muted">Lucy plans, draws and films it with no stops. About 5-10 minutes.</p>
           </div>
+        )}
+          </>
         )}
 
         {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}

@@ -99,9 +99,12 @@ export function DirectorPhotos({
   onError,
   presetSetId,
   onSetChange,
+  compact = false,
 }: {
   presetSetId?: string | null;
   onSetChange?: (id: string | null) => void;
+  /** A no-jargon uploader for Lucy's "make it for me" path. */
+  compact?: boolean;
   photos: RefPhotos;
   setPhotos: React.Dispatch<React.SetStateAction<RefPhotos>>;
   selectedCast: CastPick[];
@@ -380,6 +383,34 @@ export function DirectorPhotos({
   const totalPhotos = photos.character.length + photos.product.length + photos.location.length;
   const readyCharacters = readyUrls(photos, "character").length;
   const inputCls = "rounded-xl border border-border bg-white p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple";
+
+  if (compact) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-3">
+        {(["character", "product", "location"] as const).map((kind) => {
+          const list = photos[kind];
+          const full = list.length >= REF_LIMITS[kind];
+          const label = kind === "character" ? "Your characters" : kind === "product" ? "Your product" : "Your location";
+          const hint = kind === "character" ? "A clear photo of each person" : kind === "product" ? "Front and label, if you have one" : "A photo, or leave it blank and Lucy will imagine it";
+          return (
+            <div key={kind} className="rounded-2xl border border-purple/20 bg-white p-3">
+              <p className="text-sm font-extrabold text-foreground">{label}</p>
+              <p className="mt-0.5 min-h-8 text-[11px] text-muted">{hint}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {list.map((p) => <Thumb key={p.id} photo={p} onRemove={() => remove(kind, p.id)} />)}
+                {!full && (
+                  <label className="flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-xl bg-purple/10 text-purple">
+                    <span className="text-xl leading-none">+</span><span className="text-[9px] font-bold">Upload</span>
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addFiles(kind, e.target.files); e.target.value = ""; }} />
+                  </label>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <details className="rounded-2xl border border-border bg-white/70 p-3" open={totalPhotos > 0 || cast.length > 0 || sets.length > 0 || undefined}>
