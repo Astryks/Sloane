@@ -2,6 +2,26 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## Latest update, 2026-10-16 - Directed by Lucy: simple 3 steps; Higgsfield study; iOS listing for the editor
+
+- **Simple mode is now 3 numbered steps** (`components/SimpleDirector.tsx`), then **🎬 Lucy, direct it**:
+  1. **Who's in it?** One card per person (up to 3): photos, a **name** and a few words, plus Your cast tap-in.
+  2. **Where is it?** A photo, a saved set or a description.
+  3. **What happens?** Plain English, with an example that uses their names and an optional product photo.
+
+  Genre chips (Lucy decides / Cinematic / Ad / Selfie vlog / Documentary) set the style and shape. The model and shape selects stay. "Want to direct yourself?" still opens the full workspace.
+- **Bug fixed:** the 9 Oct simple uploader put every person's photos into one unnamed box, so two people became one blended "person in the uploaded photos". `/api/director/create` now takes a `people` JSON (`[{name, description, photos}]`, max 3, photos validated, unnamed becomes "Person N"). People's names and descriptions also go to the planner as cast, and the place text is added to the idea as "Where:".
+- **Higgsfield study** (help centre, blog, reviews):
+  - Cinema Studio 4.0 is prompt + up to 50 references + a Director's Panel (genre, era, camera, lens, moves, grade, emotion). It makes clips up to 30s on Seedance 2.5.
+  - Characters live in "Elements" (@mention); Soul ID trains from 20-80 photos.
+  - Popcorn turns 1 prompt into up to 8 storyboard frames.
+  - Supercomputer is an agent: a brief, then it approves the plan and cost before rendering.
+  - There's no timeline: users stitch in CapCut.
+  - Complaints: too many choices, credit burn, billing.
+  - Takeaways for Lucy: one genre choice (shipped), plan + total cost before filming (already there), save-to-cast from anything, @mentions, fixing one shot in chat, and Lucy's built-in stitching as a differentiator.
+- **iOS listing** for the free editor is drafted in `docs/ios-app-store-listing.md`: name, subtitle, promo, description, keywords (all within limits), screenshots plan, privacy label, review notes, and the build requirements to pass Guideline 4.2 (native Photos import/export, a bundled offline editor, no in-app links to paid credits). It needs an Apple Developer account and the iOS build itself.
+- `.claude/launch.json` gained a `web-mac` dev server entry.
+
 ## Latest update, 2026-10-01 (even later) - Pay-as-you-go only: subscriptions retired
 
 **Why:** Sid confirmed live on `/billing` that the site was still actively selling the Free/Starter/Plus/Video monthly Stripe subscriptions whose main advertised value ("Clone any voice from an upload", "18 preset voices", "N characters of audio/month") broke for every subscriber except the owner the moment the previous entry above made the standalone voice tool owner-only. Charging for a feature that now silently 403s for payers is a real problem, not a cosmetic one. Sid's decision, verbatim: "remove subscriptions for now just have pay as you go. change all marketing message accordingly." The rest of the site (video generation, stills) was already pay-as-you-go (`lib/videoPaygo.ts`, `lib/stillsPaygo.ts`, the homepage's `#pay-as-you-go` generator) - this change only retires the old recurring-subscription system that existed to sell audio/voice quotas.
