@@ -37,6 +37,7 @@ import { CopyClip } from "./CopyClip";
 const DirectorReviewPanel = dynamic(() => import("./DirectorReview").then((m) => m.DirectorReviewPanel), { ssr: false });
 const ShotDirection = dynamic(() => import("./DirectorReview").then((m) => m.ShotDirection), { ssr: false });
 import { CharacterGuide } from "./CharacterGuide";
+import { SimpleDirector, emptyPerson, readyPeople, type SimplePerson } from "./SimpleDirector";
 import { DirectorPhotos, EMPTY_PHOTOS, isUploading, photosFromLinks, readyUrls, type CastPick, type RefPhotos } from "./DirectorPhotos";
 
 const DRAFT_KEY = "lucy_director_draft";
@@ -74,6 +75,15 @@ function sheetForAI(plan: DirectorPlan): string {
     .join("\n\n");
   return `Here is the shot sheet for my film scene "${plan.title}". Improve it like a film director: better camera coverage (a wide, then over-the-shoulder close-ups on whoever is talking), natural lines with personality, one person speaking per shot, at most 18 spoken words per shot, numbers written as words. Keep the same characters and the same story. Reply with ONLY the full edited sheet in exactly this format.\n\n${shots}`;
 }
+
+// "Genre as the one directing choice" (Higgsfield research, 2026-10-16).
+const SIMPLE_STYLES: Array<{ id: ProductionStyleId | "auto"; label: string; aspect?: "16:9" | "9:16" }> = [
+  { id: "auto", label: "✨ Lucy decides" },
+  { id: "cinematic", label: "🎬 Cinematic", aspect: "16:9" },
+  { id: "commercial", label: "🛍️ Ad", aspect: "16:9" },
+  { id: "ugc", label: "📱 Selfie vlog / UGC", aspect: "9:16" },
+  { id: "documentary", label: "🎥 Documentary", aspect: "16:9" },
+];
 
 function StepBadge({ n }: { n: number }) {
   return <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-purple text-xs font-extrabold text-white">{n}</span>;
@@ -128,6 +138,8 @@ export function DirectorStudio({
   const [filmId, setFilmId] = useState<string | null>(null);
   const [film, setFilm] = useState<FilmStatus | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
+  const [simplePeople, setSimplePeople] = useState<SimplePerson[]>(() => [emptyPerson()]);
+  const [placeText, setPlaceText] = useState("");
   const [showPrompts, setShowPrompts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedCast, setSelectedCast] = useState<CastPick[]>([]);
@@ -327,13 +339,16 @@ export function DirectorStudio({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          idea: movieNotes.trim() ? `${movieNotes.trim()}\n\n${idea}` : idea,
+          idea: [movieNotes.trim(), idea, !advancedMode && placeText.trim() ? `Where: ${placeText.trim()}` : ""].filter(Boolean).join("\n\n"),
           look: activePreset?.data.look ?? undefined,
           style,
           shotCount: scriptShotCount(idea) || shotCount,
           aspectRatio: aspect,
-          hasCharacterPhoto: readyUrls(photos, "character").length > 0 || selectedCast.length > 0,
-          cast: selectedCast.map((c) => ({ name: c.name, description: c.description })),
+          hasCharacterPhoto: readyUrls(photos, "character").length > 0 || selectedCast.length > 0 || (!advancedMode && readyPeople(simplePeople).some((p) => p.photos.length > 0)),
+          cast: [
+            ...selectedCast.map((c) => ({ name: c.name, description: c.description })),
+            ...(advancedMode ? [] : readyPeople(simplePeople).filter((p) => p.name).map((p) => ({ name: p.name, description: p.description }))),
+          ],
           hasProductPhoto: readyUrls(photos, "product").length > 0,
           hasLocationPhoto: readyUrls(photos, "location").length > 0,
         }),
@@ -429,6 +444,7 @@ export function DirectorStudio({
       form.append("idea", idea);
       form.append("plan", JSON.stringify(plan));
       if (selectedCast.length) form.append("savedCharacterIds", JSON.stringify(selectedCast.map((c) => c.id)));
+      if (!advancedMode && readyPeople(simplePeople).length) form.append("people", JSON.stringify(readyPeople(simplePeople)));
       if (plan.modelVoices === false && Object.keys(voiceSamples).length) form.append("voiceSamples", JSON.stringify(voiceSamples));
       form.append("refs", JSON.stringify(refLinks));
       if (opts.auto) form.append("autoApprove", "1");
@@ -635,37 +651,36 @@ export function DirectorStudio({
       <div className="mt-5 flex flex-col gap-4">
         {!advancedMode ? (
           <>
-            <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
-              <p className="text-sm font-extrabold text-foreground">Upload what matters <span className="font-normal text-muted">(optional)</span></p>
-              <p className="mt-1 text-xs text-muted">Lucy uses these to keep the people, product and place recognisable from shot to shot.</p>
-              <div className="mt-3">
-                <DirectorPhotos
-                  compact
-                  photos={photos}
-                  setPhotos={setPhotos}
-                  selectedCast={selectedCast}
-                  setSelectedCast={setSelectedCast}
-                  onNotice={setNotice}
-                  onError={setError}
-                  presetSetId={presetSetId}
-                  onSetChange={setCurrentSetId}
-                />
+            <SimpleDirector
+              people={simplePeople}
+              setPeople={setSimplePeople}
+              selectedCast={selectedCast}
+              setSelectedCast={setSelectedCast}
+              photos={photos}
+              setPhotos={setPhotos}
+              place={placeText}
+              setPlace={setPlaceText}
+              idea={idea}
+              setIdea={setIdea}
+              onError={setError}
+            />
+            <div className="rounded-2xl border border-purple/20 bg-white/80 p-3">
+              <p className="text-xs font-semibold text-muted">Style - Lucy directs the camera and the cutting to match</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {SIMPLE_STYLES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setStyle(s.id);
+                      if (s.aspect) setAspect(s.aspect);
+                    }}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-bold ${style === s.id ? "border-purple bg-purple text-white" : "border-border bg-white text-foreground"}`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
               </div>
-            </div>
-
-            <div className="rounded-2xl border border-purple/20 bg-white/80 p-4">
-              <label className="text-sm font-extrabold text-foreground" htmlFor="lucy-simple-idea">What should Lucy make?</label>
-              <textarea
-                id="lucy-simple-idea"
-                aria-label="Describe the video Lucy should create"
-                className="mt-2 w-full rounded-2xl border border-border bg-white p-4 text-base placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-                rows={5}
-                maxLength={4000}
-                placeholder="For example: A warm 20-second film introducing our new candle. A woman lights it in a quiet apartment at dusk, then we see the label close up. Calm, premium and cinematic."
-                value={idea}
-                onChange={(e) => setIdea(e.target.value)}
-              />
-              <p className="mt-2 text-xs text-muted">Plain English is enough — no JSON, shot list or special prompt language needed.</p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="text-xs font-semibold text-muted">
                   AI model
@@ -687,10 +702,10 @@ export function DirectorStudio({
             <button
               type="button"
               onClick={makeItNow}
-              disabled={planning || creating || idea.trim().length < 3 || isUploading(photos)}
+              disabled={planning || creating || idea.trim().length < 3 || isUploading(photos) || simplePeople.some((p) => p.photos.some((x) => x.status === "uploading"))}
               className="w-full rounded-2xl bg-purple py-4 text-base font-extrabold text-white shadow-soft disabled:opacity-50"
             >
-              {creating ? "Lucy is creating your video…" : `✨ Create my video · from ${formatUsd(perShot * (scriptShotCount(idea) || shotCount))}`}
+              {creating ? "Lucy is directing your video…" : `🎬 Lucy, direct it · from ${formatUsd(perShot * (scriptShotCount(idea) || shotCount))}`}
             </button>
             <button
               type="button"

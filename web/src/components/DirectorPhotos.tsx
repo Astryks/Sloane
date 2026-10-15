@@ -66,7 +66,7 @@ async function shrink(file: File): Promise<Blob> {
   return file; // e.g. a format this browser can't decode - the server checks the size
 }
 
-async function uploadOne(file: File): Promise<string> {
+export async function uploadOne(file: File): Promise<string> {
   const form = new FormData();
   form.append("photo", await shrink(file), "photo.jpg");
   const res = await fetch("/api/director/upload", { method: "POST", body: form });
@@ -75,7 +75,7 @@ async function uploadOne(file: File): Promise<string> {
   return data.url as string;
 }
 
-function Thumb({ photo, onRemove }: { photo: RefPhoto; onRemove: () => void }) {
+export function Thumb({ photo, onRemove }: { photo: RefPhoto; onRemove: () => void }) {
   return (
     <div className="relative h-16 w-16 shrink-0">
       {/* eslint-disable-next-line @next/next/no-img-element */}

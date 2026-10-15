@@ -61,6 +61,24 @@ function parseRefLinks(raw: FormDataEntryValue | null): Record<RefKind, string[]
   }
   return out;
 }
+/** "Who's in it?" people: [{name, description, photos}] (photos are links from /api/director/upload). */
+function parseQuickPeople(raw: FormDataEntryValue | null, offset: number): CastPerson[] {
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(String(raw ?? "[]"));
+  } catch {}
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .slice(0, 3)
+    .map((p, i) => {
+      const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+      const photos = (Array.isArray(o.photos) ? o.photos : []).map((v) => resolveMediaUrl(String(v))).filter(isVendorMediaUrl).slice(0, REF_LIMITS.character);
+      const name = String(o.name ?? "").replace(/[^\p{L}\p{N} .'-]/gu, "").trim().slice(0, 40) || `Person ${offset + i + 1}`;
+      return { name, description: String(o.description ?? "").trim().slice(0, 300), photos };
+    })
+    .filter((p) => p.photos.length > 0 || !/^Person \d+$/.test(p.name));
+}
+
 export async function POST(req: NextRequest) {
   try {
     await initSchema();
@@ -99,7 +117,10 @@ export async function POST(req: NextRequest) {
     }
     const links = parseRefLinks(form.get("refs"));
     let people: CastPerson[] | undefined;
-    if (savedCast.length) {
+    // Simple flow (2026-10-16): named people with their own photos, straight
+    // from "Who's in it?" - no saving to Your cast needed. Unnamed -> "Person N".
+    const quickPeople = parseQuickPeople(form.get("people"), savedCast.length);
+    if (savedCast.length || quickPeople.length) {
       // Realism pass (2026-09-30): nobody is auto-assigned a Lucy preset voice
       // any more - the video model's own voice (steered by the voice words in
       // the cast description) is the default. A Lucy voice is only used if the
@@ -113,6 +134,7 @@ export async function POST(req: NextRequest) {
         ...(c!.voice_id ? { voiceId: c!.voice_id } : {}),
         ...(samples[c!.id] ? { voiceSampleUrl: samples[c!.id] } : {}),
       }));
+      named.push(...quickPeople);
       // Anyone uploaded alongside the cast becomes one more (unnamed) person.
       if (links.character.length) named.push({ name: "the person in the uploaded photos", description: "", photos: links.character });
       people = allocateCast(named);
