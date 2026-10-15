@@ -2,6 +2,24 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## Latest update, 2026-10-16 (later) - Native iOS editor built (`ios/LucyEditor`)
+
+- **No iOS editor existed before.** `mobile/` is the old Expo voice app and `desktop/AstryksEditor` is the macOS web-view wrapper. This is a new **native SwiftUI + AVFoundation** app, not a web view, so it clears App Review 4.2.
+- **v1 features:**
+  - Import videos and photos with PhotosPicker; photos become 3s clips.
+  - Per clip: trim, speed 0.5-2x, mute, reorder, duplicate, remove.
+  - Whole video: 9:16 / 16:9 / 1:1, crossfades, music from Files (looped, with volume and fades), and a title (top/middle/bottom, first clip or whole video).
+  - Export to a 1080p MP4, then Save to Photos (add-only permission) or Share.
+  - Projects are saved on the device. No network, no analytics, no account.
+- **Tested in the iOS 26 Simulator (iPhone 17 Pro):** a 3-item project (14s vlog + 6s clip + photo) exported a correct 22s 1080×1920 MP4 with letterboxing and audio, and saved to Photos.
+- **Fixes along the way:**
+  - Empty audio and video tracks (photos or silent clips) made AVPlayer fail with -12784, so they're now removed.
+  - The Simulator can't play an `AVVideoComposition` live, so the preview falls back to the plain timeline when that happens. Export is unaffected.
+- **Build:** `cd ios/LucyEditor && xcodegen` (the project is generated from `project.yml`), then open `LucyEditor.xcodeproj`. Bundle ID `com.astryks.lucyeditor`, iOS 17+.
+- **Listing** (`docs/ios-app-store-listing.md`) is rewritten to claim only what v1 does. PiP, split screen, cutaways and captions came out because they're web-only for now. The privacy label is now **Data Not Collected**.
+- **Sid to do:** an Apple Developer account, set the signing Team in Xcode, a quick test on a real iPhone, then Archive and upload.
+- **Next:** a Higgsfield-style "Lucy Studio" for Directed by Lucy (Elements + @mentions, genre and camera presets, cost on the button, plan-then-approve, a creations feed).
+
 ## Latest update, 2026-10-16 - Directed by Lucy: simple 3 steps; Higgsfield study; iOS listing for the editor
 
 - **Simple mode is now 3 numbered steps** (`components/SimpleDirector.tsx`), then **🎬 Lucy, direct it**:
