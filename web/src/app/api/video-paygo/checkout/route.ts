@@ -48,8 +48,8 @@ export async function POST(req: NextRequest) {
       ],
       metadata: { product: "video_credits", packId: pack.id, creditsCents: String(pack.creditsCents) },
       // Straight back to the generator, where the saved draft resumes.
-      success_url: `${origin}/?video_credits=1${returnTo === "director" ? "&director=1" : ""}#pay-as-you-go`,
-      cancel_url: `${origin}/?canceled=1${returnTo === "director" ? "&director=1" : ""}#pay-as-you-go`,
+      success_url: returnTo === "studio" ? `${origin}/studio?video_credits=1&studio=1` : `${origin}/?video_credits=1${returnTo === "director" ? "&director=1" : ""}#pay-as-you-go`,
+      cancel_url: returnTo === "studio" ? `${origin}/studio?canceled=1` : `${origin}/?canceled=1${returnTo === "director" ? "&director=1" : ""}#pay-as-you-go`,
       client_reference_id: user.id,
       managed_payments: { enabled: false },
     });

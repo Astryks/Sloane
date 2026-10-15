@@ -1930,9 +1930,14 @@ function ModeSwitch({ mode, onChange }: { mode: "single" | "director"; onChange:
     </button>
   );
   return (
-    <div className="mt-4 flex gap-2">
-      {btn("single", "✏️ One video", "Type a prompt, pick any model, pay as you go")}
-      {btn("director", "🎬 Directed by Lucy", "Your characters, your script - a full scene in 3 steps")}
+    <div className="mt-4 flex flex-col gap-2">
+      <div className="flex gap-2">
+        {btn("single", "✏️ One video", "Type a prompt, pick any model, pay as you go")}
+        {btn("director", "🎬 Directed by Lucy", "Your characters, your script - a full scene in 3 steps")}
+      </div>
+      <Link href="/studio" className="rounded-2xl bg-[#0c0b10] px-3 py-2 text-center text-xs font-bold text-white shadow-soft">
+        ✨ New: Lucy Studio - one prompt bar, @mention your people, Lucy directs →
+      </Link>
     </div>
   );
 }

@@ -2468,6 +2468,27 @@ export async function getDirectorFilm(filmId: string): Promise<DirectorFilmRow |
   return (rows[0] as DirectorFilmRow) ?? null;
 }
 
+export type DirectorFilmSummary = {
+  id: string;
+  idea: string;
+  status: DirectorFilmRow["status"];
+  title: string | null;
+  aspect: string | null;
+  engine: string;
+  final_video_url: string | null;
+  anchor_url: string | null;
+  created_at: string;
+};
+
+/** The customer's latest films for the Studio's "Your creations" feed (newest first). */
+export async function listDirectorFilms(userId: string, limit = 24): Promise<DirectorFilmSummary[]> {
+  return (await sql`
+    SELECT id, idea, status, plan->>'title' AS title, plan->>'aspectRatio' AS aspect, engine, final_video_url, anchor_url, created_at
+    FROM director_films WHERE user_id = ${userId}
+    ORDER BY created_at DESC LIMIT ${limit}
+  `) as DirectorFilmSummary[];
+}
+
 export async function getDirectorShots(filmId: string): Promise<DirectorShotRow[]> {
   return (await sql`SELECT * FROM director_shots WHERE film_id = ${filmId} ORDER BY idx`) as DirectorShotRow[];
 }

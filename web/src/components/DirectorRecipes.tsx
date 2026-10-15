@@ -14,7 +14,7 @@ import type { ProductionStyleId } from "@/lib/director/filmScience";
 
 export type DirectorRecipe = { idea: string; style: ProductionStyleId | "auto"; aspect: "auto" | "16:9" | "9:16" };
 
-type Recipe = DirectorRecipe & {
+export type Recipe = DirectorRecipe & {
   id: string;
   emoji: string;
   title: string;
@@ -24,7 +24,7 @@ type Recipe = DirectorRecipe & {
   tips: string[];
 };
 
-const RECIPES: Recipe[] = [
+export const RECIPES: Recipe[] = [
   {
     id: "ugc",
     emoji: "🤳",
