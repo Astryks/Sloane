@@ -502,6 +502,10 @@ async function runSchemaMigrations() {
   // output once it's ready - only one of "uploaded" or "TTS" is ever set
   // per job, never both.
   await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS modal_job_id TEXT`;
+  // Prompt enhancer (2026-10-16): "prompt" is what the model got; keep the
+  // user's own words and where the final prompt came from for comparison.
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS original_prompt TEXT`;
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS prompt_source TEXT`;
   await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS preset_voice_id TEXT`;
   // The raw, silent engine output from just before the lip-sync pass
   // (2026-09-12) - previously fetched and used as submitLipsyncJob's input,
@@ -1528,6 +1532,8 @@ export async function createVideoPaygoJob(params: {
   userId: string;
   engine: string;
   prompt: string;
+  originalPrompt?: string | null;
+  promptSource?: string | null;
   falEndpoint: string;
   inputImageUrl?: string | null;
   inputAudioUrl?: string | null;
@@ -1539,9 +1545,9 @@ export async function createVideoPaygoJob(params: {
   priceCents: number;
 }): Promise<string> {
   const rows = await sql`
-    INSERT INTO video_paygo_jobs (user_id, engine, prompt, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id, lip_sync_mode, duration_seconds, aspect_ratio, price_cents)
+    INSERT INTO video_paygo_jobs (user_id, engine, prompt, original_prompt, prompt_source, fal_endpoint, input_image_url, input_audio_url, needs_merge, preset_voice_id, lip_sync_mode, duration_seconds, aspect_ratio, price_cents)
     VALUES (
-      ${params.userId}, ${params.engine}, ${params.prompt}, ${params.falEndpoint},
+      ${params.userId}, ${params.engine}, ${params.prompt}, ${params.originalPrompt ?? null}, ${params.promptSource ?? null}, ${params.falEndpoint},
       ${params.inputImageUrl ?? null}, ${params.inputAudioUrl ?? null}, ${params.needsMerge ?? false}, ${params.presetVoiceId ?? null},
       ${params.lipSyncMode ?? "lipsync"}, ${params.durationSeconds ?? null}, ${params.aspectRatio ?? null}, ${params.priceCents}
     )
@@ -1591,7 +1597,8 @@ export async function setVideoPaygoJobSilentVideo(jobId: string, silentVideoUrl:
 }
 
 export async function completeVideoPaygoJob(jobId: string, videoUrl: string) {
-  await sql`UPDATE video_paygo_jobs SET status = 'completed', video_url = ${videoUrl} WHERE id = ${jobId}`;
+  // Never flip a job that another poll already failed (and refunded) - 2026-10-16 audit.
+  await sql`UPDATE video_paygo_jobs SET status = 'completed', video_url = ${videoUrl} WHERE id = ${jobId} AND status <> 'failed'`;
 }
 
 // Atomic claim: only the caller that actually transitions the row out of
@@ -2421,12 +2428,19 @@ export type DirectorShotRow = {
   alt_video_urls?: string | null;
 };
 
-/** Counts this visitor's plans in the last 24h, then logs one more if under the cap. */
+/**
+ * Logs one more free call for this visitor if they're under the daily cap.
+ * One statement (2026-10-16 audit): the old count-then-insert let parallel
+ * requests all pass the check before any of them inserted.
+ */
 export async function takeDirectorPlanSlot(visitor: string, dailyCap: number): Promise<boolean> {
-  const rows = await sql`SELECT count(*)::int AS n FROM director_plan_log WHERE visitor = ${visitor} AND created_at > now() - interval '24 hours'`;
-  if (Number(rows[0]?.n ?? 0) >= dailyCap) return false;
-  await sql`INSERT INTO director_plan_log (visitor) VALUES (${visitor})`;
-  return true;
+  const rows = await sql`
+    INSERT INTO director_plan_log (visitor)
+    SELECT ${visitor}
+    WHERE (SELECT count(*) FROM director_plan_log WHERE visitor = ${visitor} AND created_at > now() - interval '24 hours') < ${dailyCap}
+    RETURNING visitor
+  `;
+  return rows.length > 0;
 }
 
 export async function createDirectorFilm(params: {

@@ -30,6 +30,7 @@ import {
   stillImagesLeft,
 } from "@/lib/stillsPaygo";
 import { extractVideoFrame, isVideoFile, isAudioFile } from "@/lib/videoFrame";
+import { CAMERA_PRESETS, STYLE_PRESETS, maxPromptCharsFor, type CameraPresetId, type StylePresetId } from "@/lib/promptPresets";
 import { useMediaRecorder } from "@/lib/useMediaRecorder";
 
 // Backend mode is switchable at runtime from /admin (see
@@ -1191,7 +1192,15 @@ type PaygoDraft = {
   presetVoiceId: string;
   hadMedia: boolean;
   autoGenerate: boolean;
+  // Prompt enhancer (2026-10-16) - optional so older saved drafts still load.
+  enhance?: boolean;
+  cameraPreset?: CameraPresetId;
+  stylePreset?: StylePresetId;
 };
+
+// "Lucy's prompt" preview from /api/prompt/enhance, tied to the inputs it was
+// made from - any change to those makes it stale and it's hidden.
+type PromptPreview = { key: string; text: string; negative: string | null; source: string };
 
 function saveDraft(draft: PaygoDraft) {
   try {
@@ -1260,8 +1269,21 @@ function PayAsYouGoVideoSection({
   const [waitingForCredit, setWaitingForCredit] = useState(false);
   const pendingAutoGenerateRef = useRef(false);
   const optionsRef = useRef<HTMLDetailsElement | null>(null);
+  // Prompt enhancer (2026-10-16): on by default; Lucy rewrites the idea into
+  // a shot prompt for the chosen model on the server (promptEnhance.ts).
+  const [enhance, setEnhance] = useState(true);
+  const [cameraPreset, setCameraPreset] = useState<CameraPresetId>("auto");
+  const [stylePreset, setStylePreset] = useState<StylePresetId>("auto");
+  const [preview, setPreview] = useState<PromptPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [sentPrompt, setSentPrompt] = useState<{ text: string; source: string } | null>(null);
 
   const engineDef = VIDEO_PAYGO_ENGINES[engine];
+  // A Lucy voice reads the prompt as its script, and Kling Avatar is driven
+  // by the audio - the server skips enhancing in both cases, so the UI does too.
+  const enhanceApplies = audioMode !== "lucy" && !(engine === "kling" && audioMode === "own" && lipSyncMode === "lipsync");
+  const previewKey = JSON.stringify([prompt.trim(), engine, cameraPreset, stylePreset, durationSeconds, aspectRatio, audioMode, lipSyncMode, !!media.imageBlob]);
+  const activePreview = enhance && enhanceApplies && preview?.key === previewKey ? preview : null;
   // Picks up a prompt/engine (and optional photo) handed down from Prompt
   // Guide - keyed on seedVersion so it only fires on an actual new handoff.
   useEffect(() => {
@@ -1332,6 +1354,9 @@ function PayAsYouGoVideoSection({
       setAudioMode(draft.audioMode === "own" ? "none" : draft.audioMode);
       setLipSyncMode(draft.lipSyncMode);
       setPresetVoiceId(draft.presetVoiceId);
+      if (typeof draft.enhance === "boolean") setEnhance(draft.enhance);
+      if (draft.cameraPreset && CAMERA_PRESETS.some((p) => p.id === draft.cameraPreset)) setCameraPreset(draft.cameraPreset);
+      if (draft.stylePreset && STYLE_PRESETS.some((p) => p.id === draft.stylePreset)) setStylePreset(draft.stylePreset);
     }
     if (canceled) {
       setNotice("Checkout canceled - nothing was charged. Your prompt is still here.");
@@ -1394,6 +1419,9 @@ function PayAsYouGoVideoSection({
       presetVoiceId,
       hadMedia: !!media.imageBlob || audioMode === "own",
       autoGenerate,
+      enhance,
+      cameraPreset,
+      stylePreset,
     });
     try {
       const res = await fetch("/api/video-paygo/checkout", {
@@ -1411,15 +1439,53 @@ function PayAsYouGoVideoSection({
     }
   }
 
+  async function handlePreview() {
+    setPreviewLoading(true);
+    setError(null);
+    const key = previewKey;
+    try {
+      const res = await fetch("/api/prompt/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          engine,
+          cameraPreset,
+          stylePreset,
+          durationSeconds: durationSeconds ?? undefined,
+          aspectRatio: aspectRatio ?? undefined,
+          hasReferenceImage: !!media.imageBlob,
+          audioMode,
+          lipSyncMode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't enhance that right now");
+      setPreview({ key, text: data.prompt, negative: data.negativePrompt ?? null, source: data.source });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't enhance that right now");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
   async function handleGenerate() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSentPrompt(null);
     try {
       const form = new FormData();
       form.append("engine", engine);
       form.append("prompt", prompt);
       form.append("audio_mode", audioMode);
+      form.append("enhance", enhance && enhanceApplies ? "1" : "0");
+      form.append("camera_preset", cameraPreset);
+      form.append("style_preset", stylePreset);
+      if (activePreview && activePreview.text.trim()) {
+        form.append("final_prompt", activePreview.text.trim());
+        if (activePreview.negative) form.append("negative_prompt", activePreview.negative);
+      }
       if (audioMode !== "none") form.append("lip_sync_mode", lipSyncMode);
       if (durationSeconds != null && engineDef.supportsDurationChoice) {
         form.append("duration_seconds", String(durationSeconds));
@@ -1434,6 +1500,9 @@ function PayAsYouGoVideoSection({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Generation failed");
       setNotice(null);
+      if (typeof data.finalPrompt === "string" && data.promptSource && data.promptSource !== "raw") {
+        setSentPrompt({ text: data.finalPrompt, source: data.promptSource });
+      }
       const jobId = data.jobId as string;
       const { videoUrl, silentVideoUrl } = await pollVideoJob("/api/video-paygo/status", jobId);
       setResult({ videoUrl, jobId, silentVideoUrl });
@@ -1478,6 +1547,96 @@ function PayAsYouGoVideoSection({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />
+
+        {enhanceApplies ? (
+          <div className="-mt-2 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="flex items-center gap-1 rounded-full border border-border bg-white px-3 py-1.5 font-semibold text-muted">
+                🎥 Camera
+                <select
+                  aria-label="Camera move"
+                  value={cameraPreset}
+                  onChange={(e) => setCameraPreset(e.target.value as CameraPresetId)}
+                  className="bg-transparent font-semibold text-foreground focus:outline-none"
+                >
+                  {CAMERA_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1 rounded-full border border-border bg-white px-3 py-1.5 font-semibold text-muted">
+                🎨 Style
+                <select
+                  aria-label="Visual style"
+                  value={stylePreset}
+                  onChange={(e) => setStylePreset(e.target.value as StylePresetId)}
+                  className="bg-transparent font-semibold text-foreground focus:outline-none"
+                >
+                  {STYLE_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                aria-pressed={enhance}
+                onClick={() => setEnhance((v) => !v)}
+                title="Lucy rewrites your idea into a detailed shot prompt written for the model you pick"
+                className={`rounded-full border px-3 py-1.5 font-semibold transition ${
+                  enhance ? "border-purple bg-purple text-white" : "border-border bg-white text-muted"
+                }`}
+              >
+                ✨ Enhance {enhance ? "on" : "off"}
+              </button>
+              {enhance && !activePreview && (
+                <button
+                  type="button"
+                  onClick={handlePreview}
+                  disabled={previewLoading || prompt.trim().length < 3}
+                  className="font-semibold text-purple underline disabled:opacity-50"
+                >
+                  {previewLoading ? "Writing Lucy's prompt…" : "See Lucy's prompt (free)"}
+                </button>
+              )}
+            </div>
+            {activePreview && (
+              <div className="rounded-2xl border border-purple/30 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-foreground">
+                    Lucy&apos;s prompt for {engineDef.versionLabel} <span className="font-normal text-muted">· edit it, or it&apos;s used as is</span>
+                  </p>
+                  <button type="button" onClick={() => setPreview(null)} className="text-[11px] font-semibold text-muted underline">
+                    Hide
+                  </button>
+                </div>
+                <textarea
+                  aria-label="Lucy's prompt"
+                  className="mt-2 w-full rounded-xl border border-border bg-white p-2 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-purple"
+                  rows={6}
+                  maxLength={maxPromptCharsFor(engine)}
+                  value={activePreview.text}
+                  onChange={(e) => setPreview({ ...activePreview, text: e.target.value })}
+                />
+                {activePreview.source !== "llm" && (
+                  <p className="mt-1 text-[11px] italic text-muted">Lucy couldn&apos;t rewrite this one, so your words (plus your camera and style picks) go as written.</p>
+                )}
+              </div>
+            )}
+            {enhance && !activePreview && (
+              <p className="text-[11px] text-muted">
+                Lucy turns your idea into a detailed shot prompt for {engineDef.label} (subject, action, setting, camera, light, sound) before filming. Your words, dialogue and story stay the same.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="-mt-2 text-[11px] text-muted">
+            {audioMode === "lucy" ? "With a Lucy voice your text is the script, so it's read out exactly as written." : "Your audio drives this video, so the prompt goes as written."}
+          </p>
+        )}
 
         <div>
           <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">Choose your model</p>
@@ -1719,6 +1878,14 @@ function PayAsYouGoVideoSection({
         {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
         {result && (
           <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="paygo" silentVideoUrl={result.silentVideoUrl} />
+        )}
+        {sentPrompt && (
+          <details className="rounded-2xl bg-white/80 p-3 text-xs">
+            <summary className="cursor-pointer font-semibold text-purple">
+              {sentPrompt.source === "reviewed" ? "The prompt you approved" : "The prompt Lucy sent"} to {engineDef.label}
+            </summary>
+            <p className="mt-2 whitespace-pre-wrap leading-relaxed text-foreground">{sentPrompt.text}</p>
+          </details>
         )}
 
         <StillCreditsPaygoPanel />

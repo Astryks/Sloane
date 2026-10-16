@@ -2,6 +2,96 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## Latest update, 2026-10-16 (late night) - Prompt enhancer for one-prompt video (branch `feat/prompt-enhancer`, PR open, not merged)
+
+**Why:** Sid: "a prompt leads to very different results... maybe we need a system at the back end where a prompt goes to an LLM to expand it further". Before this, the homepage generator sent the user's words straight to the model (the GPT-6 Astra rewrite in `promptDirector.ts` was still on the server, but its checkbox was removed on 23 Sep, so nothing called it). Directed by Lucy / Lucy Studio already had a Gemini planner plus per-model formatters (`lib/director/formatters.ts`), so they're unchanged.
+
+**How it works now (homepage "Make a video from one prompt"):**
+1. The user types an idea and can pick **🎥 Camera** (12 Higgsfield-style moves: static, dolly in/out, crash zoom, tracking, orbit, crane up, handheld, selfie, FPV drone, aerial, whip pan) and **🎨 Style** (9 looks: cinematic, phone/UGC, commercial, documentary, golden hour, moody night, vintage film, anime, 3D animation). **✨ Enhance** is on by default.
+2. Optional **"See Lucy's prompt (free)"** calls `POST /api/prompt/enhance` (40 a day per visitor) and shows the exact prompt in an editable box. If the user edits it, or just leaves it, Generate sends that text as `final_prompt` and makes no second LLM call. Changing the idea, model, presets, duration, ratio, audio or photo hides a stale preview.
+3. On Generate (after the credit is spent, so it can't be used as a free LLM), `video-paygo/generate` runs `enhanceVideoPrompt` unless `enhance=0`. The output follows the chosen model's own guide:
+   - **Veo:** Google's order (cinematography, subject, action, context, style). Dialogue as `says: "..." (no subtitles)`, then `Ambient noise:` / `SFX:`. 50-120 words.
+   - **Kling 2.1:** subject, movement, scene, camera, light, atmosphere. No audio.
+   - **Kling 3:** `[Speaker, tone]: "line"`.
+   - **Seedance:** subject + action, environment, camera, style. Moderate motion. Ends "No subtitles, no watermark."
+   - **MiniMax:** bracket camera commands like `[Push in]`.
+   - **Grok:** plain prose. "The camera does not move" for static shots.
+   - With a reference photo, the prompt describes only motion, camera and light, and doesn't redescribe the person.
+   - A Lucy voice (the text is the script) and Kling Avatar lip-sync are never rewritten.
+4. **Negative prompt:** Veo, Kling 2.1 and Kling 3 now get `negative_prompt` (plain nouns, filtered so it never contradicts the user's words). Nothing on the homepage sent one before.
+5. After the video, "The prompt Lucy sent to <model>" shows what the model actually got.
+
+**Guarantees, enforced in code (not trusted to the LLM):**
+- **Fallback:** if the LLM fails, times out (15s total) or gives an unusable answer, the user's own prompt is used, plus their camera/style picks appended word for word.
+- **Rejected answers:** any answer that changes quoted dialogue, adds trademarks, URLs, @handles or logos (logos are allowed with a reference photo), or adds nudity, gore, weapons, drugs or children the user didn't ask for. Also rejected: answers that drop most of the user's words.
+- **Length:** trimmed at a sentence to each model's cap (1,200-1,400 characters).
+
+**LLM:** no new key or account. It uses Gemini on Vertex first (same keyless setup and `GOOGLE_PLANNER_MODEL` as the Director planner, about $0.001 a call on Google credits), then fal OpenRouter with `FAL_KEY` (the old Astra model) as a backup. **`PROMPT_ENHANCE=off`** turns the whole thing off. The Anthropic API wasn't needed because two providers are already configured.
+
+**Logging:** every enhancement logs one `[prompt-enhance]` JSON line in Vercel logs, with route, engine, presets, source (llm / presets / raw / reviewed), the fallback reason, ms, original, final and negative. `video_paygo_jobs` gains `original_prompt` and `prompt_source` columns, added automatically by `initSchema`; `prompt` stays what the model got.
+
+**Files:**
+- New: `web/src/lib/promptPresets.ts` (presets + per-model profiles, client-safe), `web/src/lib/promptEnhance.ts` (pure logic), `web/src/lib/promptEnhance.server.ts` (providers + logging), `web/src/lib/promptEnhance.test.ts` (17 tests, LLM mocked), `web/src/app/api/prompt/enhance/route.ts`.
+- Changed: `video-paygo/generate/route.ts`, `app/page.tsx`, `lib/db.ts`, `lib/videoEngines.ts`, `web/package.json` (`npm test` now also runs `src/lib/*.test.ts`), `web/.env.example`.
+- Removed: `lib/promptDirector.ts`. `director=astra` is still accepted as an alias for enhance-on.
+
+**Audit fixes in the same PR:**
+- **Free daily caps:** `takeDirectorPlanSlot` is now one atomic `INSERT ... WHERE count < cap`. Parallel requests could all pass the old count-then-insert.
+- **Completed after refund:** `completeVideoPaygoJob` no longer flips a job another poll already failed and refunded.
+- Both SQL statements were checked on PGlite.
+
+**Verified:**
+- `npm test`: 87/87 (70 existing + 17 new).
+- `tsc --noEmit` is clean and `next build` succeeds.
+- eslint: changed/new files add no new errors. `page.tsx` keeps its 5 existing errors.
+- In a local browser: Camera/Style/Enhance controls render, the preview box shows and edits, and changing a preset hides the stale preview.
+- **Not verified against production:** a real Gemini enhancement and a paid generation with it. There's no env on this machine.
+
+**Sid to do:**
+1. Review and merge the PR. Vercel deploys `main`.
+2. Make one test video and compare the `[prompt-enhance]` log line.
+3. If quality is still off on one model, tune that model's line in `FAMILY_RULES` (`promptEnhance.ts`).
+
+**Research summary (Higgsfield and the others, with sources):**
+- **Higgsfield:** about 65 named camera presets (https://higgsfield.ai/camera-controls). Cinema Studio's Director's Panel covers genre, camera body, lens, grade, lighting, era and tempo (https://higgsfield.ai/creator-hub/help-center/tools/how-do-i-use-cinema-studio). Soul ID trains on 20-80 photos (https://higgsfield.ai/creator-hub/help-center/ai-models/how-do-i-create-and-use-a-soul-id-character). Their prompt advice: layer subject, details, environment, style; for image-to-video, describe the motion, not the look; change one thing at a time (https://higgsfield.ai/creator-hub/help-center/getting-started/how-do-i-write-a-good-prompt). Their "Enhance prompt" toggle has no official write-up.
+- **Other platforms:** Luma, Freepik and Adobe Firefly all have a one-click LLM "Enhance prompt":
+  - https://lumaai.notion.site/FAQ-and-Prompt-Guide-Luma-Dream-Machine-9e4ec319320a49bc832b6708e4ae7c46
+  - https://www.freepik.com/ai/docs/your-first-ai-video
+  - https://helpx.adobe.com/firefly/work-with-audio-and-video/work-with-video/enhance-your-prompt-for-video-generation.html
+- **Runway Gen-4:** start simple, use positive phrasing, and for image-to-video describe motion only (https://help.runwayml.com/hc/en-us/articles/39789879462419).
+- **Kling:** subject, action, scene, camera language, lighting/mood (https://kling.ai/blog/kling-ai-prompt-guide). The fal Kling 3 guide covers speaker labels with tone (https://blog.fal.ai/kling-3-0-prompting-guide/).
+- **Veo 3.1:** formula plus `SFX:` / `Ambient noise:` (https://cloud.google.com/blog/products/ai-machine-learning/ultimate-prompting-guide-for-veo-3-1). Max 1,024 tokens, and a seed does not guarantee repeatable results (https://ai.google.dev/gemini-api/docs/veo). Negative prompts are plain nouns without "no" (https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/video-gen-prompt-guide).
+- **Seedance:** one camera move per shot, emotion as visible behaviour, avoid violent motion (https://docs.byteplus.com/en/docs/ModelArk/2222480; BytePlus pages didn't render, so the details came via https://runway.com/resources/seedance-2-0-prompt-guide).
+- **MiniMax Hailuo:** 15 bracket camera commands, 2,000-character limit, and its own `prompt_optimizer` is on by default (https://platform.minimax.io/docs/api-reference/video-generation-t2v).
+- **Grok Imagine:** for image-to-video, describe what happens after the first frame (https://docs.x.ai/developers/model-capabilities/video/overview).
+- **Takeaway:** every leading platform puts an LLM enhancer on top of named camera and style presets. That's what this ships.
+- **Follow-up:** MiniMax on fal still runs its own `prompt_expansion_mode: "balanced"`, so its prompts get rewritten twice. Check fal's schema for an "off" value before changing it.
+
+**Audit, still open (full list from the 16 Oct review; none fixed here except the two above):**
+- **P0:**
+  - A cancelled Director film can be filmed anyway: `updateDirectorFilm` overwrites `cancelled`.
+  - Approve racing cancel can refund twice.
+  - Free per-day caps are keyed on guest ids anyone can mint (no cookie means a new guest), so free storyboards and images are unbounded.
+  - Signed-in users get unlimited free fal images on the legacy `grid-storyboard` routes.
+  - The media proxy serves any `storage.googleapis.com` / Vercel Blob URL inline with the upstream content-type: stored XSS through `grid-storyboard/reference/create`.
+  - Two overlapping Director polls can submit the same paid vendor job: the claim doesn't check the request id.
+- **P1:**
+  - Homepage jobs only advance while the tab polls. There's no cron sweep or refund for stale jobs.
+  - A temporary error fetching a finished Veo result fails and refunds a render we paid for.
+  - Lucy-voice scripts up to 600 characters get cut to the 5-8s clip.
+  - The Stripe webhook doesn't check `payment_status`.
+  - Magic links are used up on GET by email scanners.
+  - `analyze-clip` can delete any public blob without auth.
+  - Retakes are allowed while a film is voicing or stitching.
+  - Stills timeouts refund without cancelling the fal job.
+- **P2:**
+  - Vendor error text is returned raw.
+  - Owner-mode refunds pile up on the owner's balance.
+  - The fal balance check passes if `FAL_ADMIN_KEY` is missing.
+  - `director_plan_log` is never pruned.
+  - The cron secret isn't compared in constant time.
+  - 60 env vars aren't documented in `web/.env.example`.
+
 ## Latest update, 2026-10-16 (night) - Jess "MEFE method" explainer, made on free Google Cloud credit only
 
 - **Output:** `deliverables/jess_mefe.mp4` (master, 147 MB) and `jess_mefe_share.mp4` (53 MB). 2:54, 9:16, full colour, bold 1-3 word captions in the style of the Short Sid sent. The script is delivered word for word; the final transcript matches it 98.9%. `deliverables/` is git-ignored.
