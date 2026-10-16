@@ -2,6 +2,18 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## Latest update, 2026-10-16 (night) - Jess "MEFE method" explainer, made on free Google Cloud credit only
+
+- **Output:** `deliverables/jess_mefe.mp4` (master, 147 MB) and `jess_mefe_share.mp4` (53 MB). 2:54, 9:16, full colour, bold 1-3 word captions in the style of the Short Sid sent. The script is delivered word for word; the final transcript matches it 98.9%. `deliverables/` is git-ignored.
+- **Billing:** Sid's personal Google Cloud project `lucy-labs-508023`, on the free-trial billing account (A$417 credit at the start, expires 6 Nov 2026). No card spend. Flow's 50 daily credits weren't enough.
+- **Method (Lucy's pipeline run by hand, scripts in the session scratchpad):**
+  1. Three anchor frames of Jess from `jess-sheet.jpg` with `gemini-2.5-flash-image`: window, street, desk.
+  2. 29 lines, each filmed with `veo-3.1-fast-generate-001` (8s, 1080p, audio), starting from its setup's anchor. Fixed voice description and seed.
+  3. Automatic QA with faster-whisper: transcript vs script, speech span, pitch. 3 lines were retaken with a new seed (garbled or repeated words).
+  4. Each clip cut to exactly the scripted words, which drops Veo's ad-libs. Then concat, loudnorm, and ASS captions in Arial Black.
+- **Spend:** 32 Veo clips (256s) plus 3 images, about US$39 / A$60 of trial credit.
+- **Idea for Lucy:** this is a working "explainer / talking head" mode (script, anchor frame per setup, a Veo shot per line, trim to scripted words, captions). It could be a Studio genre.
+
 ## Latest update, 2026-10-16 (evening) - Lucy Studio live at /studio (Higgsfield-style)
 
 - **One dark prompt bar** (`components/LucyStudio.tsx`):
