@@ -5,6 +5,8 @@ import { geminiWatchVideo } from "@/lib/gemini";
 import { publicJson } from "@/lib/mediaProxy";
 import { MAX_SHOTS } from "@/lib/director/plan";
 import { underPlanCap } from "../_shared";
+import { getPaygoSessionUser } from "@/lib/auth";
+import { isOwnClipUrl } from "@/lib/clipOwnership";
 
 export const maxDuration = 60;
 
@@ -43,6 +45,13 @@ export async function POST(req: NextRequest) {
     const yt = youTubeUrl(raw);
     const isUpload = /^https:\/\/[\w.-]+\.public\.blob\.vercel-storage\.com\//.test(raw);
     if (!yt && !isUpload) return publicJson({ error: "Paste a YouTube link or upload an MP4" }, { status: 400 });
+    // 2026-10-17 audit: an uploaded clip is deleted after watching, so it must
+    // be the signed-in caller's own upload (their clip folder), never any file.
+    if (isUpload) {
+      const user = await getPaygoSessionUser();
+      if (!user) return publicJson({ error: "Sign in or add credit first" }, { status: 401 });
+      if (!isOwnClipUrl(raw, user.id)) return publicJson({ error: "Upload the clip again, then try once more." }, { status: 403 });
+    }
     if (!(await underPlanCap())) return publicJson({ error: "That's today's limit for Lucy's free help - try again tomorrow." }, { status: 429 });
 
     const cast = (Array.isArray(body.cast) ? body.cast : []).map(String).filter(Boolean).slice(0, 3);
