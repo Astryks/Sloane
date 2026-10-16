@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { decodeMediaToken } from "@/lib/mediaProxy";
+import { MEDIA_SECURITY_HEADERS, decodeMediaToken, safeMediaContentType } from "@/lib/mediaProxy";
 
 // Serves generated media under our own domain - see @/lib/mediaProxy.ts.
 // Streams (never buffers) and forwards Range so video seeking works (Safari
@@ -7,7 +7,8 @@ import { decodeMediaToken } from "@/lib/mediaProxy";
 // encrypted ourselves decode, so this can't be used as an open proxy.
 export const maxDuration = 60;
 
-const PASS_HEADERS = ["content-type", "content-length", "content-range", "accept-ranges", "last-modified", "etag"];
+// content-type is never passed through as-is - see safeMediaContentType.
+const PASS_HEADERS = ["content-length", "content-range", "accept-ranges", "last-modified", "etag"];
 
 async function serve(req: NextRequest, token: string, method: "GET" | "HEAD") {
   const upstreamUrl = decodeMediaToken(token);
@@ -24,14 +25,21 @@ async function serve(req: NextRequest, token: string, method: "GET" | "HEAD") {
     return NextResponse.json({ error: upstream.status === 404 ? "This file has expired" : "Media temporarily unavailable" }, { status: upstream.status === 404 ? 404 : 502 });
   }
 
-  const headers = new Headers();
+  const ext = token.match(/\.([a-z0-9]{2,4})$/i)?.[1]?.toLowerCase() ?? null;
+  const contentType = safeMediaContentType(upstream.headers.get("content-type"), ext);
+  if (!contentType) {
+    await upstream.body?.cancel().catch(() => {});
+    return NextResponse.json({ error: "Not a media file" }, { status: 415, headers: MEDIA_SECURITY_HEADERS });
+  }
+  const headers = new Headers(MEDIA_SECURITY_HEADERS);
+  headers.set("content-type", contentType);
   for (const h of PASS_HEADERS) {
     const v = upstream.headers.get(h);
     if (v) headers.set(h, v);
   }
   if (!headers.has("accept-ranges")) headers.set("accept-ranges", "bytes");
-  const ext = token.match(/\.([a-z0-9]{2,4})$/i)?.[1] ?? "mp4";
-  headers.set("content-disposition", `inline; filename="lucy-labs.${ext}"`);
+  const fileExt = ext && /^[a-z0-9]{2,4}$/.test(ext) ? ext : "mp4";
+  headers.set("content-disposition", `inline; filename="lucy-labs.${fileExt}"`);
   // Same token always maps to the same immutable file.
   headers.set("cache-control", "public, max-age=86400, immutable");
   return new Response(method === "HEAD" ? null : upstream.body, { status: upstream.status, headers });

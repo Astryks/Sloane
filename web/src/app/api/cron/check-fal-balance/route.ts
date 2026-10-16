@@ -3,6 +3,7 @@ import { initSchema, getSetting, setSetting } from "@/lib/db";
 import { getFalBalance, FAL_MIN_BALANCE_TO_GENERATE_USD } from "@/lib/fal";
 import { sendLowFalBalanceEmail } from "@/lib/email";
 import { publicJson } from "@/lib/mediaProxy";
+import { cronAuthError } from "@/lib/adminAuth";
 
 // Give a real warning window before the real-time guard (fal.ts's
 // hasEnoughFalBalanceToGenerate) even kicks in - alerts at 4x the "block
@@ -20,15 +21,12 @@ const LAST_ALERT_SETTING_KEY = "fal_low_balance_last_alert_at";
 // token for its own scheduled invocations once the env var is set) so this
 // can't be used by anyone else to spam the alert email.
 export async function GET(req: NextRequest) {
-  const auth = req.headers.get("authorization");
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
+  const authError = cronAuthError(req);
+  if (authError === 500) {
     console.error("[cron/check-fal-balance] CRON_SECRET not configured - refusing to run");
     return publicJson({ error: "Not configured" }, { status: 500 });
   }
-  if (auth !== `Bearer ${expected}`) {
-    return publicJson({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (authError) return publicJson({ error: "Unauthorized" }, { status: 401 });
 
   try {
     await initSchema();

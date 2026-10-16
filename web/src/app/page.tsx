@@ -23,6 +23,7 @@ import {
   formatUsd,
   videoEnginePickerNote,
   videoEnginesSoundBlurb,
+  lucyVoiceMaxChars,
   type VideoEngine,
 } from "@/lib/videoEngines";
 import {
@@ -1182,6 +1183,8 @@ function SiteNav() {
 // the round trip, so hadMedia stops auto-generate and asks to re-attach.
 const PAYGO_DRAFT_KEY = "lucy_paygo_draft";
 
+type RecentPaygoJob = { id: string; status: "COMPLETED" | "FAILED" | "IN_PROGRESS"; videoUrl: string | null; prompt: string; createdAt: string };
+
 type PaygoDraft = {
   prompt: string;
   engine: VideoEngine;
@@ -1247,6 +1250,8 @@ function PayAsYouGoVideoSection({
   // Owner test mode (OWNER_EMAILS on the server) - generate without Stripe.
   const [ownerMode, setOwnerMode] = useState(false);
   const [balanceLoaded, setBalanceLoaded] = useState(false);
+  // Videos from the last two days (2026-10-17): one that finished after the tab was closed shows up here.
+  const [recentJobs, setRecentJobs] = useState<RecentPaygoJob[]>([]);
   const [engine, setEngine] = useState<VideoEngine>("veo");
   // Duration/aspect ratio choices (2026-09-15) - null means "use the
   // engine's own default". Reset whenever the engine changes since each
@@ -1317,6 +1322,8 @@ function PayAsYouGoVideoSection({
   // Avatar's own uploaded audio already carries every word, so it's the
   // only case a text prompt can be skipped.
   const promptSkippable = engine === "kling" && audioMode === "own" && !!audio.selectedBlob;
+  // Lucy-voice script limit (2026-10-17): the clip is only so long - same rule as the server.
+  const lucyScriptMax = audioMode === "lucy" && !(engine === "kling" && lipSyncMode === "lipsync") ? lucyVoiceMaxChars(engine) : null;
 
   async function refreshBalance(): Promise<number> {
     try {
@@ -1325,6 +1332,7 @@ function PayAsYouGoVideoSection({
       setSignedIn(data.signedIn);
       setBalance(data.balance);
       setOwnerMode(!!data.isOwner);
+      setRecentJobs(Array.isArray(data.recentJobs) ? (data.recentJobs as RecentPaygoJob[]) : []);
       return data.balance as number;
     } catch {
       return balance;
@@ -1542,11 +1550,16 @@ function PayAsYouGoVideoSection({
           aria-label="Describe your video"
           className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
           rows={7}
-          maxLength={600}
-          placeholder={audioMode === "lucy" ? "What should the voice say?" : PAYGO_PROMPT_PLACEHOLDER}
+          maxLength={lucyScriptMax ?? 600}
+          placeholder={audioMode === "lucy" ? `What should the voice say? (up to ${lucyScriptMax ?? 600} characters)` : PAYGO_PROMPT_PLACEHOLDER}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />
+        {lucyScriptMax !== null && (
+          <p className={`-mt-2 text-xs ${prompt.length > lucyScriptMax ? "font-semibold text-coral-dark" : "text-muted"}`}>
+            {prompt.length}/{lucyScriptMax} characters - {engineDef.label} makes a {engineDef.durationSeconds}-second clip, so a longer script would be cut off.
+          </p>
+        )}
 
         {enhanceApplies ? (
           <div className="-mt-2 flex flex-col gap-2">
@@ -1878,6 +1891,27 @@ function PayAsYouGoVideoSection({
         {error && <p className="rounded-2xl bg-white/70 p-3 text-sm text-coral-dark">{error}</p>}
         {result && (
           <VideoResultPlayer videoUrl={result.videoUrl} jobId={result.jobId} jobType="paygo" silentVideoUrl={result.silentVideoUrl} />
+        )}
+        {recentJobs.some((j) => j.id !== result?.jobId) && (
+          <details className="rounded-2xl bg-white/80 p-3 text-xs">
+            <summary className="cursor-pointer font-semibold text-purple">Your recent videos</summary>
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {recentJobs
+                .filter((j) => j.id !== result?.jobId)
+                .map((j) => (
+                  <li key={j.id} className="flex items-center justify-between gap-3">
+                    <span className="truncate text-foreground">{j.prompt || "Video"}</span>
+                    {j.status === "COMPLETED" && j.videoUrl ? (
+                      <a href={j.videoUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 font-semibold text-purple underline">
+                        Watch
+                      </a>
+                    ) : (
+                      <span className="shrink-0 text-muted">{j.status === "FAILED" ? "Failed - refunded" : "Still making…"}</span>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          </details>
         )}
         {sentPrompt && (
           <details className="rounded-2xl bg-white/80 p-3 text-xs">

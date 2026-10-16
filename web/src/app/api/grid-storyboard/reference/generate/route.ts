@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { GRID_FREE_IMAGES_PER_DAY, GRID_LIMIT_MESSAGE, takeFreeAllowance } from "@/lib/freeCaps";
+import { isOwner } from "@/lib/owner";
 import { getGridStoryboardProjectOwner, initSchema } from "@/lib/db";
 import { generateImageVariants, hasEnoughFalBalanceToGenerate, isImageEngine } from "@/lib/fal";
 import { publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
@@ -43,6 +45,10 @@ export async function POST(req: NextRequest) {
     const owner = await getGridStoryboardProjectOwner(projectId);
     if (!owner) return publicJson({ error: "Project not found" }, { status: 404 });
     if (owner !== user.id) return publicJson({ error: "Not your project" }, { status: 403 });
+
+    if (!isOwner(user) && !(await takeFreeAllowance("grid-img", GRID_FREE_IMAGES_PER_DAY, user, numImages))) {
+      return publicJson({ error: GRID_LIMIT_MESSAGE }, { status: 429 });
+    }
 
     // Same real-time balance guard as video-paygo/generate - catches an
     // exhausted/locked fal account before it ever reaches fal's API, so the

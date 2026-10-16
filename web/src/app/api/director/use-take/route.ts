@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     if (!shot) return publicJson({ error: "Unknown shot" }, { status: 400 });
     const url = parseTakes(shot.alt_video_urls)[Number(body.take)];
     if (!url) return publicJson({ error: "That take isn't available" }, { status: 400 });
-    if (!(await switchDirectorShotTake(film.id, shot.id, url))) return publicJson({ error: "Wait for the film to finish, then pick a take." }, { status: 409 });
+    if (!(await switchDirectorShotTake(film.id, shot.id, url))) return publicJson({ error: "Wait for the film to finish (or this shot to be filmed), then pick a take." }, { status: 409 });
     return publicJson({ ok: true });
   } catch (err) {
     console.error("[director/use-take] failed", err);

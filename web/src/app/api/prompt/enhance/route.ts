@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { initSchema, takeDirectorPlanSlot } from "@/lib/db";
+import { initSchema } from "@/lib/db";
+import { getPaygoSessionUser } from "@/lib/auth";
+import { takeFreeAllowance } from "@/lib/freeCaps";
 import { publicJson } from "@/lib/mediaProxy";
 import { VIDEO_PAYGO_ENGINES, VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS, type VideoEngine } from "@/lib/videoEngines";
 import { enhanceVideoPrompt } from "@/lib/promptEnhance.server";
-import { visitorKey } from "../../director/_shared";
 
 // The enhancer can take ~15s (Gemini, then the fal fallback).
 export const maxDuration = 30;
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
     if (audioMode === "lucy") {
       return publicJson({ error: "With a Lucy voice, your text is the script - it's read out as written" }, { status: 400 });
     }
-    if (!(await takeDirectorPlanSlot(`enh:${await visitorKey(req)}`, DAILY_PREVIEW_CAP))) {
+    if (!(await takeFreeAllowance("enh", DAILY_PREVIEW_CAP, await getPaygoSessionUser().catch(() => null)))) {
       return publicJson({ error: "You've previewed a lot of prompts today - Generate still enhances automatically." }, { status: 429 });
     }
     const min = VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS[engine];

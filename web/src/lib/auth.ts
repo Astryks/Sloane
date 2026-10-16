@@ -10,8 +10,10 @@ import {
   linkSubscriberToUser,
   createGuestUser,
   mergeGuestIntoUser,
+  takeFreeSlots,
   type User,
 } from "./db";
+import { requestIpKey } from "./freeCaps";
 
 const SESSION_COOKIE = "lucy_session";
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60; // 30 days, matches sessions.expires_at
@@ -77,9 +79,28 @@ export async function getPaygoSessionUser(): Promise<User | null> {
 // Called from checkout when nobody is signed in: creates a guest and gives
 // this browser a normal session cookie for it, so the Stripe webhook's
 // client_reference_id and every later generate/status call line up.
-export async function getOrCreatePaygoSessionUser(): Promise<User> {
+//
+// 2026-10-17 audit: guest creation is capped per IP per day, so a script
+// that drops its cookie can't mint unlimited guest accounts. Checkout gets
+// its own, roomier allowance so a real purchase is never the thing blocked.
+export const GUEST_CREATES_PER_IP_PER_DAY = 12;
+export const CHECKOUT_GUEST_CREATES_PER_IP_PER_DAY = 30;
+
+export class GuestLimitError extends Error {
+  constructor() {
+    super("Too many new sessions from your network today - sign in with your email to keep going.");
+    this.name = "GuestLimitError";
+  }
+}
+
+export async function getOrCreatePaygoSessionUser(opts: { forCheckout?: boolean } = {}): Promise<User> {
   const existing = await getAnySessionUser();
   if (existing) return existing;
+  const ip = await requestIpKey();
+  const allowed = opts.forCheckout
+    ? await takeFreeSlots([{ key: `guest-create-checkout:ip:${ip}`, cap: CHECKOUT_GUEST_CREATES_PER_IP_PER_DAY }])
+    : await takeFreeSlots([{ key: `guest-create:ip:${ip}`, cap: GUEST_CREATES_PER_IP_PER_DAY }]);
+  if (!allowed) throw new GuestLimitError();
   const guest = await createGuestUser();
   await startSession(guest.id);
   return guest;

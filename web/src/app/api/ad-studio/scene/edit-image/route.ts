@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { GRID_FREE_IMAGES_PER_DAY, GRID_LIMIT_MESSAGE, takeFreeAllowance } from "@/lib/freeCaps";
+import { isOwner } from "@/lib/owner";
 import { getAdStudioScene, getAdStudioSceneProjectOwner, initSchema, MAX_SCENE_IMAGE_EDITS, recordAdStudioSceneEdit } from "@/lib/db";
 import { editImageWithPrompt } from "@/lib/fal";
 import { publicJson } from "@/lib/mediaProxy";
@@ -26,6 +28,9 @@ export async function POST(req: NextRequest) {
     const owner = await getAdStudioSceneProjectOwner(sceneId);
     if (!owner) return publicJson({ error: "Scene not found" }, { status: 404 });
     if (owner !== user.id) return publicJson({ error: "Not your project" }, { status: 403 });
+    if (!isOwner(user) && !(await takeFreeAllowance("grid-img", GRID_FREE_IMAGES_PER_DAY, user))) {
+      return publicJson({ error: GRID_LIMIT_MESSAGE }, { status: 429 });
+    }
 
     const scene = await getAdStudioScene(sceneId);
     if (!scene) return publicJson({ error: "Scene not found" }, { status: 404 });

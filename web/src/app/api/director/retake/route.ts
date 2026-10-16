@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { addVideoCredits, getDirectorShots, getUserById, initSchema, resetDirectorShotForRetake, setDirectorFilmPlan, setDirectorShotPrompts, spendVideoCredit } from "@/lib/db";
+import { addVideoCredits, getDirectorShots, getUserById, initSchema, refundVideoCredit, resetDirectorShotForRetake, setDirectorFilmPlan, setDirectorShotPrompts, spendVideoCredit } from "@/lib/db";
 import { publicJson } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { formatUsd } from "@/lib/videoEngines";
@@ -20,10 +20,16 @@ export async function POST(req: NextRequest) {
     const { film, plan } = owned;
     const idx = Number(body.shotIdx);
     if (!Number.isInteger(idx) || idx < 0 || idx >= plan.shots.length) return publicJson({ error: "Unknown shot" }, { status: 400 });
-    if (!["completed", "failed", "shots", "voicing", "stitching"].includes(film.status)) return publicJson({ error: "Approve the storyboard first - retakes are for filmed shots." }, { status: 409 });
+    // 2026-10-17 audit: not while voicing/stitching (those steps work from
+    // the shot list they started with), and only for a finished shot - a
+    // shot still rendering would orphan a paid job. Re-checked atomically in
+    // resetDirectorShotForRetake; this is the friendly message.
+    if (film.status === "voicing" || film.status === "stitching") return publicJson({ error: "Lucy is joining the film right now - retake a shot once it's ready." }, { status: 409 });
+    if (!["completed", "failed", "shots"].includes(film.status)) return publicJson({ error: "Approve the storyboard first - retakes are for filmed shots." }, { status: 409 });
     const shots = await getDirectorShots(film.id);
     const shot = shots[idx];
     if (!shot) return publicJson({ error: "Unknown shot" }, { status: 400 });
+    if (shot.status !== "completed" && shot.status !== "failed") return publicJson({ error: "This shot is still being filmed - retake it once it's done." }, { status: 409 });
 
     const price = shot.price_cents;
     if (isOwner(await getUserById(film.user_id))) await addVideoCredits(film.user_id, price);
@@ -46,7 +52,10 @@ export async function POST(req: NextRequest) {
       await setDirectorShotPrompts(shot.id, compileShotPrompt(next, idx, refFlags(film), { nativeAudio, model: promptModelFor(film.engine) }), compileKeyframePrompt(next, idx, refFlags(film)));
     }
     if (!(await resetDirectorShotForRetake(film.id, shot.id))) {
-      await addVideoCredits(film.user_id, price);
+      // Put the plan and prompts back so a refused retake leaves nothing changed.
+      await setDirectorFilmPlan(film.id, plan);
+      if (note) await setDirectorShotPrompts(shot.id, shot.prompt, shot.keyframe_prompt);
+      await refundVideoCredit(film.user_id, price);
       return publicJson({ error: "Couldn't start the retake - you haven't been charged." }, { status: 409 });
     }
     return publicJson({ ok: true, chargedCents: price });

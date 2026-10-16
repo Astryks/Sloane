@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   await initSchema();
   const user = await getPaygoSessionUser();
   if (!user) return publicJson({ error: "Sign in first" }, { status: 401 });
-  if (!(await underPlanCap(req))) return publicJson({ error: "That's today's limit for free previews - try again tomorrow." }, { status: 429 });
+  if (!(await underPlanCap())) return publicJson({ error: "That's today's limit for free previews - try again tomorrow." }, { status: 429 });
   const body = (await req.json().catch(() => ({}))) as { voiceId?: string; line?: string; delivery?: string; speaker?: string; character?: string; context?: string; seconds?: number };
   const line = String(body.line ?? "").replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim().slice(0, 400);
   const voiceId = String(body.voiceId ?? "");

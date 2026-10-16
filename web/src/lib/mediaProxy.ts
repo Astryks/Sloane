@@ -46,6 +46,54 @@ function extensionOf(url: string): string {
   return m ? `.${m[1].toLowerCase()}` : "";
 }
 
+// Stored-XSS fix (2026-10-17 audit): the proxy used to pass the upstream
+// content-type straight through, so an HTML/SVG file anyone could put on a
+// storage host we proxy (e.g. their own storage.googleapis.com bucket, saved
+// as a "reference" through grid-storyboard/reference/create) was served as a
+// page on lucylabs.app. Only these media types are ever served; a generic
+// binary type falls back to the type the file extension says (from this
+// same list); anything else (text/html, image/svg+xml, xml, js...) is refused.
+export const SAFE_MEDIA_TYPES: Record<string, string> = {
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  m4a: "audio/mp4",
+};
+const SAFE_TYPE_SET = new Set([
+  ...Object.values(SAFE_MEDIA_TYPES),
+  "audio/x-wav",
+  "audio/wave",
+  "audio/vnd.wave",
+  "audio/x-m4a",
+  "audio/aac",
+  "audio/ogg",
+  "audio/webm",
+  "video/x-m4v",
+]);
+const GENERIC_TYPES = new Set(["", "application/octet-stream", "binary/octet-stream", "application/x-binary"]);
+
+/** The content-type to serve a proxied file with, or null to refuse it. */
+export function safeMediaContentType(upstreamType: string | null, ext: string | null): string | null {
+  const t = (upstreamType ?? "").split(";")[0].trim().toLowerCase();
+  if (SAFE_TYPE_SET.has(t)) return t;
+  if (GENERIC_TYPES.has(t)) return SAFE_MEDIA_TYPES[(ext ?? "").toLowerCase()] ?? null;
+  return null;
+}
+
+/** Headers every proxied media response carries, whatever the file. */
+export const MEDIA_SECURITY_HEADERS: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  // Even if a browser were tricked into rendering it as a document, it gets no script, no origin.
+  "content-security-policy": "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
+};
+
 export function toPublicMediaUrl(url: string): string {
   const k = key();
   const iv = createHmac("sha256", k).update(url).digest().subarray(0, 12);

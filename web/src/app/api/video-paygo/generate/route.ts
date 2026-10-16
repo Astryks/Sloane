@@ -34,6 +34,7 @@ import { PRESET_VOICES } from "@/lib/presetVoices";
 import { enhanceVideoPrompt } from "@/lib/promptEnhance.server";
 import { maxPromptCharsFor, promptProfileFor } from "@/lib/promptPresets";
 import { publicJson } from "@/lib/mediaProxy";
+import { lucyVoiceMaxChars, maxAudioSecondsFor } from "@/lib/videoEngines";
 
 // The prompt enhancer (promptEnhance.server.ts) adds up to ~15s before
 // submission - needs more than the default limit.
@@ -173,6 +174,15 @@ export async function POST(req: NextRequest) {
     if (prompt.length > MAX_PROMPT_LENGTH) {
       return publicJson({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
     }
+    // 2026-10-17 audit: the video is only as long as the model's clip, so a
+    // longer Lucy-voice script was cut off mid-sentence. Kling Avatar is the
+    // exception - its video follows the audio.
+    if (wantsLucyVoice && !useKlingAvatar && prompt.length > lucyVoiceMaxChars(engine)) {
+      return publicJson(
+        { error: `${engineDef.label} makes a ${engineDef.durationSeconds}-second clip - keep the script to ${lucyVoiceMaxChars(engine)} characters (about ${engineDef.durationSeconds} seconds of speech) so none of it is cut off.` },
+        { status: 400 },
+      );
+    }
     if (reviewedPrompt.length > maxPromptCharsFor(engine)) {
       return publicJson({ error: `Lucy's prompt is too long for ${engineDef.label} (max ${maxPromptCharsFor(engine)} characters)` }, { status: 400 });
     }
@@ -211,6 +221,13 @@ export async function POST(req: NextRequest) {
       if (ownAudioSeconds != null && ownAudioSeconds < LIPSYNC_MIN_AUDIO_SECONDS) {
         return publicJson(
           { error: `That audio is too short to lip-sync (${ownAudioSeconds.toFixed(1)}s) - add at least ${LIPSYNC_MIN_AUDIO_SECONDS}s` },
+          { status: 400 },
+        );
+      }
+      // Same rule as the Lucy-voice script: audio longer than the clip would be cut off.
+      if (ownAudioSeconds != null && !useKlingAvatar && ownAudioSeconds > maxAudioSecondsFor(engine)) {
+        return publicJson(
+          { error: `That audio is ${ownAudioSeconds.toFixed(1)}s, but ${engineDef.label} makes a ${engineDef.durationSeconds}-second clip - trim it to ${engineDef.durationSeconds}s so none of it is cut off.` },
           { status: 400 },
         );
       }

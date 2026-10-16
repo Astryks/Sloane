@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const instruction = String(body.instruction ?? "").trim();
     if (!instruction) return publicJson({ error: "Say what you'd like to change" }, { status: 400 });
     if (instruction.length > 6000) return publicJson({ error: "That's too long - paste one scene's shot sheet at a time" }, { status: 400 });
-    if (!(await underPlanCap(req))) return publicJson({ error: "You've made a lot of changes today - edit the shots directly, or try again tomorrow." }, { status: 429 });
+    if (!(await underPlanCap())) return publicJson({ error: "You've made a lot of changes today - edit the shots directly, or try again tomorrow." }, { status: 429 });
     const plan = sanitizePlan(body.plan);
     const shotIndex = Number.isInteger(body.shotIndex) && (body.shotIndex as number) >= 0 && (body.shotIndex as number) < plan.shots.length ? (body.shotIndex as number) : null;
     const next = await revisePlan(plan, instruction, shotIndex);

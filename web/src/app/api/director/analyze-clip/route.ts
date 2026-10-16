@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     const yt = youTubeUrl(raw);
     const isUpload = /^https:\/\/[\w.-]+\.public\.blob\.vercel-storage\.com\//.test(raw);
     if (!yt && !isUpload) return publicJson({ error: "Paste a YouTube link or upload an MP4" }, { status: 400 });
-    if (!(await underPlanCap(req))) return publicJson({ error: "That's today's limit for Lucy's free help - try again tomorrow." }, { status: 429 });
+    if (!(await underPlanCap())) return publicJson({ error: "That's today's limit for Lucy's free help - try again tomorrow." }, { status: 429 });
 
     const cast = (Array.isArray(body.cast) ? body.cast : []).map(String).filter(Boolean).slice(0, 3);
     const castLine = cast.length

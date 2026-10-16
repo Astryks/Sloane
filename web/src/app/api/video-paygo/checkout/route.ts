@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { stripe } from "@/lib/stripe";
-import { getOrCreatePaygoSessionUser } from "@/lib/auth";
+import { GuestLimitError, getOrCreatePaygoSessionUser } from "@/lib/auth";
 import { initSchema } from "@/lib/db";
 import { videoPackFromId, formatUsd } from "@/lib/videoPaygo";
 import { publicJson } from "@/lib/mediaProxy";
@@ -28,7 +28,13 @@ export async function POST(req: NextRequest) {
   }
 
   await initSchema();
-  const user = await getOrCreatePaygoSessionUser();
+  let user;
+  try {
+    user = await getOrCreatePaygoSessionUser({ forCheckout: true });
+  } catch (err) {
+    if (err instanceof GuestLimitError) return publicJson({ error: err.message }, { status: 429 });
+    throw err;
+  }
 
   const origin = req.nextUrl.origin;
   try {
