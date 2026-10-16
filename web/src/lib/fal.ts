@@ -378,20 +378,51 @@ async function pollForImageUrl(endpoint: string, requestId: string, timeoutMs: n
   return urls[0];
 }
 
+/**
+ * Asks fal to cancel a queued/running job. Returns "completed" when fal says
+ * it already finished (so the result can still be collected), otherwise
+ * whether the cancel was accepted.
+ */
+export async function cancelFalJob(endpoint: string, requestId: string): Promise<"cancelled" | "completed" | "failed"> {
+  try {
+    const res = await fetch(`${FAL_BASE}/${pollingEndpoint(endpoint)}/requests/${requestId}/cancel`, { method: "PUT", headers: falHeaders() });
+    const data = (await res.json().catch(() => ({}))) as { status?: string };
+    if (data.status === "ALREADY_COMPLETED") return "completed";
+    return res.ok ? "cancelled" : "failed";
+  } catch {
+    return "failed";
+  }
+}
+
+function imageUrlsOf(result: unknown): string[] {
+  return ((result as { images?: Array<{ url?: string }> }).images ?? []).map((i) => i.url).filter((u): u is string => !!u);
+}
+
+// 2026-10-17 audit: a timeout used to throw (and the caller refunded) while
+// the fal job kept running and billing us. Now a timeout cancels the job;
+// if fal says it had just finished, its images are returned instead. A
+// transient error checking status is retried until the deadline rather
+// than failing straight away.
 async function pollForImageUrls(endpoint: string, requestId: string, timeoutMs: number, label: string): Promise<string[]> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const status = await getFalJobStatus(endpoint, requestId);
+    let status: FalJobStatus | null = null;
+    try {
+      status = await getFalJobStatus(endpoint, requestId);
+    } catch (err) {
+      console.error(`[fal] ${label} status check failed - retrying`, err);
+    }
     if (status === "FAILED") throw new Error(`${label} failed`);
     if (status === "COMPLETED") {
-      const result = await getFalJobResult(endpoint, requestId);
-      const urls = ((result as { images?: Array<{ url?: string }> }).images ?? [])
-        .map((i) => i.url)
-        .filter((u): u is string => !!u);
+      const urls = imageUrlsOf(await getFalJobResult(endpoint, requestId));
       if (!urls.length) throw new Error(`${label} returned no image`);
       return urls;
     }
     await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  if ((await cancelFalJob(endpoint, requestId)) === "completed") {
+    const urls = imageUrlsOf(await getFalJobResult(endpoint, requestId).catch(() => ({})));
+    if (urls.length) return urls;
   }
   throw new Error(`${label} timed out`);
 }

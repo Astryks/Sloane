@@ -130,10 +130,18 @@ export function resolveMediaUrl(value: string): string {
 
 const GENERIC_ERROR = "Generation failed - please try again.";
 
+// 2026-10-17 audit: vendor error text reached customers raw when it didn't
+// name the vendor - HTTP status dumps, JSON bodies, request ids, quota/key
+// messages, stack-ish text. Our own messages are plain sentences.
+const RAW_VENDOR_ERROR = /\(\d{3}\)|\b[45]\d\d\b.*[:{]|[{}[\]]|https?:\/\/|request[_ ]?id|api[_ ]?key|rate.?limit|internal server error|ECONN|ETIMEDOUT|fetch failed|undefined|null\b|exception|stack|traceback/i;
+export function looksLikeRawVendorError(value: string): boolean {
+  return value.length > 400 || RAW_VENDOR_ERROR.test(value);
+}
+
 function scrub(value: unknown, parentKey: string | null): unknown {
   if (typeof value === "string") {
     if (isVendorMediaUrl(value)) return toPublicMediaUrl(value);
-    if (VENDOR_NAME.test(value) && parentKey && /error|message|reason/i.test(parentKey)) return GENERIC_ERROR;
+    if (parentKey && /error|message|reason/i.test(parentKey) && (VENDOR_NAME.test(value) || looksLikeRawVendorError(value))) return GENERIC_ERROR;
     return value;
   }
   if (Array.isArray(value)) return value.map((v) => scrub(v, parentKey));
