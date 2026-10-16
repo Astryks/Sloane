@@ -2,6 +2,18 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## Latest update, 2026-10-16 (evening) - Lucy Studio live at /studio (Higgsfield-style)
+
+- **One dark prompt bar** (`components/LucyStudio.tsx`):
+  - **Elements:** + Person / + Place / + Product, either from saved cast and sets or uploaded. A person can also be just a name. Adding a person @mentions them in the prompt, and typing @ opens a mention list.
+  - **Chips:** genre, camera move (handheld, selfie, dolly in, tracking, orbit, crane, reveal, locked-off), shape, shot count, model, "One take" (chained continuous shots) and "Check frames first".
+  - **Generate · $price** makes a free storyboard. "Change it" edits it in plain English, then "Draw the frames (free)" or "Film it". Paying uses the same exact-amount checkout, now returning to `/studio`.
+- **Recreate gallery:** the 5 recipe videos (hover to play) fill in the prompt, genre and shape.
+- **Your creations:** a feed from the new `GET /api/director/films`. Click one to resume or watch it.
+- **Revise** can now add or remove shots ("add a final shot of the bread"), within 2-8.
+- **Verified on prod:** add @Maya, describe the scene, Generate gives a 3-shot storyboard with the price, and "Change it" works. Nothing was filmed.
+- The home page links to it ("✨ New: Lucy Studio").
+
 ## Latest update, 2026-10-16 (later) - Native iOS editor built (`ios/LucyEditor`)
 
 - **No iOS editor existed before.** `mobile/` is the old Expo voice app and `desktop/AstryksEditor` is the macOS web-view wrapper. This is a new **native SwiftUI + AVFoundation** app, not a web view, so it clears App Review 4.2.
