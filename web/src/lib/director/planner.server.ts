@@ -1,6 +1,6 @@
 // Server-only: runs the storyboard planner on Gemini (Vertex, Google
 // credits), falling back to the rule-based planner. See plan.ts.
-import { MAX_SHOTS } from "./plan";
+import { MAX_SHOTS, MIN_SHOTS } from "./plan";
 import { withCoverageGrammar } from "./grammar";
 import { tagBeats, withShotChoices } from "./beats";
 import { geminiJson } from "../gemini";
@@ -36,7 +36,15 @@ export async function revisePlan(plan: DirectorPlan, instruction: string, shotIn
     : instruction;
   const raw = await geminiJson<unknown>(PLANNER_SYSTEM, reviseUserMessage(plan, ask, shotIndex), { temperature: 0.5 });
   if (!raw) return null;
-  const sanitized = sanitizePlan(raw, { shotCount: pastedShots >= 2 && shotIndex == null ? Math.min(MAX_SHOTS, pastedShots) : plan.shots.length });
+  // "Add a shot of the bread" / "cut the last shot" (Lucy Studio, 2026-10-16): let the model's shot count stand.
+  const returned = Array.isArray((raw as { shots?: unknown[] })?.shots) ? (raw as { shots: unknown[] }).shots.length : 0;
+  const changesCount = shotIndex == null && /\b(add|another|extra|insert|remove|delete|drop|cut|fewer|more)\b[^.]*\bshots?\b|\bshots?\b[^.]*\b(added|removed)\b/i.test(instruction);
+  const shotCount = pastedShots >= 2 && shotIndex == null
+    ? Math.min(MAX_SHOTS, pastedShots)
+    : changesCount && returned
+      ? Math.min(MAX_SHOTS, Math.max(MIN_SHOTS, returned))
+      : plan.shots.length;
+  const sanitized = sanitizePlan(raw, { shotCount });
   // Keep the customer's film settings (camera format, coverage, voices...) - the model doesn't return them.
   const next: DirectorPlan = {
     ...sanitized,

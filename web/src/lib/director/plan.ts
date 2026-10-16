@@ -727,7 +727,7 @@ export function reviseUserMessage(plan: DirectorPlan, instruction: string, shotI
   return [
     `Current plan JSON:\n${JSON.stringify(plan)}`,
     shotIndex == null
-      ? `Change request for the whole film: ${instruction.trim()}`
+      ? `Change request for the whole film (if it asks to add or remove a shot, return that many shots, between ${MIN_SHOTS} and ${MAX_SHOTS}): ${instruction.trim()}`
       : `Change request for shot ${shotIndex + 1} ONLY (keep every other shot, the look and the character exactly as they are): ${instruction.trim()}`,
     "Return the full updated plan JSON.",
   ].join("\n\n");
