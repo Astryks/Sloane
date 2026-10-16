@@ -2,6 +2,133 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## Latest update, 2026-10-17 - Audit fixes (branch `fix/audit-security`, PR open, not merged)
+
+Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, which contains it. Nothing is deployed until it's merged to `main`.
+
+**P0**
+- [x] **A cancelled Director film could still be filmed.** `updateDirectorFilm` never touches a `cancelled` film now, and every pipeline write-back only applies while the film is still in the status that poll read. A poll finishing a step after a cancel can't move the film to review or shots any more. (`lib/db.ts`, `lib/director/pipeline.ts`)
+- [x] **Approve racing cancel could refund twice.** Approve charges first, then one atomic `review -> shots` step also marks the film paid (`approveDirectorFilm`). The film used to be marked paid before the transition. Cancel is one atomic step that returns the row it cancelled (`cancelDirectorFilm`), and the refund is worked out from that row. Only the side that loses refunds, and only its own charge. (`api/director/approve`, `api/director/cancel`)
+- [x] **Free daily caps were keyed on guest ids anyone can create.** New `lib/freeCaps.ts`:
+  - Guests are counted per client IP: Vercel's `x-real-ip`, with IPv6 grouped by /64.
+  - Real accounts are counted per account and per IP. The IP gets 3x the cap, for shared networks.
+  - `takeFreeSlots` takes advisory locks per key in one transaction, so a parallel burst gets exactly the cap. The 16 Oct single statement still let concurrent requests through.
+  - Applies to: storyboards (3/day), planning/revise/act-line/Copy-a-clip (20), character and location sheets (18), uploads (120), voice samples (20) and prompt previews (40).
+  - Guest creation is capped at 12 per IP per day. Checkout has its own 30, so a purchase is never what gets blocked.
+- [x] **Signed-in users had unlimited free images on the old storyboard grid.** Grid `generate-image`, `reference/generate` (counted per image) and `generate-cinematic-scene` share a limit of 20 images a day per account (3x per IP). So do the Ad Studio scene image and edit routes, which had the same hole through unlimited projects. Owners are exempt.
+- [x] **Media proxy could serve uploaded HTML (stored XSS).** `/api/media/<token>` now serves only an allowlist of video, image and audio types:
+  - A generic binary type falls back to the file extension's type.
+  - HTML, SVG, XML and anything else gets a 415.
+  - Every response has `X-Content-Type-Options: nosniff` and a sandboxing CSP.
+  - The site sends `nosniff` on every response (`next.config.ts`).
+  - `grid-storyboard/reference/create` only saves media-host URLs.
+- [x] **Two overlapping Director polls could submit the same paid job.** `claimDirectorFilm` and `claimDirectorShot` now return the row as it is after the claim. Each step works from that row and backs off if the request id or status changed since the poll read it. Voicing and stitching re-read the shots after claiming.
+
+**P1**
+- [x] **Homepage jobs only advanced while the tab polled.** The status logic moved to `lib/videoPaygoAdvance.ts`, and three things run it:
+  - The open tab, as before.
+  - A sweep of idle jobs (nobody polled for 90s), run after every status and balance request from any visitor.
+  - The daily cleanup cron, as a backstop. Vercel Hobby only allows daily crons.
+  - Jobs still unfinished after 3 hours are failed and refunded.
+  - The homepage shows "Your recent videos" (last 2 days), so a video that finished after the tab closed can be found.
+- [x] **A temporary error fetching a finished Veo result refunded a render we'd paid for.** Collection errors are now retried for up to 30 minutes before failing and refunding. This covers homepage jobs (`result_error_since`) and Director shots (`poll_error_since`). A voice-service status error is also retried, not refunded.
+- [x] **Lucy-voice scripts up to 600 characters were cut to the clip.** The limit is now the model's clip length x 15 characters a second (Veo 120, Kling 75). The form shows a counter and `maxLength`, and `video-paygo/generate` enforces it. Uploaded audio longer than the clip is refused the same way. Kling Avatar is exempt because its video follows the audio. (`lib/videoEngines.ts`)
+- [x] **The Stripe webhook didn't check `payment_status`.** Credit is granted only when `payment_status === "paid"`. Delayed payments are granted on `checkout.session.async_payment_succeeded`. Grants are now keyed on the Checkout Session id, so two events can't both grant one purchase. Signature check and event-id idempotency are unchanged. The handler moved to `lib/stripeWebhook.ts`.
+- [x] **Magic links were used up on GET by email scanners.** The GET now shows a "Sign in" page. Only a POST from that page consumes the token: the Origin must match and the token must be 64-character hex. (`api/auth/verify`, `lib/magicLink.ts`)
+- [x] **`analyze-clip` could delete any public blob without auth.** Uploads go into a per-account folder (`clips/<HMAC of user id>/`), which `clip-upload` enforces when it issues the token. `analyze-clip` needs a session and only accepts, and deletes, a clip in the caller's own folder. (`lib/clipOwnership.ts`, `components/CopyClip.tsx`)
+- [x] **Retakes were allowed while voicing or stitching.** A retake now needs a finished shot (completed or failed) in a completed, failed or filming film. It's one locked SQL statement, so the same shot can't be charged twice. The shots -> voicing/stitching step checks in SQL that no shot is still rendering. Picking another take follows the same rules.
+- [x] **A stills timeout refunded without cancelling the fal job.** A timeout now cancels it, and if fal says the job had just finished, its image is returned instead. A transient status error is retried until the deadline. (`lib/fal.ts`)
+
+**P2**
+- [x] **Vendor error text was returned raw.** `publicJson` replaces error text that looks like a raw vendor reply: HTTP status dumps, JSON, URLs, request ids, API-key, rate-limit or network errors, or anything over 400 characters.
+- [x] **Owner-mode refunds piled up.** `refundVideoCredit` skips owners, whose spends are topped up just before they happen. Director refunds now go through it.
+- [ ] **The fal balance check passes if `FAL_ADMIN_KEY` is missing.** Not changed. Failing closed without the key would block every fal generation, and I can't see whether the key is set in Vercel. It's documented in `.env.example`. **Sid:** check that `FAL_ADMIN_KEY` (an admin-scoped fal key) is set in Vercel, then this can be switched to fail closed.
+- [x] **`director_plan_log` was never pruned.** The daily cleanup cron deletes rows older than 2 days.
+- [x] **The cron secret wasn't compared in constant time.** `cronAuthError` uses a hashed `timingSafeEqual`. (`lib/adminAuth.ts`)
+- [x] **60 env vars weren't in `web/.env.example`.** Every `process.env` the app reads is now listed.
+
+**Also in this PR**
+- **MiniMax double rewrite:** fal's MiniMax H3 Max schema has no `prompt_optimizer`. Its own rewrite is `prompt_expansion_mode` (`disabled | balanced | quality`, required, default `balanced`; checked against fal's OpenAPI on 17 Oct). It's set to `disabled` when Lucy wrote the prompt: the enhancer (`llm`), a reviewed preview, or any Director shot. Raw or preset-only prompts keep `balanced`.
+- **Homepage placeholder** shortened to one line, since Lucy expands the idea. With Enhance off it asks for the detail. The box is 4 rows instead of 7.
+- **Fresh databases:** `stripe_credit_grants` was created before `users`, which it references, so `initSchema` failed on a new database. It's moved below `users`; production is unaffected.
+
+**Tests:** `src/lib/auditFixes.test.ts`, 32 tests. The SQL runs on a real in-memory Postgres (PGlite, a new dev dependency, through `__setDbForTests`). Vendors, Stripe and the network are mocked.
+- `npm test`: 119/119.
+- `tsc --noEmit` is clean and `next build` succeeds.
+- eslint: changed files add no new errors (`page.tsx` keeps its 5 existing ones).
+
+**Sid to do:**
+1. Stripe dashboard: add `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed` to the webhook endpoint's events. Card payments are unaffected, but this is needed if delayed payment methods are ever enabled.
+2. Check `FAL_ADMIN_KEY` in Vercel (see P2 above).
+3. After merging, existing free-cap counters start fresh once, because the key format changed.
+
+## Latest update, 2026-10-16 (late night) - Prompt enhancer for one-prompt video (branch `feat/prompt-enhancer`, PR open, not merged)
+
+**Why:** Sid: "a prompt leads to very different results... maybe we need a system at the back end where a prompt goes to an LLM to expand it further". Before this, the homepage generator sent the user's words straight to the model (the GPT-6 Astra rewrite in `promptDirector.ts` was still on the server, but its checkbox was removed on 23 Sep, so nothing called it). Directed by Lucy / Lucy Studio already had a Gemini planner plus per-model formatters (`lib/director/formatters.ts`), so they're unchanged.
+
+**How it works now (homepage "Make a video from one prompt"):**
+1. The user types an idea and can pick **🎥 Camera** (12 Higgsfield-style moves: static, dolly in/out, crash zoom, tracking, orbit, crane up, handheld, selfie, FPV drone, aerial, whip pan) and **🎨 Style** (9 looks: cinematic, phone/UGC, commercial, documentary, golden hour, moody night, vintage film, anime, 3D animation). **✨ Enhance** is on by default.
+2. Optional **"See Lucy's prompt (free)"** calls `POST /api/prompt/enhance` (40 a day per visitor) and shows the exact prompt in an editable box. If the user edits it, or just leaves it, Generate sends that text as `final_prompt` and makes no second LLM call. Changing the idea, model, presets, duration, ratio, audio or photo hides a stale preview.
+3. On Generate (after the credit is spent, so it can't be used as a free LLM), `video-paygo/generate` runs `enhanceVideoPrompt` unless `enhance=0`. The output follows the chosen model's own guide:
+   - **Veo:** Google's order (cinematography, subject, action, context, style). Dialogue as `says: "..." (no subtitles)`, then `Ambient noise:` / `SFX:`. 50-120 words.
+   - **Kling 2.1:** subject, movement, scene, camera, light, atmosphere. No audio.
+   - **Kling 3:** `[Speaker, tone]: "line"`.
+   - **Seedance:** subject + action, environment, camera, style. Moderate motion. Ends "No subtitles, no watermark."
+   - **MiniMax:** bracket camera commands like `[Push in]`.
+   - **Grok:** plain prose. "The camera does not move" for static shots.
+   - With a reference photo, the prompt describes only motion, camera and light, and doesn't redescribe the person.
+   - A Lucy voice (the text is the script) and Kling Avatar lip-sync are never rewritten.
+4. **Negative prompt:** Veo, Kling 2.1 and Kling 3 now get `negative_prompt` (plain nouns, filtered so it never contradicts the user's words). Nothing on the homepage sent one before.
+5. After the video, "The prompt Lucy sent to <model>" shows what the model actually got.
+
+**Guarantees, enforced in code (not trusted to the LLM):**
+- **Fallback:** if the LLM fails, times out (15s total) or gives an unusable answer, the user's own prompt is used, plus their camera/style picks appended word for word.
+- **Rejected answers:** any answer that changes quoted dialogue, adds trademarks, URLs, @handles or logos (logos are allowed with a reference photo), or adds nudity, gore, weapons, drugs or children the user didn't ask for. Also rejected: answers that drop most of the user's words.
+- **Length:** trimmed at a sentence to each model's cap (1,200-1,400 characters).
+
+**LLM:** no new key or account. It uses Gemini on Vertex first (same keyless setup and `GOOGLE_PLANNER_MODEL` as the Director planner, about $0.001 a call on Google credits), then fal OpenRouter with `FAL_KEY` (the old Astra model) as a backup. **`PROMPT_ENHANCE=off`** turns the whole thing off. The Anthropic API wasn't needed because two providers are already configured.
+
+**Logging:** every enhancement logs one `[prompt-enhance]` JSON line in Vercel logs, with route, engine, presets, source (llm / presets / raw / reviewed), the fallback reason, ms, original, final and negative. `video_paygo_jobs` gains `original_prompt` and `prompt_source` columns, added automatically by `initSchema`; `prompt` stays what the model got.
+
+**Files:**
+- New: `web/src/lib/promptPresets.ts` (presets + per-model profiles, client-safe), `web/src/lib/promptEnhance.ts` (pure logic), `web/src/lib/promptEnhance.server.ts` (providers + logging), `web/src/lib/promptEnhance.test.ts` (17 tests, LLM mocked), `web/src/app/api/prompt/enhance/route.ts`.
+- Changed: `video-paygo/generate/route.ts`, `app/page.tsx`, `lib/db.ts`, `lib/videoEngines.ts`, `web/package.json` (`npm test` now also runs `src/lib/*.test.ts`), `web/.env.example`.
+- Removed: `lib/promptDirector.ts`. `director=astra` is still accepted as an alias for enhance-on.
+
+**Audit fixes in the same PR:**
+- **Free daily caps:** `takeDirectorPlanSlot` is now one atomic `INSERT ... WHERE count < cap`. Parallel requests could all pass the old count-then-insert.
+- **Completed after refund:** `completeVideoPaygoJob` no longer flips a job another poll already failed and refunded.
+- Both SQL statements were checked on PGlite.
+
+**Verified:**
+- `npm test`: 87/87 (70 existing + 17 new).
+- `tsc --noEmit` is clean and `next build` succeeds.
+- eslint: changed/new files add no new errors. `page.tsx` keeps its 5 existing errors.
+- In a local browser: Camera/Style/Enhance controls render, the preview box shows and edits, and changing a preset hides the stale preview.
+- **Not verified against production:** a real Gemini enhancement and a paid generation with it. There's no env on this machine.
+
+**Sid to do:**
+1. Review and merge the PR. Vercel deploys `main`.
+2. Make one test video and compare the `[prompt-enhance]` log line.
+3. If quality is still off on one model, tune that model's line in `FAMILY_RULES` (`promptEnhance.ts`).
+
+**Research summary (Higgsfield and the others, with sources):**
+- **Higgsfield:** about 65 named camera presets (https://higgsfield.ai/camera-controls). Cinema Studio's Director's Panel covers genre, camera body, lens, grade, lighting, era and tempo (https://higgsfield.ai/creator-hub/help-center/tools/how-do-i-use-cinema-studio). Soul ID trains on 20-80 photos (https://higgsfield.ai/creator-hub/help-center/ai-models/how-do-i-create-and-use-a-soul-id-character). Their prompt advice: layer subject, details, environment, style; for image-to-video, describe the motion, not the look; change one thing at a time (https://higgsfield.ai/creator-hub/help-center/getting-started/how-do-i-write-a-good-prompt). Their "Enhance prompt" toggle has no official write-up.
+- **Other platforms:** Luma, Freepik and Adobe Firefly all have a one-click LLM "Enhance prompt":
+  - https://lumaai.notion.site/FAQ-and-Prompt-Guide-Luma-Dream-Machine-9e4ec319320a49bc832b6708e4ae7c46
+  - https://www.freepik.com/ai/docs/your-first-ai-video
+  - https://helpx.adobe.com/firefly/work-with-audio-and-video/work-with-video/enhance-your-prompt-for-video-generation.html
+- **Runway Gen-4:** start simple, use positive phrasing, and for image-to-video describe motion only (https://help.runwayml.com/hc/en-us/articles/39789879462419).
+- **Kling:** subject, action, scene, camera language, lighting/mood (https://kling.ai/blog/kling-ai-prompt-guide). The fal Kling 3 guide covers speaker labels with tone (https://blog.fal.ai/kling-3-0-prompting-guide/).
+- **Veo 3.1:** formula plus `SFX:` / `Ambient noise:` (https://cloud.google.com/blog/products/ai-machine-learning/ultimate-prompting-guide-for-veo-3-1). Max 1,024 tokens, and a seed does not guarantee repeatable results (https://ai.google.dev/gemini-api/docs/veo). Negative prompts are plain nouns without "no" (https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/video-gen-prompt-guide).
+- **Seedance:** one camera move per shot, emotion as visible behaviour, avoid violent motion (https://docs.byteplus.com/en/docs/ModelArk/2222480; BytePlus pages didn't render, so the details came via https://runway.com/resources/seedance-2-0-prompt-guide).
+- **MiniMax Hailuo:** 15 bracket camera commands, 2,000-character limit, and its own `prompt_optimizer` is on by default (https://platform.minimax.io/docs/api-reference/video-generation-t2v).
+- **Grok Imagine:** for image-to-video, describe what happens after the first frame (https://docs.x.ai/developers/model-capabilities/video/overview).
+- **Takeaway:** every leading platform puts an LLM enhancer on top of named camera and style presets. That's what this ships.
+- **Follow-up:** MiniMax on fal still runs its own `prompt_expansion_mode: "balanced"`, so its prompts get rewritten twice. Check fal's schema for an "off" value before changing it.
+
+**Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
+
 ## Latest update, 2026-10-16 (night) - Jess "MEFE method" explainer, made on free Google Cloud credit only
 
 - **Output:** `deliverables/jess_mefe.mp4` (master, 147 MB) and `jess_mefe_share.mp4` (53 MB). 2:54, 9:16, full colour, bold 1-3 word captions in the style of the Short Sid sent. The script is delivered word for word; the final transcript matches it 98.9%. `deliverables/` is git-ignored.

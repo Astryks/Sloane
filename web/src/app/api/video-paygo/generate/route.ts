@@ -15,6 +15,7 @@ import {
   VIDEO_PAYGO_ENGINES,
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
   buildVideoInferenceInput,
+  disableVendorPromptRewrite,
   resolveVideoEndpoint,
   videoEngineUsesModelArk,
   videoPriceCents,
@@ -31,14 +32,17 @@ import {
 import { submitModalJob } from "@/lib/modal";
 import { probeAudioDurationSeconds, LIPSYNC_MIN_AUDIO_SECONDS } from "@/lib/audioDuration";
 import { PRESET_VOICES } from "@/lib/presetVoices";
-import { directPrompt } from "@/lib/promptDirector";
+import { enhanceVideoPrompt } from "@/lib/promptEnhance.server";
+import { maxPromptCharsFor, promptProfileFor } from "@/lib/promptPresets";
 import { publicJson } from "@/lib/mediaProxy";
+import { lucyVoiceMaxChars, maxAudioSecondsFor } from "@/lib/videoEngines";
 
-// The optional GPT-6 Astra prompt-director call (see promptDirector.ts)
-// adds up to ~25s before submission - needs more than the default limit.
+// The prompt enhancer (promptEnhance.server.ts) adds up to ~15s before
+// submission - needs more than the default limit.
 export const maxDuration = 60;
 
 const MAX_PROMPT_LENGTH = 600;
+const MAX_NEGATIVE_PROMPT_LENGTH = 300;
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 type AudioMode = "none" | "own" | "lucy";
@@ -95,7 +99,16 @@ export async function POST(req: NextRequest) {
     const lipSyncMode = (String(form.get("lip_sync_mode") ?? "lipsync") || "lipsync") as LipSyncMode;
     const durationField = form.get("duration_seconds");
     const aspectRatioField = form.get("aspect_ratio");
-    const director = String(form.get("director") ?? "");
+    // Prompt enhancer (2026-10-16): on unless the client sends enhance=0.
+    // "director=astra" is the old opt-in name for the same step.
+    const enhanceField = String(form.get("enhance") ?? "");
+    const wantsEnhance = enhanceField !== "0" || String(form.get("director") ?? "") === "astra";
+    const cameraPreset = String(form.get("camera_preset") ?? "auto").slice(0, 40);
+    const stylePreset = String(form.get("style_preset") ?? "auto").slice(0, 40);
+    // The enhanced prompt the user already previewed (and maybe edited) via
+    // /api/prompt/enhance - used exactly as given, no second LLM call.
+    const reviewedPrompt = String(form.get("final_prompt") ?? "").trim();
+    const reviewedNegative = String(form.get("negative_prompt") ?? "").trim();
 
     if (!VIDEO_PAYGO_ENGINES[engine]) {
       return publicJson({ error: "Unknown engine" }, { status: 400 });
@@ -162,6 +175,21 @@ export async function POST(req: NextRequest) {
     if (prompt.length > MAX_PROMPT_LENGTH) {
       return publicJson({ error: `Prompt is too long (max ${MAX_PROMPT_LENGTH} characters)` }, { status: 400 });
     }
+    // 2026-10-17 audit: the video is only as long as the model's clip, so a
+    // longer Lucy-voice script was cut off mid-sentence. Kling Avatar is the
+    // exception - its video follows the audio.
+    if (wantsLucyVoice && !useKlingAvatar && prompt.length > lucyVoiceMaxChars(engine)) {
+      return publicJson(
+        { error: `${engineDef.label} makes a ${engineDef.durationSeconds}-second clip - keep the script to ${lucyVoiceMaxChars(engine)} characters (about ${engineDef.durationSeconds} seconds of speech) so none of it is cut off.` },
+        { status: 400 },
+      );
+    }
+    if (reviewedPrompt.length > maxPromptCharsFor(engine)) {
+      return publicJson({ error: `Lucy's prompt is too long for ${engineDef.label} (max ${maxPromptCharsFor(engine)} characters)` }, { status: 400 });
+    }
+    if (reviewedNegative.length > MAX_NEGATIVE_PROMPT_LENGTH) {
+      return publicJson({ error: `Negative prompt is too long (max ${MAX_NEGATIVE_PROMPT_LENGTH} characters)` }, { status: 400 });
+    }
     if ((hasAudio || wantsLucyVoice) && useKlingAvatar && !hasImage) {
       return publicJson(
         { error: wantsLucyVoice ? "Kling needs a photo (or video) to lip-sync the voice to" : "Kling needs a photo (or video) to lip-sync your audio to" },
@@ -194,6 +222,13 @@ export async function POST(req: NextRequest) {
       if (ownAudioSeconds != null && ownAudioSeconds < LIPSYNC_MIN_AUDIO_SECONDS) {
         return publicJson(
           { error: `That audio is too short to lip-sync (${ownAudioSeconds.toFixed(1)}s) - add at least ${LIPSYNC_MIN_AUDIO_SECONDS}s` },
+          { status: 400 },
+        );
+      }
+      // Same rule as the Lucy-voice script: audio longer than the clip would be cut off.
+      if (ownAudioSeconds != null && !useKlingAvatar && ownAudioSeconds > maxAudioSecondsFor(engine)) {
+        return publicJson(
+          { error: `That audio is ${ownAudioSeconds.toFixed(1)}s, but ${engineDef.label} makes a ${engineDef.durationSeconds}-second clip - trim it to ${engineDef.durationSeconds}s so none of it is cut off.` },
           { status: 400 },
         );
       }
@@ -239,26 +274,46 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: message }, { status: 500 });
     }
 
-    // Optional GPT-6 Astra rewrite (see promptDirector.ts) - after the
-    // credit is spent so it can't be used as a free LLM, and skipped for
-    // a Lucy voice, where the prompt is the literal TTS script. Falls back
-    // to the user's own words on any failure.
-    let finalPrompt = prompt;
-    let directedPrompt: string | null = null;
-    if (director === "astra" && prompt && !wantsLucyVoice && !useKlingAvatar) {
-      directedPrompt = await directPrompt({
-        prompt,
-        engineLabel: engineDef.versionLabel,
-        durationSeconds: requestedDurationSeconds ?? engineDef.durationSeconds,
-        hasReferenceImage: hasImage,
-      });
-      if (directedPrompt) finalPrompt = directedPrompt;
-    }
-
+    // Prompt enhancer (promptEnhance.ts): the user's idea + chosen camera/
+    // style presets -> a model-specific shot prompt. Runs after the credit is
+    // spent so it can't be used as a free LLM. Skipped for a Lucy voice (the
+    // prompt is the literal TTS script) and Kling Avatar (audio drives it).
+    // Any LLM failure falls back to the user's own words (+ presets).
     // "voiceover" mode never uses Avatar (even on Kling) - every engine
     // renders normally, then gets its audio muxed on afterward, so
-    // needsMerge now also fires for Kling whenever lip-sync wasn't chosen.
+    // needsMerge also fires for Kling whenever lip-sync wasn't chosen.
     const needsMerge = (hasAudio || wantsLucyVoice) && !useKlingAvatar;
+    const enhanceEligible = !!prompt && !wantsLucyVoice && !useKlingAvatar;
+    let finalPrompt = prompt;
+    let negativePrompt: string | null = null;
+    let promptSource: "raw" | "presets" | "llm" | "reviewed" = "raw";
+    if (enhanceEligible && reviewedPrompt) {
+      finalPrompt = reviewedPrompt;
+      negativePrompt = reviewedNegative || null;
+      promptSource = "reviewed";
+      console.info("[prompt-enhance]", JSON.stringify({ route: "video-paygo/generate", engine, source: "reviewed", original: prompt, final: finalPrompt, negative: negativePrompt }));
+    } else if (enhanceEligible && wantsEnhance) {
+      const enhanced = await enhanceVideoPrompt(
+        {
+          prompt,
+          engine,
+          engineLabel: engineDef.versionLabel,
+          durationSeconds: requestedDurationSeconds ?? engineDef.durationSeconds,
+          aspectRatio: requestedAspectRatio,
+          cameraPreset,
+          stylePreset,
+          hasReferenceImage: hasImage,
+          nativeAudio: !needsMerge && engineDef.supportsNativeAudio,
+          speechAddedLater: needsMerge ? lipSyncMode : null,
+        },
+        { route: "video-paygo/generate" },
+      );
+      finalPrompt = enhanced.prompt;
+      negativePrompt = enhanced.negativePrompt;
+      promptSource = enhanced.source;
+    }
+    if (!promptProfileFor(engine).negativePrompt || !engineDef.supportsNegativePrompt) negativePrompt = null;
+
     const falEndpoint = useKlingAvatar
       ? VIDEO_PAYGO_ENGINES.kling.falAvatarEndpoint!
       : resolveVideoEndpoint(engine, hasImage);
@@ -274,6 +329,8 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         engine,
         prompt: finalPrompt,
+        originalPrompt: prompt,
+        promptSource,
         falEndpoint,
         inputImageUrl,
         inputAudioUrl,
@@ -304,7 +361,7 @@ export async function POST(req: NextRequest) {
       // flag; Seedance 2.5 / Kling v3 also support it (videoEngines.ts).
       const wantsNativeAudio =
         !needsMerge && Boolean(VIDEO_PAYGO_ENGINES[engine].supportsNativeAudio);
-      const falInput = useKlingAvatar
+      const falInput: Record<string, unknown> = useKlingAvatar
         ? { image_url: inputImageUrl, audio_url: inputAudioUrl }
         : buildVideoInferenceInput(
             engine,
@@ -315,9 +372,12 @@ export async function POST(req: NextRequest) {
             requestedDurationSeconds,
             requestedAspectRatio,
           );
+      if (negativePrompt && !useKlingAvatar) falInput.negative_prompt = negativePrompt;
+      // Lucy already expanded it - don't let MiniMax rewrite it a second time.
+      if (promptSource === "llm" || promptSource === "reviewed") disableVendorPromptRewrite(falInput, falEndpoint);
       const requestId = await submitVideoInferenceJob(falEndpoint, falInput);
       await setVideoPaygoJobRequestId(jobId, requestId);
-      return publicJson({ jobId, directedPrompt });
+      return publicJson({ jobId, finalPrompt, negativePrompt, promptSource });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Submission failed";
       await failVideoPaygoJob(jobId, message);

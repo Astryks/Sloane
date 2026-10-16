@@ -8,7 +8,7 @@ import {
   updateStoryboardReferenceImage,
   type StoryboardReferenceKind,
 } from "@/lib/db";
-import { publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
+import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 
 const MAX_NAME_LENGTH = 60;
 const KINDS: StoryboardReferenceKind[] = ["character", "location", "product", "vibe"];
@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
     // Browser sends back our own /api/media URL - decode to the real one before storing.
     const imageUrl = resolveMediaUrl(String(body.imageUrl ?? ""));
     if (!imageUrl) return publicJson({ error: "Missing imageUrl" }, { status: 400 });
+    // Only an image Lucy made or stored (2026-10-17 audit: any URL used to be saved and re-served).
+    if (!isVendorMediaUrl(imageUrl)) return publicJson({ error: "Pick one of the generated images" }, { status: 400 });
 
     if (referenceId) {
       const owner = await getStoryboardReferenceProjectOwner(referenceId);

@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { GRID_FREE_IMAGES_PER_DAY, GRID_LIMIT_MESSAGE, takeFreeAllowance } from "@/lib/freeCaps";
+import { isOwner } from "@/lib/owner";
 import { getGridStoryboardSlotProjectOwner, initSchema, setGridStoryboardSlotImage } from "@/lib/db";
 import { generateImageVariants, hasEnoughFalBalanceToGenerate, isImageEngine, uploadBufferToFal } from "@/lib/fal";
 import { detectAtmosphere, detectColorToneHints, expandCinematicPrompt, ATMOSPHERE_LIBRARY } from "@/lib/directorMode";
@@ -72,6 +74,10 @@ export async function POST(req: NextRequest) {
     const owner = await getGridStoryboardSlotProjectOwner(slotId);
     if (!owner) return publicJson({ error: "Scene not found" }, { status: 404 });
     if (owner !== user.id) return publicJson({ error: "Not your project" }, { status: 403 });
+
+    if (!isOwner(user) && !(await takeFreeAllowance("grid-img", GRID_FREE_IMAGES_PER_DAY, user, 1))) {
+      return publicJson({ error: GRID_LIMIT_MESSAGE }, { status: 429 });
+    }
 
     if (!(await hasEnoughFalBalanceToGenerate())) {
       return publicJson(

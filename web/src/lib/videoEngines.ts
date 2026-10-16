@@ -7,9 +7,6 @@
 
 export type VideoEngine = "seedance25" | "seedance" | "veo" | "veolite" | "veo31" | "kling" | "klingv3" | "minimax" | "grok";
 
-// Optional prompt-rewrite step - see promptDirector.ts (server-only).
-export const PROMPT_DIRECTOR_LABEL = "GPT-6 Astra";
-
 // Two price tiers (2026-09-27, per direct request to reflect lower direct-
 // vendor costs). Each clears the $1/video profit floor after Stripe fees at
 // the engine's worst-case cost (see VIDEO_PAYGO_ENGINE_COST_USD):
@@ -41,7 +38,7 @@ export type VideoEngineInfo = {
   supportsNativeAudio: boolean;
   aspectRatioOptions?: string[]; // undefined = no manual control on this engine
   supportsDurationChoice?: boolean; // gets the duration slider
-  supportsNegativePrompt?: boolean; // recorded, not wired into the UI yet
+  supportsNegativePrompt?: boolean; // the prompt enhancer sends negative_prompt (promptEnhance.ts)
 };
 
 export const VIDEO_PAYGO_ENGINES: Record<VideoEngine, VideoEngineInfo> = {
@@ -318,3 +315,19 @@ export const LEGACY_VIDEO_PRICE_ENV_CREDITS: Record<string, number> = {
   STRIPE_PRICE_VIDEO_CREDIT_10: 10,
 };
 export const LEGACY_CENTS_PER_CREDIT = 399;
+
+// Lucy-voice scripts (2026-10-17 audit): the script is read out, then the
+// video is made to the audio's length - but never longer than the model's
+// clip (5-10s). A 600-character script (~40s) was silently cut to the clip.
+// About 15 characters a second of natural speech; the same limit is used by
+// the form (counter + maxLength) and enforced by video-paygo/generate.
+export const LUCY_VOICE_CHARS_PER_SECOND = 15;
+
+export function lucyVoiceMaxChars(engine: VideoEngine): number {
+  return Math.floor(VIDEO_PAYGO_ENGINES[engine].durationSeconds * LUCY_VOICE_CHARS_PER_SECOND);
+}
+
+/** Uploaded audio longer than the clip (plus a little slack) would be cut off too. */
+export function maxAudioSecondsFor(engine: VideoEngine): number {
+  return VIDEO_PAYGO_ENGINES[engine].durationSeconds + 0.5;
+}

@@ -15,6 +15,8 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      // 2026-10-17 audit: browsers never guess a different type than the one we send.
+      { source: "/:path*", headers: [{ key: "X-Content-Type-Options", value: "nosniff" }] },
       {
         source: "/api/:path*",
         headers: [

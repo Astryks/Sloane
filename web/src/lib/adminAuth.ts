@@ -9,7 +9,7 @@ import type { NextRequest } from "next/server";
 // buffers be the same length (a raw length mismatch would otherwise throw
 // before any real comparison happens, which is itself a timing leak) and
 // makes the actual byte-compare constant-time.
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   const digestA = createHash("sha256").update(a).digest();
   const digestB = createHash("sha256").update(b).digest();
   return timingSafeEqual(digestA, digestB);
@@ -23,4 +23,15 @@ export function checkAdminAuth(req: NextRequest): boolean {
   if (!expected) return false;
   const password = req.headers.get("x-admin-password") ?? "";
   return safeEqual(password, expected);
+}
+
+/**
+ * Vercel cron calls carry `Authorization: Bearer $CRON_SECRET`. Compared in
+ * constant time (2026-10-17 audit - it was a plain !==). Returns null when
+ * allowed, otherwise the status code to refuse with (500 = not configured).
+ */
+export function cronAuthError(req: Pick<NextRequest, "headers">): 401 | 500 | null {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) return 500;
+  return safeEqual(req.headers.get("authorization") ?? "", `Bearer ${expected}`) ? null : 401;
 }

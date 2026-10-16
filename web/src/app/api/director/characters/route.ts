@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getOrCreatePaygoSessionUser, getPaygoSessionUser } from "@/lib/auth";
+import { GuestLimitError, getOrCreatePaygoSessionUser, getPaygoSessionUser } from "@/lib/auth";
 import { createSavedCharacter, deleteSavedCharacter, updateSavedCharacter, initSchema, listSavedCharacters, savedCharacterPhotos, type SavedCharacter } from "@/lib/db";
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { REF_LIMITS } from "@/lib/director/refs";
@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     const c = await createSavedCharacter(user.id, name, description, links, kind);
     return publicJson({ character: toClient(c) });
   } catch (err) {
+    if (err instanceof GuestLimitError) return publicJson({ error: err.message }, { status: 429 });
     console.error("[director/characters] save failed", err);
     return publicJson({ error: "Couldn't save that character right now." }, { status: 500 });
   }

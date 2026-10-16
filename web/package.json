@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/director/*.test.ts"
+    "test": "tsx --test src/lib/director/*.test.ts src/lib/*.test.ts"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
@@ -27,6 +27,7 @@
     "stripe": "^22.6.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/node-wav": "^0.0.4",
