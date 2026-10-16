@@ -40,7 +40,7 @@ import {
 } from "../db";
 import { getFalJobResult, getFalJobStatus, submitFalJob, IMAGE_EDIT_ENDPOINT, TEXT_TO_IMAGE_ENDPOINT } from "../fal";
 import { editableModelArkInput, getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
-import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
+import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, disableVendorPromptRewrite, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import { voiceLockRequested, type DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
 import { isVertexEndpoint } from "../vertexVeo";
@@ -410,6 +410,8 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       }
       // Editable form for direct Seedance too, so the reference audio / images / duration set below reach ModelArk.
       const input = editableModelArkInput(buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio), prompt, imageUrl);
+      // Lucy's formatter already wrote the full shot prompt - no second rewrite on MiniMax.
+      disableVendorPromptRewrite(input, endpoint);
       // Never on a reaction shot: Seedance would lip-sync the listener to it.
       if (lineAudio && !layIn) input.reference_audio_urls = [lineAudio];
       // Director Vertex jobs (2026-09-30): ask Veo to use our prompt as written,

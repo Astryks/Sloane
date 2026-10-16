@@ -498,3 +498,17 @@ export function buildSeedanceModelArkInput(
   });
   return withModelArkBody(body);
 }
+
+
+/**
+ * MiniMax on fal rewrites every prompt itself (prompt_expansion_mode,
+ * default "balanced"). fal's H3 Max schema (text- and image-to-video,
+ * checked 2026-10-17) takes "disabled" | "balanced" | "quality" - there is
+ * no prompt_optimizer field on fal. When Lucy has already written the full
+ * shot prompt (her enhancer, a reviewed preview, or a Director shot), the
+ * second rewrite is switched off so the model gets Lucy's prompt as written.
+ */
+export function disableVendorPromptRewrite(input: Record<string, unknown>, endpoint: string): Record<string, unknown> {
+  if (/^minimax\//.test(endpoint)) input.prompt_expansion_mode = "disabled";
+  return input;
+}

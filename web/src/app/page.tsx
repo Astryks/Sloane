@@ -1148,12 +1148,10 @@ function ProductAdSection() {
 
 type PaygoAudioMode = "none" | "own" | "lucy";
 
-const PAYGO_PROMPT_PLACEHOLDER =
-  "Add your prompt here and select a video. We have a detailed prompt guide below - prompting is everything. " +
-  "The more detailed the better. Use ChatGPT or any image model to create an image of your character and location. " +
-  "Then use Seedance, Veo or any model you like to generate a video. Honestly, these videos work best one scene at " +
-  "a time, use our guide to choose camera angle and other details, and play around with it! Really pay attention to " +
-  "your favourite movie directors and learn how they shoot their shots and have fun with it!";
+// Shorter now that Lucy expands the idea into a full shot prompt (2026-10-17).
+const PAYGO_PROMPT_PLACEHOLDER = "Describe your video in a sentence or two - who's in it, what happens, where. Lucy writes the full shot prompt for the model you pick.";
+// With "Enhance" off the words go to the model as typed, so ask for the detail.
+const PAYGO_PROMPT_PLACEHOLDER_RAW = "Describe the shot in detail: who, what they do, where, the camera move, the light and the style.";
 
 // Logo + section links, shown as the top of the generator card so the
 // brand and the first thing to do read as one block.
@@ -1549,9 +1547,9 @@ function PayAsYouGoVideoSection({
         <textarea
           aria-label="Describe your video"
           className="w-full rounded-2xl border border-border bg-white p-4 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple"
-          rows={7}
+          rows={4}
           maxLength={lucyScriptMax ?? 600}
-          placeholder={audioMode === "lucy" ? `What should the voice say? (up to ${lucyScriptMax ?? 600} characters)` : PAYGO_PROMPT_PLACEHOLDER}
+          placeholder={audioMode === "lucy" ? `What should the voice say? (up to ${lucyScriptMax ?? 600} characters)` : enhance ? PAYGO_PROMPT_PLACEHOLDER : PAYGO_PROMPT_PLACEHOLDER_RAW}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />

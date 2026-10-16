@@ -15,6 +15,7 @@ import {
   VIDEO_PAYGO_ENGINES,
   VIDEO_PAYGO_ENGINE_MIN_DURATION_SECONDS,
   buildVideoInferenceInput,
+  disableVendorPromptRewrite,
   resolveVideoEndpoint,
   videoEngineUsesModelArk,
   videoPriceCents,
@@ -372,6 +373,8 @@ export async function POST(req: NextRequest) {
             requestedAspectRatio,
           );
       if (negativePrompt && !useKlingAvatar) falInput.negative_prompt = negativePrompt;
+      // Lucy already expanded it - don't let MiniMax rewrite it a second time.
+      if (promptSource === "llm" || promptSource === "reviewed") disableVendorPromptRewrite(falInput, falEndpoint);
       const requestId = await submitVideoInferenceJob(falEndpoint, falInput);
       await setVideoPaygoJobRequestId(jobId, requestId);
       return publicJson({ jobId, finalPrompt, negativePrompt, promptSource });
