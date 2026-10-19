@@ -2,6 +2,18 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## ▶ Waiting on the owner (2026-10-19)
+
+Two pull requests are ready and tested but **not merged** (merging to `main` deploys the live site, so it waits for Sid's OK):
+1. **PR #45 `feat/prompt-enhancer`**: Gemini prompt expansion for one-prompt video (Higgsfield-style), 12 camera + 9 style presets, model-specific rewrite, "See Lucy's prompt (free)". https://github.com/Astryks/Sloane/pull/45
+2. **PR #46 `fix/audit-security`** (builds on #45, merge #45 first): all 12 audit findings fixed (Director state races, free caps, media XSS, server-side job completion, Stripe and magic-link hardening); 119 tests pass. https://github.com/Astryks/Sloane/pull/46
+
+**After merging, owner settings:**
+- Stripe dashboard → the Lucy webhook endpoint → add events `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`.
+- Vercel → Production env: confirm `FAL_ADMIN_KEY` is set (used server-side only).
+
+The full audit notes are in STATUS.md on the PR #46 branch.
+
 ## Latest update, 2026-10-16 (night) - Jess "MEFE method" explainer, made on free Google Cloud credit only
 
 - **Output:** `deliverables/jess_mefe.mp4` (master, 147 MB) and `jess_mefe_share.mp4` (53 MB). 2:54, 9:16, full colour, bold 1-3 word captions in the style of the Short Sid sent. The script is delivered word for word; the final transcript matches it 98.9%. `deliverables/` is git-ignored.
