@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getPaygoSessionUser } from "@/lib/auth";
-import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, savedCharacterPhotos, spendVideoCredit, takeDirectorPlanSlot } from "@/lib/db";
+import { takeFreeAllowance } from "@/lib/freeCaps";
+import { addVideoCredits, createDirectorFilm, getSavedCharacter, initSchema, refundVideoCredit, savedCharacterPhotos, spendVideoCredit } from "@/lib/db";
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
 import { uploadInputMedia } from "@/lib/mediaUpload";
@@ -185,7 +186,7 @@ export async function POST(req: NextRequest) {
     let chargeNow = totalCents;
     let paidCents: number | null = null;
     if (!autoApprove) {
-      const free = isOwner(user) || (await takeDirectorPlanSlot(`board:${user.id}`, FREE_BOARDS_PER_DAY));
+      const free = isOwner(user) || (await takeFreeAllowance("board", FREE_BOARDS_PER_DAY, user));
       chargeNow = free ? 0 : STORYBOARD_FEE_CENTS;
       paidCents = chargeNow;
     } else if (isOwner(user)) await addVideoCredits(user.id, totalCents);
@@ -204,7 +205,7 @@ export async function POST(req: NextRequest) {
         if (f) links[k] = [await uploadInputMedia(Buffer.from(await f.arrayBuffer()), f.type, `${k}.jpg`, "vertex"), ...links[k]].slice(0, REF_LIMITS[k]);
       }
     } catch (err) {
-      if (chargeNow > 0) await addVideoCredits(user.id, chargeNow);
+      if (chargeNow > 0) await refundVideoCredit(user.id, chargeNow);
       console.error("[director/create] upload failed", err);
       return publicJson({ error: "Couldn't upload your photos - you haven't been charged." }, { status: 500 });
     }
@@ -229,7 +230,7 @@ export async function POST(req: NextRequest) {
       });
       return publicJson({ filmId, totalCents });
     } catch (err) {
-      if (chargeNow > 0) await addVideoCredits(user.id, chargeNow);
+      if (chargeNow > 0) await refundVideoCredit(user.id, chargeNow);
       console.error("[director/create] failed", err);
       return publicJson({ error: "Couldn't start your film - you haven't been charged." }, { status: 500 });
     }

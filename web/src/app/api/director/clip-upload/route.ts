@@ -1,19 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { getPaygoSessionUser } from "@/lib/auth";
+import { clipPrefix, isOwnClipPathname } from "@/lib/clipOwnership";
 
 // "Copy a clip" (2026-09-29): the browser uploads the customer's MP4 straight
 // to storage (too big for a normal request), then /analyze-clip has Gemini
 // watch it. Signed-in visitors only, video files only, up to 100MB.
+// 2026-10-17 audit: only into the caller's own clip folder (GET returns it),
+// so analyze-clip can tell whose clip it is before deleting it.
+
+export async function GET() {
+  const user = await getPaygoSessionUser();
+  if (!user) return NextResponse.json({ error: "Sign in or add credit first" }, { status: 401 });
+  return NextResponse.json({ prefix: clipPrefix(user.id) });
+}
+
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as HandleUploadBody;
   try {
     const result = await handleUpload({
       body,
       request: req,
-      onBeforeGenerateToken: async () => {
+      onBeforeGenerateToken: async (pathname) => {
         const user = await getPaygoSessionUser();
         if (!user) throw new Error("Sign in or add credit first");
+        if (!isOwnClipPathname(pathname, user.id)) throw new Error("Upload refused");
         return {
           allowedContentTypes: ["video/mp4", "video/quicktime", "video/webm"],
           maximumSizeInBytes: 100 * 1024 * 1024,

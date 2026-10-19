@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
-import { getOrCreatePaygoSessionUser } from "@/lib/auth";
-import { initSchema, takeDirectorPlanSlot } from "@/lib/db";
+import { GuestLimitError, getOrCreatePaygoSessionUser } from "@/lib/auth";
+import { initSchema } from "@/lib/db";
+import { takeFreeAllowance } from "@/lib/freeCaps";
 import { generateImageOnVertex } from "@/lib/googleImage";
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { isOwner } from "@/lib/owner";
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
       .map((p) => resolveMediaUrl(String(p)))
       .filter(isVendorMediaUrl);
     const user = await getOrCreatePaygoSessionUser();
-    if (!isOwner(user) && !(await takeDirectorPlanSlot(`sheet:${user.id}`, DAILY_ANGLE_CAP))) {
+    if (!isOwner(user) && !(await takeFreeAllowance("sheet", DAILY_ANGLE_CAP, user))) {
       return publicJson({ error: "That's today's limit for free sheets - try again tomorrow." }, { status: 429 });
     }
     const aspect = body.aspect === "9:16" ? "9:16" : "16:9";
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
     if (!url) return publicJson({ error: "Lucy couldn't draw that view right now - try again in a minute." }, { status: 503 });
     return publicJson({ url, angle });
   } catch (err) {
+    if (err instanceof GuestLimitError) return publicJson({ error: err.message }, { status: 429 });
     console.error("[director/location-sheet] failed", err);
     return publicJson({ error: "Lucy couldn't draw that view right now - try again in a minute." }, { status: 500 });
   }

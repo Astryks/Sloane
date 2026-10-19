@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getOrCreatePaygoSessionUser, getPaygoSessionUser } from "@/lib/auth";
+import { GuestLimitError, getOrCreatePaygoSessionUser, getPaygoSessionUser } from "@/lib/auth";
 import { deleteDirectorPreset, initSchema, listDirectorPresets, saveDirectorPreset } from "@/lib/db";
 import { publicJson } from "@/lib/mediaProxy";
 
@@ -37,7 +37,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { id?: unknown; name?: unknown; data?: unknown };
   const name = str(body.name, 60).trim();
   if (!name) return publicJson({ error: "Give your movie a name" }, { status: 400 });
-  const user = await getOrCreatePaygoSessionUser();
+  const user = await getOrCreatePaygoSessionUser().catch((err) => (err instanceof GuestLimitError ? null : Promise.reject(err)));
+  if (!user) return publicJson({ error: new GuestLimitError().message }, { status: 429 });
   const p = await saveDirectorPreset(user.id, str(body.id, 60) || null, name, clean(body.data));
   if (!p) return publicJson({ error: "Not found" }, { status: 404 });
   return publicJson({ preset: { id: p.id, name: p.name, data: p.data } });

@@ -23,9 +23,12 @@ import {
   claimDirectorFilm,
   claimDirectorShot,
   failDirectorShot,
+  finishDirectorShots,
   getDirectorShots,
+  noteDirectorShotPollError,
   refundVideoCredit,
   releaseDirectorFilm,
+  releaseDirectorShot,
   setDirectorFilmCast,
   setDirectorFilmRefs,
   setDirectorShotTakes,
@@ -37,7 +40,7 @@ import {
 } from "../db";
 import { getFalJobResult, getFalJobStatus, submitFalJob, IMAGE_EDIT_ENDPOINT, TEXT_TO_IMAGE_ENDPOINT } from "../fal";
 import { editableModelArkInput, getVideoInferenceResult, getVideoInferenceStatus, getVideoInferenceUrl, submitVideoInferenceJob } from "../videoInference";
-import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
+import { VIDEO_PAYGO_ENGINES, buildVideoInferenceInput, disableVendorPromptRewrite, resolveVideoEndpoint, type VideoEngine } from "../videoPaygo";
 import { voiceLockRequested, type DirectorPlan } from "./plan";
 import { generateImageOnVertex } from "../googleImage";
 import { isVertexEndpoint } from "../vertexVeo";
@@ -46,6 +49,13 @@ import { AUTO_CAST_ANGLES, REF_LIMITS, buildRefs, castLegend, characterFromTextP
 import type { DirectorShot } from "./plan";
 import { refFlags } from "./filmAccess";
 import { frameKey, isReactionShot } from "./coverage";
+
+/**
+ * How long a finished-but-uncollectable render (vendor/storage outage) is
+ * retried before the shot is failed and refunded (2026-10-17 audit: it used
+ * to refund on the first transient error, for a render we'd already paid for).
+ */
+export const RESULT_RETRY_SECONDS = 30 * 60;
 
 // Marker stored as the request id when a still was made synchronously on
 // Google (no reseller job to poll).
@@ -101,7 +111,13 @@ async function pollImage(requestId: string, hadRefs: boolean): Promise<{ done: b
  */
 async function advanceCast(film: DirectorFilmRow, plan: DirectorPlan): Promise<boolean> {
   if (film.cast_status === "done") return false;
-  if (!(await claimDirectorFilm(film.id))) return true;
+  const fresh = await claimDirectorFilm(film.id);
+  if (!fresh) return true;
+  if (fresh.status !== "anchor" || fresh.cast_status === "done") {
+    await releaseDirectorFilm(film.id);
+    return fresh.status !== "anchor";
+  }
+  film = fresh;
   const lists = { character: refList(film.refs, "character"), product: refList(film.refs, "product"), location: refList(film.refs, "location") };
   try {
     if (!lists.character.length) {
@@ -131,7 +147,11 @@ function uploadedRefs(film: DirectorFilmRow): string[] {
 }
 
 async function advanceAnchor(film: DirectorFilmRow, plan: DirectorPlan) {
-  if (!(await claimDirectorFilm(film.id))) return;
+  const fresh = await claimDirectorFilm(film.id);
+  if (!fresh) return;
+  if (fresh.status !== "anchor") return releaseDirectorFilm(film.id);
+  film = fresh;
+  const setFilm = (f: Parameters<typeof updateDirectorFilm>[1]) => updateDirectorFilm(film.id, f, "anchor");
   try {
     const refs = uploadedRefs(film);
     if (!film.anchor_request_id) {
@@ -139,18 +159,18 @@ async function advanceAnchor(film: DirectorFilmRow, plan: DirectorPlan) {
       const prompt = [compileAnchorPrompt(plan, refFlags(film)), castLegend(refs, film.refs.people)].filter(Boolean).join(" ");
       // Google first (Google credits); reseller job as the fallback.
       const googleUrl = await generateImageOnVertex(prompt, refs, plan.aspectRatio);
-      if (googleUrl) return updateDirectorFilm(film.id, { anchor_request_id: VERTEX_SYNC, anchor_url: googleUrl, status: "frames" });
+      if (googleUrl) return void (await setFilm({ anchor_request_id: VERTEX_SYNC, anchor_url: googleUrl, status: "frames" }));
       const requestId = await submitImage(prompt, refs, plan.aspectRatio);
-      await updateDirectorFilm(film.id, { anchor_request_id: requestId });
+      await setFilm({ anchor_request_id: requestId });
       return;
     }
     const { done, url } = await pollImage(film.anchor_request_id, refs.length > 0);
     if (!done) return releaseDirectorFilm(film.id);
     // No anchor (vendor failure) -> skip frames and go straight to review.
-    await updateDirectorFilm(film.id, { status: url ? "frames" : "review", anchor_url: url ?? undefined });
+    await setFilm({ status: url ? "frames" : "review", anchor_url: url ?? undefined });
   } catch (err) {
     console.error("[director] anchor step failed - continuing without it", err);
-    await updateDirectorFilm(film.id, { status: "review" });
+    await setFilm({ status: "review" });
   }
 }
 
@@ -183,7 +203,13 @@ async function advanceFrame(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
     const { compileSetupKeyframePrompt } = await import("./compile");
     setupPrompt = compileSetupKeyframePrompt(plan, setup, shot.idx, refFlags(film), !!masterUrl);
   }
-  if (!(await claimDirectorShot(shot.id))) return;
+  const freshShot = await claimDirectorShot(shot.id);
+  if (!freshShot) return;
+  // Another poll may have finished this step since we read the row.
+  if (freshShot.keyframe_url || freshShot.error === "frame" || freshShot.redraw_from_url !== shot.redraw_from_url || freshShot.keyframe_request_id !== shot.keyframe_request_id) {
+    return releaseDirectorShot(shot.id);
+  }
+  shot = freshShot;
   try {
     // Redraws edit the shot's previous frame first; the anchor, product
     // photos and every character angle stay in the list so identity, label
@@ -263,7 +289,12 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       chainFrame = await lastFrameOf(prev.raw_video_url ?? prev.video_url);
     }
   }
-  if (!(await claimDirectorShot(shot.id))) return;
+  const freshShot = await claimDirectorShot(shot.id);
+  if (!freshShot) return;
+  if (freshShot.status === "completed" || freshShot.status === "failed" || freshShot.video_request_id !== shot.video_request_id) {
+    return releaseDirectorShot(shot.id); // moved on since we read it - the next poll takes it from here
+  }
+  shot = freshShot;
   const engine = film.engine as VideoEngine;
   try {
     if (!shot.video_request_id || shot.video_request_id.startsWith(TTS_PREFIX)) {
@@ -379,6 +410,8 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       }
       // Editable form for direct Seedance too, so the reference audio / images / duration set below reach ModelArk.
       const input = editableModelArkInput(buildVideoInferenceInput(engine, prompt, imageUrl, nativeAudio, null, d, plan.aspectRatio), prompt, imageUrl);
+      // Lucy's formatter already wrote the full shot prompt - no second rewrite on MiniMax.
+      disableVendorPromptRewrite(input, endpoint);
       // Never on a reaction shot: Seedance would lip-sync the listener to it.
       if (lineAudio && !layIn) input.reference_audio_urls = [lineAudio];
       // Director Vertex jobs (2026-09-30): ask Veo to use our prompt as written,
@@ -458,9 +491,23 @@ async function advanceVideo(film: DirectorFilmRow, plan: DirectorPlan, shot: Dir
       return updateDirectorShot(shot.id, { status: "video", video_endpoint: endpoint, video_request_id: requestId });
     }
     const endpoint = shot.video_endpoint as string;
-    const status = await getVideoInferenceStatus(endpoint, shot.video_request_id);
+    const requestId = shot.video_request_id;
+    // A paid render is in flight: an error reaching the vendor (or storing the
+    // finished file) is retried on later polls, never refunded straight away.
+    let status: Awaited<ReturnType<typeof getVideoInferenceStatus>>;
+    let result: unknown = null;
+    try {
+      status = await getVideoInferenceStatus(endpoint, requestId);
+      if (status === "COMPLETED") result = await getVideoInferenceResult(endpoint, requestId);
+    } catch (err) {
+      const seconds = await noteDirectorShotPollError(shot.id);
+      console.error("[director] couldn't check/collect the shot - retrying", shot.id, Math.round(seconds), err);
+      if (seconds > RESULT_RETRY_SECONDS && (await failDirectorShot(shot.id, "We couldn't collect this shot from the model - it's been refunded."))) {
+        await refundVideoCredit(film.user_id, shot.price_cents);
+      }
+      return;
+    }
     if (status === "COMPLETED") {
-      const result = await getVideoInferenceResult(endpoint, shot.video_request_id);
       const url = getVideoInferenceUrl(result);
       const takes = (result as { takes?: unknown }).takes;
       if (url && Array.isArray(takes) && takes.length > 1) await setDirectorShotTakes(shot.id, takes.filter((t): t is string => typeof t === "string"));
@@ -548,9 +595,14 @@ async function wantsVoicing(plan: DirectorPlan, people: CastPerson[] | undefined
 
 async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
   const people = film.refs.people ?? [];
-  if (!(await wantsVoicing(plan, people)) || !process.env.MODAL_SHARED_SECRET) return updateDirectorFilm(film.id, { status: "stitching" });
+  if (!(await wantsVoicing(plan, people)) || !process.env.MODAL_SHARED_SECRET) return void (await updateDirectorFilm(film.id, { status: "stitching" }, "voicing"));
   const lockOn = voiceLockActive(plan, people);
-  if (!(await claimDirectorFilm(film.id))) return;
+  const fresh = await claimDirectorFilm(film.id);
+  if (!fresh) return;
+  if (fresh.status !== "voicing") return releaseDirectorFilm(film.id);
+  film = fresh;
+  // Re-read after the claim: voice states may have moved on since this poll read them.
+  shots = await getDirectorShots(film.id);
   try {
     const refs = JSON.parse(JSON.stringify(film.refs)) as typeof film.refs;
     const cast = refs.people as CastPerson[];
@@ -733,11 +785,11 @@ async function advanceVoicing(film: DirectorFilmRow, plan: DirectorPlan, shots: 
       }
     }
     if (pending) return releaseDirectorFilm(film.id);
-    return updateDirectorFilm(film.id, { status: "stitching" });
+    return void (await updateDirectorFilm(film.id, { status: "stitching" }, "voicing"));
   } catch (err) {
     // Never hold a film back over voices - stitch with Veo's own audio.
     console.error("[director] voicing step failed - stitching with original audio", err);
-    return updateDirectorFilm(film.id, { status: "stitching" });
+    return void (await updateDirectorFilm(film.id, { status: "stitching" }, "voicing"));
   }
 }
 
@@ -778,46 +830,51 @@ export function stitchShots(plan: DirectorPlan, done: DirectorShotRow[]): Stitch
 }
 
 async function advanceStitch(film: DirectorFilmRow, plan: DirectorPlan, shots: DirectorShotRow[]) {
-  if (!(await claimDirectorFilm(film.id))) return;
+  const fresh = await claimDirectorFilm(film.id);
+  if (!fresh) return;
+  if (fresh.status !== "stitching") return releaseDirectorFilm(film.id);
+  film = fresh;
+  shots = await getDirectorShots(film.id);
+  const setFilm = (f: Parameters<typeof updateDirectorFilm>[1]) => updateDirectorFilm(film.id, f, "stitching");
   const doneRows = shots.filter((s) => s.status === "completed" && s.video_url).sort((a, b) => a.idx - b.idx);
   const done = doneRows.map((s) => s.video_url as string);
   try {
-    if (done.length === 0) return updateDirectorFilm(film.id, { status: "failed", error: "No shots could be rendered - you have been refunded." });
-    if (done.length === 1) return updateDirectorFilm(film.id, { status: "completed", final_video_url: done[0] });
+    if (done.length === 0) return void (await setFilm({ status: "failed", error: "No shots could be rendered - you have been refunded." }));
+    if (done.length === 1) return void (await setFilm({ status: "completed", final_video_url: done[0] }));
     if (!film.stitch_request_id) {
       if (MODAL_STITCH && process.env.MODAL_SHARED_SECRET) {
         try {
           const { call_id } = await modalStitch("/start", { method: "POST", body: JSON.stringify({ video_urls: done, shots: stitchShots(plan, doneRows) }) });
-          if (typeof call_id === "string") return updateDirectorFilm(film.id, { stitch_request_id: `${MODAL_PREFIX}${call_id}` });
+          if (typeof call_id === "string") return void (await setFilm({ stitch_request_id: `${MODAL_PREFIX}${call_id}` }));
         } catch (err) {
           console.error("[director] colour-match stitcher unavailable, using plain merge", err);
         }
       }
       const requestId = await submitFalJob(MERGE_ENDPOINT, { video_urls: done });
-      return updateDirectorFilm(film.id, { stitch_request_id: requestId });
+      return void (await setFilm({ stitch_request_id: requestId }));
     }
     if (film.stitch_request_id.startsWith(MODAL_PREFIX)) {
       const r = await modalStitch(`/result?call_id=${encodeURIComponent(film.stitch_request_id.slice(MODAL_PREFIX.length))}`);
-      if (r.status === "done" && typeof r.video_url === "string") return updateDirectorFilm(film.id, { status: "completed", final_video_url: r.video_url });
+      if (r.status === "done" && typeof r.video_url === "string") return void (await setFilm({ status: "completed", final_video_url: r.video_url }));
       if (r.status === "failed") {
         console.error("[director] colour-match stitch failed", r.error);
         // Retry once with the plain merge rather than leave the customer without a film.
         const requestId = await submitFalJob(MERGE_ENDPOINT, { video_urls: done });
-        return updateDirectorFilm(film.id, { stitch_request_id: requestId });
+        return void (await setFilm({ stitch_request_id: requestId }));
       }
       return releaseDirectorFilm(film.id);
     }
     const status = await getFalJobStatus(MERGE_ENDPOINT, film.stitch_request_id);
     if (status === "COMPLETED") {
       const url = getVideoInferenceUrl(await getFalJobResult(MERGE_ENDPOINT, film.stitch_request_id));
-      return updateDirectorFilm(film.id, { status: "completed", final_video_url: url ?? undefined });
+      return void (await setFilm({ status: "completed", final_video_url: url ?? undefined }));
     }
     // Stitch failure still leaves every finished shot downloadable.
-    if (status === "FAILED") return updateDirectorFilm(film.id, { status: "completed", error: "Couldn't join the shots automatically - download them below or join them in the free editor." });
+    if (status === "FAILED") return void (await setFilm({ status: "completed", error: "Couldn't join the shots automatically - download them below or join them in the free editor." }));
     return releaseDirectorFilm(film.id);
   } catch (err) {
     console.error("[director] stitch failed", err);
-    return updateDirectorFilm(film.id, { status: "completed", error: "Couldn't join the shots automatically - download them below or join them in the free editor." });
+    return void (await setFilm({ status: "completed", error: "Couldn't join the shots automatically - download them below or join them in the free editor." }));
   }
 }
 
@@ -834,8 +891,8 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     await Promise.all(shots.map((s) => advanceFrame(film, plan, s, shots)));
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.keyframe_url || s.error === "frame")) {
-      // One-tap films ("just make it") go straight to filming.
-      await updateDirectorFilm(film.id, { status: film.auto_approve ? "shots" : "review" });
+      // One-tap films ("just make it") go straight to filming. Never a cancelled one.
+      await updateDirectorFilm(film.id, { status: film.auto_approve ? "shots" : "review" }, "frames");
     }
     return shots;
   }
@@ -844,9 +901,14 @@ export async function advanceFilm(film: DirectorFilmRow): Promise<DirectorShotRo
     shots = await getDirectorShots(film.id);
     if (shots.every((s) => s.status === "completed" || s.status === "failed")) {
       // Voice lock (opt-in, real recordings only) and/or the free sync check before joining the shots.
-      await updateDirectorFilm(film.id, { status: (await wantsVoicing(plan, film.refs.people)) ? "voicing" : "stitching" });
+      await finishDirectorShots(film.id, (await wantsVoicing(plan, film.refs.people)) ? "voicing" : "stitching");
     }
     return shots;
+  }
+  // Self-heal: a shot re-queued (retake) right as filming finished goes back to filming first.
+  if ((film.status === "voicing" || film.status === "stitching") && shots.some((s) => s.status !== "completed" && s.status !== "failed")) {
+    await updateDirectorFilm(film.id, { status: "shots" }, film.status);
+    return getDirectorShots(film.id);
   }
   if (film.status === "voicing") {
     await advanceVoicing(film, plan, shots);

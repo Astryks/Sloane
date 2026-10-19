@@ -20,7 +20,12 @@ export function CopyClip({ castNames, notes, onScript }: { castNames: string[]; 
       if (file) {
         if (file.size > 100 * 1024 * 1024) throw new Error("That clip is over 100MB - trim it to the scene you want.");
         setBusy("Uploading your clip…");
-        const blob = await upload(`clips/${file.name.replace(/[^\w.-]+/g, "_")}`, file, { access: "public", handleUploadUrl: "/api/director/clip-upload" });
+        // Uploads go into this visitor's own clip folder (2026-10-17 audit).
+        const where = await fetch("/api/director/clip-upload");
+        const { prefix, error: whereError } = (await where.json()) as { prefix?: string; error?: string };
+        if (!where.ok || !prefix) throw new Error(whereError || "Sign in or add credit to upload a clip.");
+        const name = file.name.replace(/[^\w.-]+/g, "_").slice(-100) || "clip.mp4";
+        const blob = await upload(`${prefix}${name}`, file, { access: "public", handleUploadUrl: "/api/director/clip-upload" });
         url = blob.url;
       }
       if (!url) throw new Error("Paste a YouTube link or pick an MP4 first.");

@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { randomBytes } from "crypto";
 import { PLANS, type PlanId } from "./plans";
+import { isOwner } from "./owner";
 import type { DirectorRefs } from "./director/refs";
 
 // POSTGRES_URL is what Vercel's Postgres (Neon-backed) integration injects
@@ -8,11 +9,40 @@ import type { DirectorRefs } from "./director/refs";
 // client lazy: constructing neon() at module import time makes a local
 // production build crash before initSchema() can return its useful,
 // actionable configuration error.
-const sql = (strings: TemplateStringsArray, ...values: unknown[]) => {
+// Tests (src/lib/*.test.ts) swap in an in-memory Postgres (PGlite) through
+// __setDbForTests, so the atomic SQL below is exercised for real.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- rows are cast per query, as before
+type Rows = Record<string, any>[];
+type SqlTag = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<Rows>;
+type TxBuilder = (tx: SqlTag) => Promise<Rows>[];
+type TestDb = { sql: SqlTag; transaction: (build: TxBuilder) => Promise<Rows[]> };
+let testDb: TestDb | null = null;
+export function __setDbForTests(db: TestDb | null) {
+  testDb = db;
+  schemaReady = null;
+}
+
+function neonClient() {
   const url = process.env.POSTGRES_URL;
   if (!url) throw new Error("Server misconfiguration: POSTGRES_URL is not set.");
-  return neon(url)(strings, ...values);
+  return neon(url);
+}
+
+const sql: SqlTag = (strings, ...values) => {
+  if (testDb) return testDb.sql(strings, ...values);
+  return neonClient()(strings, ...values) as Promise<Rows>;
 };
+
+/**
+ * Several statements in ONE transaction (READ COMMITTED, so each statement
+ * sees rows committed before it started - what makes an advisory lock
+ * followed by a count-then-insert truly atomic). Returns each statement's rows.
+ */
+async function sqlTransaction(build: TxBuilder): Promise<Rows[]> {
+  if (testDb) return testDb.transaction(build);
+  const db = neonClient();
+  return (await db.transaction((tx) => build(tx as unknown as SqlTag) as never, { isolationLevel: "ReadCommitted" })) as Rows[];
+}
 
 export type Subscriber = {
   id: string;
@@ -57,7 +87,7 @@ export function initSchema(): Promise<void> {
 }
 
 async function runSchemaMigrations() {
-  if (!process.env.POSTGRES_URL) {
+  if (!process.env.POSTGRES_URL && !testDb) {
     throw new Error("Server misconfiguration: POSTGRES_URL is not set.");
   }
   await sql`
@@ -117,14 +147,7 @@ async function runSchemaMigrations() {
   // event id itself, checked with an atomic INSERT ... ON CONFLICT DO
   // NOTHING, makes the grant idempotent no matter how many times or in what
   // order this event is ever delivered - see claimVideoCreditGrant below.
-  await sql`
-    CREATE TABLE IF NOT EXISTS stripe_credit_grants (
-      event_id TEXT PRIMARY KEY,
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      credits INTEGER NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `;
+  // (stripe_credit_grants is created right after users - it references it.)
   // Real cross-tenant leak partially fixed here (security audit,
   // 2026-09-16): /api/job-status has no auth/ownership check at all (by
   // design - it serves both anonymous free-tier and logged-in requests with
@@ -158,6 +181,15 @@ async function runSchemaMigrations() {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       email TEXT UNIQUE NOT NULL,
       google_id TEXT UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  // Moved below users (2026-10-17): a brand-new database failed here.
+  await sql`
+    CREATE TABLE IF NOT EXISTS stripe_credit_grants (
+      event_id TEXT PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      credits INTEGER NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
@@ -680,6 +712,14 @@ async function runSchemaMigrations() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_director_plan_log_visitor ON director_plan_log(visitor, created_at)`;
+  // 2026-10-17 audit: homepage jobs are advanced server-side too (sweep),
+  // polled_at lets the sweep skip jobs a browser is already polling, and
+  // result_error_since lets a transient error collecting a finished video be
+  // retried instead of refunded (only a long outage fails the job).
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS polled_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE video_paygo_jobs ADD COLUMN IF NOT EXISTS result_error_since TIMESTAMPTZ`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_video_paygo_jobs_open ON video_paygo_jobs(created_at) WHERE status IN ('pending', 'in_progress')`;
+  await sql`ALTER TABLE director_shots ADD COLUMN IF NOT EXISTS poll_error_since TIMESTAMPTZ`;
   // Vendor treasury ledger (2026-09-23): when Stripe grants still/video
   // credits, record revenue vs estimated Fal COGS so Lucy can later buy
   // matching Fal prepaid credits and keep the margin. Idempotent on
@@ -1374,7 +1414,12 @@ export async function spendVideoCredit(userId: string, cents: number): Promise<b
 }
 
 // A failed/blocked generation gives back exactly what it was charged.
+// Owner test mode (2026-10-17 audit): the owner's spends are topped up just
+// before they happen, so refunding them only piled free credit onto the
+// owner's balance - owners are never refunded.
 export async function refundVideoCredit(userId: string, cents: number) {
+  if (cents <= 0) return;
+  if (isOwner(await getUserById(userId))) return;
   await addVideoCredits(userId, cents);
 }
 
@@ -1510,6 +1555,7 @@ export type VideoPaygoJob = {
   price_cents: number | null; // what this job was charged (null = pre-wallet job, charged the old $3.99)
   engine: string;
   prompt: string;
+  original_prompt?: string | null;
   fal_request_id: string | null;
   fal_endpoint: string | null;
   input_image_url: string | null;
@@ -1615,6 +1661,56 @@ export async function failVideoPaygoJob(jobId: string, error: string): Promise<b
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+/**
+ * A transient error collecting a FINISHED render (2026-10-17 audit): we've
+ * already paid for it, so the job is retried, not refunded. Returns seconds
+ * since the first such error - callers give up only after a long outage.
+ */
+export async function noteVideoPaygoResultError(jobId: string): Promise<number> {
+  const rows = await sql`
+    UPDATE video_paygo_jobs SET result_error_since = COALESCE(result_error_since, now())
+    WHERE id = ${jobId}
+    RETURNING EXTRACT(EPOCH FROM (now() - result_error_since))::float AS seconds
+  `;
+  return Number(rows[0]?.seconds ?? 0);
+}
+
+/** A browser (or the sweep) is looking at this job now. */
+export async function touchVideoPaygoJob(jobId: string) {
+  await sql`UPDATE video_paygo_jobs SET polled_at = now() WHERE id = ${jobId}`;
+}
+
+/**
+ * Server-side sweep (2026-10-17 audit): claims up to `limit` unfinished jobs
+ * nobody has polled for `idleSeconds` (closed tab), stamping polled_at so
+ * overlapping sweeps never pick the same job.
+ */
+export async function claimIdleVideoPaygoJobs(limit: number, idleSeconds: number): Promise<VideoPaygoJob[]> {
+  const rows = await sql`
+    UPDATE video_paygo_jobs SET polled_at = now()
+    WHERE id IN (
+      SELECT id FROM video_paygo_jobs
+      WHERE status IN ('pending', 'in_progress')
+        AND created_at < now() - make_interval(secs => ${idleSeconds}::int)
+        AND (polled_at IS NULL OR polled_at < now() - make_interval(secs => ${idleSeconds}::int))
+      ORDER BY created_at
+      LIMIT ${limit}::int
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
+  `;
+  return rows as VideoPaygoJob[];
+}
+
+/** The caller's unfinished/recent homepage jobs (so a returning visitor sees a video made after they left). */
+export async function listRecentVideoPaygoJobs(userId: string, hours = 48): Promise<VideoPaygoJob[]> {
+  const rows = await sql`
+    SELECT * FROM video_paygo_jobs WHERE user_id = ${userId} AND created_at > now() - make_interval(hours => ${hours}::int)
+    ORDER BY created_at DESC LIMIT 10
+  `;
+  return rows as VideoPaygoJob[];
 }
 
 export async function getVideoPaygoJob(jobId: string): Promise<VideoPaygoJob | null> {
@@ -2426,6 +2522,8 @@ export type DirectorShotRow = {
   raw_video_url: string | null;
   /** JSON array of every take's URL when the shot was multi-sampled (hero shots), else null. */
   alt_video_urls?: string | null;
+  /** First transient error collecting this shot's render (retried until RESULT_RETRY_SECONDS). */
+  poll_error_since?: string | null;
 };
 
 /**
@@ -2434,13 +2532,49 @@ export type DirectorShotRow = {
  * requests all pass the check before any of them inserted.
  */
 export async function takeDirectorPlanSlot(visitor: string, dailyCap: number): Promise<boolean> {
-  const rows = await sql`
-    INSERT INTO director_plan_log (visitor)
-    SELECT ${visitor}
-    WHERE (SELECT count(*) FROM director_plan_log WHERE visitor = ${visitor} AND created_at > now() - interval '24 hours') < ${dailyCap}
-    RETURNING visitor
-  `;
-  return rows.length > 0;
+  return takeFreeSlots([{ key: visitor, cap: dailyCap }]);
+}
+
+/**
+ * Free daily allowances (2026-10-17 audit): takes `amount` units against
+ * EVERY key at once (e.g. the account AND the visitor's IP), only if each
+ * key stays within its own 24-hour cap - all or nothing. Per-key advisory
+ * locks in the same transaction make the count-then-insert truly atomic:
+ * a burst of parallel requests is serialised per key instead of every one
+ * of them reading the same count before any insert lands.
+ */
+export async function takeFreeSlots(slots: Array<{ key: string; cap: number }>, amount = 1): Promise<boolean> {
+  const byKey = new Map<string, number>();
+  for (const s of slots) if (s.key) byKey.set(s.key, Math.min(byKey.get(s.key) ?? Infinity, s.cap));
+  if (!byKey.size || amount < 1) return false;
+  const keys = [...byKey.keys()].sort();
+  const caps = keys.map((k) => byKey.get(k) as number);
+  if (caps.some((c) => c < amount)) return false;
+  const results = await sqlTransaction((tx) => [
+    ...keys.map((k) => tx`SELECT pg_advisory_xact_lock(hashtext(${`free:${k}`}))`),
+    tx`
+      INSERT INTO director_plan_log (visitor)
+      SELECT k FROM unnest(${keys}::text[]) AS k, generate_series(1, ${amount}::int)
+      WHERE NOT EXISTS (
+        SELECT 1 FROM unnest(${keys}::text[], ${caps}::int[]) AS c(key, cap)
+        WHERE (SELECT count(*) FROM director_plan_log l WHERE l.visitor = c.key AND l.created_at > now() - interval '24 hours') + ${amount}::int > c.cap
+      )
+      RETURNING visitor
+    `,
+  ]);
+  return (results[results.length - 1]?.length ?? 0) > 0;
+}
+
+/** The free-allowance log only needs the last 24 hours (pruned by the daily cleanup cron). */
+export async function pruneFreeUsageLog(): Promise<number> {
+  const rows = await sql`DELETE FROM director_plan_log WHERE created_at < now() - interval '2 days' RETURNING id`;
+  return rows.length;
+}
+
+/** How many free-allowance units a key has used in the last 24 hours (tests / support). */
+export async function freeSlotsUsed(key: string): Promise<number> {
+  const rows = await sql`SELECT count(*)::int AS n FROM director_plan_log WHERE visitor = ${key} AND created_at > now() - interval '24 hours'`;
+  return Number(rows[0]?.n ?? 0);
 }
 
 export async function createDirectorFilm(params: {
@@ -2511,13 +2645,19 @@ export async function getDirectorShots(filmId: string): Promise<DirectorShotRow[
 // the paygo claim-before-submit functions: overlapping polls can't both
 // submit (and pay for) the same vendor job. A claim older than 10 minutes is
 // treated as abandoned.
-export async function claimDirectorFilm(filmId: string): Promise<boolean> {
+//
+// 2026-10-17 audit: the claim returns the row AS IT IS NOW. A poll that read
+// the film/shot before another poll submitted a job and released its claim
+// would otherwise win the next claim holding a stale row (no request id
+// yet) and submit - and pay for - the same vendor job again. Callers must
+// work from the returned row, never the one they read before claiming.
+export async function claimDirectorFilm(filmId: string): Promise<DirectorFilmRow | null> {
   const rows = await sql`
     UPDATE director_films SET claimed_at = now()
     WHERE id = ${filmId} AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
-    RETURNING id
+    RETURNING *
   `;
-  return rows.length > 0;
+  return (rows[0] as DirectorFilmRow) ?? null;
 }
 /** Voice lock: per-shot re-voicing state; the original clip is kept in raw_video_url. */
 export async function setDirectorShotVoice(shotId: string, f: { voice_request_id: string; video_url?: string; raw_video_url?: string }) {
@@ -2540,20 +2680,32 @@ export async function setDirectorFilmCast(filmId: string, refs: DirectorRefs, ca
 export async function releaseDirectorFilm(filmId: string) {
   await sql`UPDATE director_films SET claimed_at = NULL WHERE id = ${filmId}`;
 }
-export async function claimDirectorShot(shotId: string): Promise<boolean> {
+export async function claimDirectorShot(shotId: string): Promise<DirectorShotRow | null> {
   const rows = await sql`
     UPDATE director_shots SET claimed_at = now()
     WHERE id = ${shotId} AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
-    RETURNING id
+    RETURNING *
   `;
-  return rows.length > 0;
+  return (rows[0] as DirectorShotRow) ?? null;
+}
+export async function releaseDirectorShot(shotId: string) {
+  await sql`UPDATE director_shots SET claimed_at = NULL WHERE id = ${shotId}`;
 }
 
+/**
+ * Pipeline write-back. 2026-10-17 audit: it used to overwrite whatever the
+ * status was, so a poll finishing a step after the customer cancelled (and
+ * was refunded) flipped the film back to review/shots and it got filmed.
+ * Now it never touches a cancelled film, and with `from` it only applies
+ * while the film is still in the status the caller read. Returns whether
+ * the row was updated.
+ */
 export async function updateDirectorFilm(
   filmId: string,
   f: Partial<Pick<DirectorFilmRow, "status" | "anchor_request_id" | "anchor_url" | "stitch_request_id" | "final_video_url" | "error">>,
-) {
-  await sql`
+  from?: DirectorFilmRow["status"],
+): Promise<boolean> {
+  const rows = await sql`
     UPDATE director_films SET
       status = COALESCE(${f.status ?? null}, status),
       anchor_request_id = COALESCE(${f.anchor_request_id ?? null}, anchor_request_id),
@@ -2562,8 +2714,53 @@ export async function updateDirectorFilm(
       final_video_url = COALESCE(${f.final_video_url ?? null}, final_video_url),
       error = COALESCE(${f.error ?? null}, error),
       claimed_at = NULL
-    WHERE id = ${filmId}
+    WHERE id = ${filmId} AND status <> 'cancelled' AND (${from ?? null}::text IS NULL OR status = ${from ?? null}::text)
+    RETURNING id
   `;
+  return rows.length > 0;
+}
+
+/**
+ * Every shot is finished: move on to voicing/stitching. Checked in SQL, so a
+ * retake that just re-queued a shot can't be skipped (and its charge lost).
+ */
+export async function finishDirectorShots(filmId: string, to: "voicing" | "stitching"): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_films SET status = ${to}, claimed_at = NULL
+    WHERE id = ${filmId} AND status = 'shots'
+      AND NOT EXISTS (SELECT 1 FROM director_shots WHERE film_id = ${filmId} AND status NOT IN ('completed', 'failed'))
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/**
+ * Approve & film (2026-10-17 audit): one atomic review -> shots step that
+ * also records the film as fully paid. The old flow marked it paid BEFORE
+ * the transition, so a cancel landing in between refunded the whole film
+ * while the losing approve refunded its charge too.
+ */
+export async function approveDirectorFilm(filmId: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE director_films SET status = 'shots', paid_cents = NULL, claimed_at = NULL
+    WHERE id = ${filmId} AND status = 'review'
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/**
+ * Cancel before filming. Returns the row as it was cancelled (paid_cents /
+ * total_cents decide the refund), or null if filming already started - the
+ * one caller that gets a row is the only one that refunds.
+ */
+export async function cancelDirectorFilm(filmId: string): Promise<{ paid_cents: number | null; total_cents: number } | null> {
+  const rows = await sql`
+    UPDATE director_films SET status = 'cancelled', claimed_at = NULL
+    WHERE id = ${filmId} AND status IN ('anchor', 'frames', 'review')
+    RETURNING paid_cents, total_cents
+  `;
+  return (rows[0] as { paid_cents: number | null; total_cents: number }) ?? null;
 }
 
 export async function updateDirectorShot(
@@ -2579,9 +2776,20 @@ export async function updateDirectorShot(
       video_request_id = COALESCE(${f.video_request_id ?? null}, video_request_id),
       video_url = COALESCE(${f.video_url ?? null}, video_url),
       error = COALESCE(${f.error ?? null}, error),
-      claimed_at = NULL
+      claimed_at = NULL,
+      poll_error_since = NULL
     WHERE id = ${shotId}
   `;
+}
+
+/** A transient error polling a shot's paid render: returns seconds since the first one. */
+export async function noteDirectorShotPollError(shotId: string): Promise<number> {
+  const rows = await sql`
+    UPDATE director_shots SET poll_error_since = COALESCE(poll_error_since, now()), claimed_at = NULL
+    WHERE id = ${shotId}
+    RETURNING EXTRACT(EPOCH FROM (now() - poll_error_since))::float AS seconds
+  `;
+  return Number(rows[0]?.seconds ?? 0);
 }
 
 /** Consumes one storyboard redraw if any are left. */
@@ -2622,19 +2830,29 @@ export async function markDirectorFilmRefunded(filmId: string, cents: number) {
 
 /** Marks a shot failed exactly once; returns true only for the caller that did it (so only one refund). */
 /** Retake (2026-09-29): film one finished shot again and re-join the film. */
+//
+// 2026-10-17 audit: only for a FINISHED shot (completed/failed) of a film
+// that is filmed or still filming - never while voicing or stitching, which
+// work from the shot list they started with. One statement: the film row is
+// locked first, the shot is re-queued only if it is still finished (so two
+// retakes of the same shot can't both be charged), and the film goes back to
+// 'shots' only if the shot was re-queued.
+const RETAKE_FILM_STATES = ["completed", "failed", "shots"];
 export async function resetDirectorShotForRetake(filmId: string, shotId: string): Promise<boolean> {
   const rows = await sql`
+    WITH film AS (
+      SELECT id FROM director_films WHERE id = ${filmId} AND status = ANY(${RETAKE_FILM_STATES}::text[]) FOR UPDATE
+    ), shot AS (
+      UPDATE director_shots SET status = 'keyframe', video_endpoint = NULL, video_request_id = NULL, video_url = NULL,
+        voice_request_id = NULL, raw_video_url = NULL, alt_video_urls = NULL, error = NULL, claimed_at = NULL, poll_error_since = NULL
+      WHERE id = ${shotId} AND film_id = ${filmId} AND status IN ('completed', 'failed') AND EXISTS (SELECT 1 FROM film)
+      RETURNING id
+    )
     UPDATE director_films SET status = 'shots', final_video_url = NULL, stitch_request_id = NULL, error = NULL, claimed_at = NULL
-    WHERE id = ${filmId} AND status IN ('completed', 'failed', 'shots', 'voicing', 'stitching')
+    WHERE id = ${filmId} AND EXISTS (SELECT 1 FROM shot)
     RETURNING id
   `;
-  if (!rows.length) return false;
-  await sql`
-    UPDATE director_shots SET status = 'keyframe', video_endpoint = NULL, video_request_id = NULL, video_url = NULL,
-      voice_request_id = NULL, raw_video_url = NULL, alt_video_urls = NULL, error = NULL, claimed_at = NULL
-    WHERE id = ${shotId}
-  `;
-  return true;
+  return rows.length > 0;
 }
 
 /** Every take of a multi-sampled shot (the first one is what video_url starts as). */
@@ -2648,16 +2866,18 @@ export async function setDirectorShotTakes(shotId: string, urls: string[]) {
  */
 export async function switchDirectorShotTake(filmId: string, shotId: string, url: string): Promise<boolean> {
   const rows = await sql`
+    WITH film AS (
+      SELECT id FROM director_films WHERE id = ${filmId} AND status = ANY(${RETAKE_FILM_STATES}::text[]) FOR UPDATE
+    ), shot AS (
+      UPDATE director_shots SET video_url = ${url}, raw_video_url = NULL, voice_request_id = NULL, error = NULL, claimed_at = NULL
+      WHERE id = ${shotId} AND film_id = ${filmId} AND status = 'completed' AND EXISTS (SELECT 1 FROM film)
+      RETURNING id
+    )
     UPDATE director_films SET status = 'shots', final_video_url = NULL, stitch_request_id = NULL, error = NULL, claimed_at = NULL
-    WHERE id = ${filmId} AND status IN ('completed', 'failed', 'shots', 'voicing', 'stitching')
+    WHERE id = ${filmId} AND EXISTS (SELECT 1 FROM shot)
     RETURNING id
   `;
-  if (!rows.length) return false;
-  await sql`
-    UPDATE director_shots SET video_url = ${url}, raw_video_url = NULL, voice_request_id = NULL, error = NULL, claimed_at = NULL
-    WHERE id = ${shotId} AND film_id = ${filmId}
-  `;
-  return true;
+  return rows.length > 0;
 }
 
 export async function failDirectorShot(shotId: string, error: string): Promise<boolean> {

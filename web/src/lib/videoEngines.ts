@@ -315,3 +315,19 @@ export const LEGACY_VIDEO_PRICE_ENV_CREDITS: Record<string, number> = {
   STRIPE_PRICE_VIDEO_CREDIT_10: 10,
 };
 export const LEGACY_CENTS_PER_CREDIT = 399;
+
+// Lucy-voice scripts (2026-10-17 audit): the script is read out, then the
+// video is made to the audio's length - but never longer than the model's
+// clip (5-10s). A 600-character script (~40s) was silently cut to the clip.
+// About 15 characters a second of natural speech; the same limit is used by
+// the form (counter + maxLength) and enforced by video-paygo/generate.
+export const LUCY_VOICE_CHARS_PER_SECOND = 15;
+
+export function lucyVoiceMaxChars(engine: VideoEngine): number {
+  return Math.floor(VIDEO_PAYGO_ENGINES[engine].durationSeconds * LUCY_VOICE_CHARS_PER_SECOND);
+}
+
+/** Uploaded audio longer than the clip (plus a little slack) would be cut off too. */
+export function maxAudioSecondsFor(engine: VideoEngine): number {
+  return VIDEO_PAYGO_ENGINES[engine].durationSeconds + 0.5;
+}

@@ -8,8 +8,67 @@ Sid approved merging both PRs on 2026-10-19 (prompt enhancer #45, then the audit
 - Stripe dashboard → the Lucy webhook endpoint → add events `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`.
 - Vercel → Production env: confirm `FAL_ADMIN_KEY` is set (used server-side only).
 - Make one test video and compare the `[prompt-enhance]` log line in Vercel logs.
+## Latest update, 2026-10-17 - Audit fixes (PR #46, merged 2026-10-19)
 
-## Latest update, 2026-10-16 (late night) - Prompt enhancer for one-prompt video (branch `feat/prompt-enhancer`, PR open, not merged)
+Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, which contains it. Nothing is deployed until it's merged to `main`.
+
+**P0**
+- [x] **A cancelled Director film could still be filmed.** `updateDirectorFilm` never touches a `cancelled` film now, and every pipeline write-back only applies while the film is still in the status that poll read. A poll finishing a step after a cancel can't move the film to review or shots any more. (`lib/db.ts`, `lib/director/pipeline.ts`)
+- [x] **Approve racing cancel could refund twice.** Approve charges first, then one atomic `review -> shots` step also marks the film paid (`approveDirectorFilm`). The film used to be marked paid before the transition. Cancel is one atomic step that returns the row it cancelled (`cancelDirectorFilm`), and the refund is worked out from that row. Only the side that loses refunds, and only its own charge. (`api/director/approve`, `api/director/cancel`)
+- [x] **Free daily caps were keyed on guest ids anyone can create.** New `lib/freeCaps.ts`:
+  - Guests are counted per client IP: Vercel's `x-real-ip`, with IPv6 grouped by /64.
+  - Real accounts are counted per account and per IP. The IP gets 3x the cap, for shared networks.
+  - `takeFreeSlots` takes advisory locks per key in one transaction, so a parallel burst gets exactly the cap. The 16 Oct single statement still let concurrent requests through.
+  - Applies to: storyboards (3/day), planning/revise/act-line/Copy-a-clip (20), character and location sheets (18), uploads (120), voice samples (20) and prompt previews (40).
+  - Guest creation is capped at 12 per IP per day. Checkout has its own 30, so a purchase is never what gets blocked.
+- [x] **Signed-in users had unlimited free images on the old storyboard grid.** Grid `generate-image`, `reference/generate` (counted per image) and `generate-cinematic-scene` share a limit of 20 images a day per account (3x per IP). So do the Ad Studio scene image and edit routes, which had the same hole through unlimited projects. Owners are exempt.
+- [x] **Media proxy could serve uploaded HTML (stored XSS).** `/api/media/<token>` now serves only an allowlist of video, image and audio types:
+  - A generic binary type falls back to the file extension's type.
+  - HTML, SVG, XML and anything else gets a 415.
+  - Every response has `X-Content-Type-Options: nosniff` and a sandboxing CSP.
+  - The site sends `nosniff` on every response (`next.config.ts`).
+  - `grid-storyboard/reference/create` only saves media-host URLs.
+- [x] **Two overlapping Director polls could submit the same paid job.** `claimDirectorFilm` and `claimDirectorShot` now return the row as it is after the claim. Each step works from that row and backs off if the request id or status changed since the poll read it. Voicing and stitching re-read the shots after claiming.
+
+**P1**
+- [x] **Homepage jobs only advanced while the tab polled.** The status logic moved to `lib/videoPaygoAdvance.ts`, and three things run it:
+  - The open tab, as before.
+  - A sweep of idle jobs (nobody polled for 90s), run after every status and balance request from any visitor.
+  - The daily cleanup cron, as a backstop. Vercel Hobby only allows daily crons.
+  - Jobs still unfinished after 3 hours are failed and refunded.
+  - The homepage shows "Your recent videos" (last 2 days), so a video that finished after the tab closed can be found.
+- [x] **A temporary error fetching a finished Veo result refunded a render we'd paid for.** Collection errors are now retried for up to 30 minutes before failing and refunding. This covers homepage jobs (`result_error_since`) and Director shots (`poll_error_since`). A voice-service status error is also retried, not refunded.
+- [x] **Lucy-voice scripts up to 600 characters were cut to the clip.** The limit is now the model's clip length x 15 characters a second (Veo 120, Kling 75). The form shows a counter and `maxLength`, and `video-paygo/generate` enforces it. Uploaded audio longer than the clip is refused the same way. Kling Avatar is exempt because its video follows the audio. (`lib/videoEngines.ts`)
+- [x] **The Stripe webhook didn't check `payment_status`.** Credit is granted only when `payment_status === "paid"`. Delayed payments are granted on `checkout.session.async_payment_succeeded`. Grants are now keyed on the Checkout Session id, so two events can't both grant one purchase. Signature check and event-id idempotency are unchanged. The handler moved to `lib/stripeWebhook.ts`.
+- [x] **Magic links were used up on GET by email scanners.** The GET now shows a "Sign in" page. Only a POST from that page consumes the token: the Origin must match and the token must be 64-character hex. (`api/auth/verify`, `lib/magicLink.ts`)
+- [x] **`analyze-clip` could delete any public blob without auth.** Uploads go into a per-account folder (`clips/<HMAC of user id>/`), which `clip-upload` enforces when it issues the token. `analyze-clip` needs a session and only accepts, and deletes, a clip in the caller's own folder. (`lib/clipOwnership.ts`, `components/CopyClip.tsx`)
+- [x] **Retakes were allowed while voicing or stitching.** A retake now needs a finished shot (completed or failed) in a completed, failed or filming film. It's one locked SQL statement, so the same shot can't be charged twice. The shots -> voicing/stitching step checks in SQL that no shot is still rendering. Picking another take follows the same rules.
+- [x] **A stills timeout refunded without cancelling the fal job.** A timeout now cancels it, and if fal says the job had just finished, its image is returned instead. A transient status error is retried until the deadline. (`lib/fal.ts`)
+
+**P2**
+- [x] **Vendor error text was returned raw.** `publicJson` replaces error text that looks like a raw vendor reply: HTTP status dumps, JSON, URLs, request ids, API-key, rate-limit or network errors, or anything over 400 characters.
+- [x] **Owner-mode refunds piled up.** `refundVideoCredit` skips owners, whose spends are topped up just before they happen. Director refunds now go through it.
+- [ ] **The fal balance check passes if `FAL_ADMIN_KEY` is missing.** Not changed. Failing closed without the key would block every fal generation, and I can't see whether the key is set in Vercel. It's documented in `.env.example`. **Sid:** check that `FAL_ADMIN_KEY` (an admin-scoped fal key) is set in Vercel, then this can be switched to fail closed.
+- [x] **`director_plan_log` was never pruned.** The daily cleanup cron deletes rows older than 2 days.
+- [x] **The cron secret wasn't compared in constant time.** `cronAuthError` uses a hashed `timingSafeEqual`. (`lib/adminAuth.ts`)
+- [x] **60 env vars weren't in `web/.env.example`.** Every `process.env` the app reads is now listed.
+
+**Also in this PR**
+- **MiniMax double rewrite:** fal's MiniMax H3 Max schema has no `prompt_optimizer`. Its own rewrite is `prompt_expansion_mode` (`disabled | balanced | quality`, required, default `balanced`; checked against fal's OpenAPI on 17 Oct). It's set to `disabled` when Lucy wrote the prompt: the enhancer (`llm`), a reviewed preview, or any Director shot. Raw or preset-only prompts keep `balanced`.
+- **Homepage placeholder** shortened to one line, since Lucy expands the idea. With Enhance off it asks for the detail. The box is 4 rows instead of 7.
+- **Fresh databases:** `stripe_credit_grants` was created before `users`, which it references, so `initSchema` failed on a new database. It's moved below `users`; production is unaffected.
+
+**Tests:** `src/lib/auditFixes.test.ts`, 32 tests. The SQL runs on a real in-memory Postgres (PGlite, a new dev dependency, through `__setDbForTests`). Vendors, Stripe and the network are mocked.
+- `npm test`: 119/119.
+- `tsc --noEmit` is clean and `next build` succeeds.
+- eslint: changed files add no new errors (`page.tsx` keeps its 5 existing ones).
+
+**Sid to do:**
+1. Stripe dashboard: add `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed` to the webhook endpoint's events. Card payments are unaffected, but this is needed if delayed payment methods are ever enabled.
+2. Check `FAL_ADMIN_KEY` in Vercel (see P2 above).
+3. After merging, existing free-cap counters start fresh once, because the key format changed.
+
+## Latest update, 2026-10-16 (late night) - Prompt enhancer for one-prompt video (PR #45, merged 2026-10-19)
 
 **Why:** Sid: "a prompt leads to very different results... maybe we need a system at the back end where a prompt goes to an LLM to expand it further". Before this, the homepage generator sent the user's words straight to the model (the GPT-6 Astra rewrite in `promptDirector.ts` was still on the server, but its checkbox was removed on 23 Sep, so nothing called it). Directed by Lucy / Lucy Studio already had a Gemini planner plus per-model formatters (`lib/director/formatters.ts`), so they're unchanged.
 
@@ -74,30 +133,7 @@ Sid approved merging both PRs on 2026-10-19 (prompt enhancer #45, then the audit
 - **Takeaway:** every leading platform puts an LLM enhancer on top of named camera and style presets. That's what this ships.
 - **Follow-up:** MiniMax on fal still runs its own `prompt_expansion_mode: "balanced"`, so its prompts get rewritten twice. Check fal's schema for an "off" value before changing it.
 
-**Audit, still open (full list from the 16 Oct review; none fixed here except the two above):**
-- **P0:**
-  - A cancelled Director film can be filmed anyway: `updateDirectorFilm` overwrites `cancelled`.
-  - Approve racing cancel can refund twice.
-  - Free per-day caps are keyed on guest ids anyone can mint (no cookie means a new guest), so free storyboards and images are unbounded.
-  - Signed-in users get unlimited free fal images on the legacy `grid-storyboard` routes.
-  - The media proxy serves any `storage.googleapis.com` / Vercel Blob URL inline with the upstream content-type: stored XSS through `grid-storyboard/reference/create`.
-  - Two overlapping Director polls can submit the same paid vendor job: the claim doesn't check the request id.
-- **P1:**
-  - Homepage jobs only advance while the tab polls. There's no cron sweep or refund for stale jobs.
-  - A temporary error fetching a finished Veo result fails and refunds a render we paid for.
-  - Lucy-voice scripts up to 600 characters get cut to the 5-8s clip.
-  - The Stripe webhook doesn't check `payment_status`.
-  - Magic links are used up on GET by email scanners.
-  - `analyze-clip` can delete any public blob without auth.
-  - Retakes are allowed while a film is voicing or stitching.
-  - Stills timeouts refund without cancelling the fal job.
-- **P2:**
-  - Vendor error text is returned raw.
-  - Owner-mode refunds pile up on the owner's balance.
-  - The fal balance check passes if `FAL_ADMIN_KEY` is missing.
-  - `director_plan_log` is never pruned.
-  - The cron secret isn't compared in constant time.
-  - 60 env vars aren't documented in `web/.env.example`.
+**Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
 ## Latest update, 2026-10-16 (night) - Jess "MEFE method" explainer, made on free Google Cloud credit only
 

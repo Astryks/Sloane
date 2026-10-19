@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
-import { getOrCreatePaygoSessionUser } from "@/lib/auth";
+import { GuestLimitError, getOrCreatePaygoSessionUser } from "@/lib/auth";
 import { isOwner } from "@/lib/owner";
-import { initSchema, takeDirectorPlanSlot } from "@/lib/db";
+import { initSchema } from "@/lib/db";
+import { takeFreeAllowance } from "@/lib/freeCaps";
 import { generateImageOnVertex } from "@/lib/googleImage";
 import { isVendorMediaUrl, publicJson, resolveMediaUrl } from "@/lib/mediaProxy";
 import { SHEET_ANGLES, sheetAnglePrompt, type SheetAngleId } from "@/lib/director/refs";
@@ -26,13 +27,14 @@ export async function POST(req: NextRequest) {
       .filter(isVendorMediaUrl);
     if (!photos.length) return publicJson({ error: "Add a clear photo of the person first" }, { status: 400 });
     const user = await getOrCreatePaygoSessionUser();
-    if (!isOwner(user) && !(await takeDirectorPlanSlot(`sheet:${user.id}`, DAILY_ANGLE_CAP))) {
+    if (!isOwner(user) && !(await takeFreeAllowance("sheet", DAILY_ANGLE_CAP, user))) {
       return publicJson({ error: "You've made 3 character sheets today - that's the daily limit. Try again tomorrow." }, { status: 429 });
     }
     const url = await generateImageOnVertex(sheetAnglePrompt(angle, String(body.description ?? ""), String(body.outfit ?? "")), photos, "3:4");
     if (!url) return publicJson({ error: "Lucy couldn't draw that angle right now - try again in a minute." }, { status: 503 });
     return publicJson({ url, angle });
   } catch (err) {
+    if (err instanceof GuestLimitError) return publicJson({ error: err.message }, { status: 429 });
     console.error("[director/character-sheet] failed", err);
     return publicJson({ error: "Lucy couldn't draw that angle right now - try again in a minute." }, { status: 500 });
   }

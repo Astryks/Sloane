@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
-import { getOrCreatePaygoSessionUser } from "@/lib/auth";
-import { initSchema, recordConsent, takeDirectorPlanSlot } from "@/lib/db";
+import { GuestLimitError, getOrCreatePaygoSessionUser } from "@/lib/auth";
+import { initSchema, recordConsent } from "@/lib/db";
+import { takeFreeAllowance } from "@/lib/freeCaps";
 import { publicJson } from "@/lib/mediaProxy";
 import { uploadInputMedia } from "@/lib/mediaUpload";
 import { VOICE_SAMPLE_CONSENT } from "@/lib/director/voiceSample";
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
       return publicJson({ error: "Please confirm you have permission to use this voice." }, { status: 400 });
     }
     const user = await getOrCreatePaygoSessionUser();
-    if (!(await takeDirectorPlanSlot(`voice-sample:${user.id}`, DAILY_CAP))) {
+    if (!(await takeFreeAllowance("voice-sample", DAILY_CAP, user))) {
       return publicJson({ error: "You've added a lot of voice recordings today - try again tomorrow." }, { status: 429 });
     }
     await recordConsent({
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
     const url = await uploadInputMedia(Buffer.from(await audio.arrayBuffer()), audio.type, `voice${AUDIO_EXT[audio.type] ?? ".wav"}`, "vertex");
     return publicJson({ url });
   } catch (err) {
+    if (err instanceof GuestLimitError) return publicJson({ error: err.message }, { status: 429 });
     console.error("[director/voice-sample] failed", err);
     return publicJson({ error: "Couldn't add that recording right now - please try again." }, { status: 500 });
   }
