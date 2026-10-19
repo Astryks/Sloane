@@ -5,7 +5,7 @@ Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open is
 ## ▶ Owner to do after the 2026-10-19 merge of PRs #45 and #46
 
 Sid approved merging both PRs on 2026-10-19 (prompt enhancer #45, then the audit/security fixes #46). Owner settings still needed:
-- Stripe dashboard → the Lucy webhook endpoint → add events `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`.
+- Stripe (optional): credits are now only given once `payment_status` is "paid". Cards and Apple/Google Pay are instant, so nothing changes for them. Only if a delayed method (e.g. bank debit) is ever switched on in the Stripe dashboard, add events `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed` to the webhook, or those buyers would pay without getting credits. Checkout doesn't set `payment_method_types`, so it follows the dashboard.
 - Vercel → Production env: confirm `FAL_ADMIN_KEY` is set (used server-side only).
 - Make one test video and compare the `[prompt-enhance]` log line in Vercel logs.
 ## Latest update, 2026-10-17 - Audit fixes (PR #46, merged 2026-10-19)
