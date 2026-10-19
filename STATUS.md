@@ -2,7 +2,13 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
-## Latest update, 2026-10-17 - Audit fixes (branch `fix/audit-security`, PR open, not merged)
+## ▶ Owner to do after the 2026-10-19 merge of PRs #45 and #46
+
+Sid approved merging both PRs on 2026-10-19 (prompt enhancer #45, then the audit/security fixes #46). Owner settings still needed:
+- Stripe dashboard → the Lucy webhook endpoint → add events `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`.
+- Vercel → Production env: confirm `FAL_ADMIN_KEY` is set (used server-side only).
+- Make one test video and compare the `[prompt-enhance]` log line in Vercel logs.
+## Latest update, 2026-10-17 - Audit fixes (PR #46, merged 2026-10-19)
 
 Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, which contains it. Nothing is deployed until it's merged to `main`.
 
@@ -62,7 +68,7 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 2. Check `FAL_ADMIN_KEY` in Vercel (see P2 above).
 3. After merging, existing free-cap counters start fresh once, because the key format changed.
 
-## Latest update, 2026-10-16 (late night) - Prompt enhancer for one-prompt video (branch `feat/prompt-enhancer`, PR open, not merged)
+## Latest update, 2026-10-16 (late night) - Prompt enhancer for one-prompt video (PR #45, merged 2026-10-19)
 
 **Why:** Sid: "a prompt leads to very different results... maybe we need a system at the back end where a prompt goes to an LLM to expand it further". Before this, the homepage generator sent the user's words straight to the model (the GPT-6 Astra rewrite in `promptDirector.ts` was still on the server, but its checkbox was removed on 23 Sep, so nothing called it). Directed by Lucy / Lucy Studio already had a Gemini planner plus per-model formatters (`lib/director/formatters.ts`), so they're unchanged.
 
