@@ -1,5 +1,9 @@
 # Sloane Project Status
 
+## Status review — 26 Oct 2026 (Sydney)
+- Git: branch `chore/realism-consolidation`, tip `3c34365 Realism consolidation: one screen-side lookup, one TTS-engine flag reader, docs/re`; working tree clean and pushed after this review.
+- Branch chore/realism-consolidation had no remote branch; pushed today (not merged). Open: Google for Startups credits awaiting reply; Seedance direct awaiting BytePlus activation; Veo 3.1 Lite not wired; Stripe->Fal auto-buy blocked. Latest dated entry 30 Sep.
+
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
 ## Latest update, 2026-09-30 - Cinematic engine: beats, shot choice, scene recipes, model playbooks, Director's review (PR `director-cinematic-engine`)
