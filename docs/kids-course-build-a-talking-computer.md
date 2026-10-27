@@ -1213,6 +1213,29 @@ Video models are **very hungry**. Remember, a video can cost 10 to 100 times mor
 - **Segment Anything** by Meta cuts out any object in a photo with one click.
 - **AudioSeal** by Meta adds invisible watermarks to sound.
 
+### Why do open-source models even exist?
+
+`[ON SCREEN: The kid looking at a huge pile of gifts labelled "Chatterbox", "Basic Pitch", "Demucs", "Llama", "Whisper", each with a tag that says "FREE".]`
+
+**NARRATOR:**
+Wasn't that amazing? How incredible are these open-source models?
+
+If you're wondering why open-source models exist, that's a question I was wondering too. Why would a company put such talented engineers to work on a project, spend all that money on GPUs and compute, feed in all that data to train the model, build this incredible tool... and then open-source it and give it away for free? Why would they do that?
+
+`[ON SCREEN: Two lemonade stands. One has a sign "Lemonade $5". Next door, another stand puts up a sign: "Lemonade FREE". The line moves to the free stand. The $5 sign wobbles and drops to $1.]`
+
+Well, I guess one answer could be **competition**. Companies sometimes want to **commoditise** a product. That's a big word, so here's what it means.
+
+Imagine you're the only kid on your street selling lemonade, so you can charge five dollars a cup. Then the kid next door starts giving lemonade away **for free**. Now nobody wants to pay five dollars for yours. Lemonade has become a **commodity**: something so easy to get that nobody pays extra for it.
+
+That's what companies can do with models. If they have a competitor who makes a lot of money from a product, building a comparable product and giving it away for free turns that product into a commodity. Their competitor can no longer charge a premium price for it. It hurts the competition.
+
+Maybe it's just that, to be more competitive. Or maybe it's a genuine interest in putting amazing things out there for other builders, like **you**, to build on top of. We can't say for sure.
+
+What we do know is that these tools are genuinely amazing, and you don't even need any technical knowledge to use them. You can take the models and make them your own. Train them with Claude, using the **LoRA** sticky notes we spoke about earlier, and customise them any way you want.
+
+Play around with them, wander around, and let your mind explore!
+
 ### The big secret of this whole course
 
 `[ON SCREEN: The kid from Chapter 1, now with their own website, their own voice and a Basic Pitch song. They look at the camera.]`
