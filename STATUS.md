@@ -135,6 +135,16 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-10-27 (later) - ORCA ad: couple diving off a sailboat on the Amalfi Coast (free credit only)
+
+- **Output:** `deliverables/ORCA_amalfi.mp4`, 32s, 9:16.
+  - Marco (he wears the shorts) and Giulia, both written as clearly adult 23-year-olds, on a sailboat off Positano.
+  - Shots: "You coming or what?", the drawstring tease, a "Three, two, one!" slow-motion dive, an underwater glide, laughter on the swim platform, then an end card using Sid's exact ORCA logo PNG (faded in with ffmpeg, not AI-drawn).
+- **Method:** same as version A of the shorts test. A cast reference, then 5 frames drawn from the product photos, then Veo 3.1 Fast 1080p (all 5 passed first time).
+  - Veo's babble in shots 1-2 is muted; only the real lines, splashes and laughter are kept.
+  - Music is an instrumental made with Lyria 2 (`lyria-002`) on the same project. Checked for no vocals.
+- **Spend:** about US$7 (A$10) of trial credit. Scripts are in the session scratchpad (`orca/orca_run.py`, `orca/edit.py`).
+
 ## Latest update, 2026-10-27 - Polar-bear shorts UGC ad: hand-directed vs Directed by Lucy (free credit only)
 
 - **Same brief, two versions:** Veo 3.1 Fast at 1080p 9:16 on Sid's free-trial project `lucy-labs-508023`. Outputs are in `deliverables/`.
