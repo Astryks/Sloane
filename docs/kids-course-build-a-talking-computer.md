@@ -3,7 +3,7 @@
 
 **How to use this script**
 
-- There are 14 chapters. Each one is about 5 to 7 minutes when read aloud at a calm pace (about 900 to 1,100 words).
+- There are 15 chapters. Each one is about 5 to 7 minutes when read aloud at a calm pace (about 900 to 1,100 words).
 - **NARRATOR** lines are read aloud.
 - Lines in `[ON SCREEN: ...]` tell the video editor what to show.
 - Boxes that start with **"Type this to Claude"** are real prompts kids can copy.
@@ -23,10 +23,23 @@
 ## Chapter 1 — Meet the Talking Computer
 *(about 6 minutes)*
 
+### Welcome to the series
+
+`[ON SCREEN: Title card: "Build Anything with Open-Source AI". Then the Claude app on a Mac, with the Code tab glowing.]`
+
+**NARRATOR:**
+We hear a lot about open versus closed source models. What does that all really mean? And how can we use simple prompts in Claude Code to use these open source models and build really cool projects? Let's explore.
+
+You need no technical expertise at all. Ask your mum or dad for a Claude subscription. You do need to download the app and use Claude Code. It's as easy as speaking to Claude like a friend: write in plain, simple English, and let it do all the technical things for you.
+
+You can also use other AI models, like ChatGPT's Codex, or whatever you prefer. This is in no way sponsored. Use whatever you like. For this course I'll be using Claude.
+
+You can build anything you can imagine, and there are some amazing open source models out there. Let's get into it and explore!
+
 `[ON SCREEN: A laptop. A text box says "Hello! I'm a computer and I can talk." A play button. Sound wave wiggles as a warm voice reads it.]`
 
 **NARRATOR:**
-Hi, builders! Today we're going to learn how to make a computer talk. Not a beepy robot voice. A real voice, with breaths and little laughs, that sounds like a person.
+For our first project, we're going to learn how to make a computer talk. Not a beepy robot voice. A real voice, with breaths and little laughs, that sounds like a person.
 
 You type words in a box. You pick a voice. You press play. And the computer reads your words out loud in that voice. Grown-ups call this **text-to-speech**, or **TTS** for short. Text goes in, speech comes out.
 
@@ -386,6 +399,8 @@ A Mac is great. This course uses a Mac. A Windows computer works too. You don't 
 **NARRATOR:**
 Claude is the AI helper who will build with you. To use it for building apps, you need a **paid Claude plan**, like **Pro** or **Max**. Claude's plans are for grown-ups, so a grown-up signs up, pays, and builds alongside you. Think of it as a library card that a grown-up holds for the family.
 
+Prefer a different helper? That's fine. Tools like **ChatGPT's Codex** work in a very similar way: you talk in plain English and it does the technical work. The prompts in this course work with any of them. We're just using Claude.
+
 ### Tool 3: The Claude app, and the Code button
 
 `[ON SCREEN: The Claude desktop app opening on a Mac. A big arrow points to the "Code" tab at the top of the window. Click! The screen changes to a folder picker.]`
@@ -628,7 +643,7 @@ Lucy Labs started with **videos**: real lessons from an art teacher and a music 
 1. **Put the videos in your project folder** on your Mac, in a folder like `raw_videos/`. The **originals stay on your computer**. Videos are huge, so they **never go to GitHub**.
 2. **Take the sound out.** Claude uses a free tool called **ffmpeg** to pull just the sound from each video. Lucy Labs got about **95 minutes** of the art teacher and **47 minutes** of the music teacher. Sound files are much smaller than video files.
 3. **Upload the sound to the GPU's locker.** That's the **network volume** on RunPod, or a **volume** on Modal. It's private storage that sits right next to the GPU. Claude can copy the files there for you.
-4. **Clean the voice.** On the GPU, a free model from Meta called **Demucs** separates the voice from any music or noise. You'll learn how Demucs works in Chapter 13!
+4. **Clean the voice.** On the GPU, a free model from Meta called **Demucs** separates the voice from any music or noise. You'll learn how Demucs works in Chapter 14!
 5. **Chop and write down.** A free speech-to-text model called **Whisper** listens to the clean voice, cuts it into little clips **2 to 15 seconds long**, and writes down every word. Lucy Labs ended up with **712 clips (47½ minutes)** of the art teacher and **390 clips (36½ minutes)** of the music teacher.
 6. **Make a list.** One file lists every clip and its words, like: `clip_00042.wav | Find the note you're comfortable singing.` That list is what training reads.
 
@@ -892,75 +907,198 @@ It won't all work first time. Lucy Labs hit **dozens** of bugs. Tools that didn'
 
 ---
 
-## Chapter 12 — More Open-Source Magic: Basic Pitch by Spotify
+## Chapter 12 — How Computers Hear Music: Sound Waves and Spotify's Basic Pitch
 *(about 7 minutes)*
 
-`[ON SCREEN: A kid humming into a phone. Musical notes appear on a piano roll as they hum.]`
+`[ON SCREEN: A kid pressing one key on a piano. The camera zooms into the air in front of the piano, where tiny air particles squish together and spread apart.]`
 
 **NARRATOR:**
-Chatterbox isn't the only treasure. There are thousands of open models. Let's meet two amazing ones for **music**.
+Chatterbox isn't the only treasure. There are thousands of open models, and some of the coolest ones are about **music**. To understand them, we first need to understand **sound** itself. So let's zoom in. Way in.
 
-The first is **Basic Pitch**, made by **Spotify**, the music app. Our friend **Hayden Keys** used Basic Pitch in a project. *[Producer: add one sentence about what Hayden made.]*
-
-### What does Basic Pitch do?
+### Sound is air wiggling
 
 **NARRATOR:**
-You give it a recording: you singing, a guitar, a piano. It listens and writes down **which notes were played, when they started, and how long they lasted**. It turns sound into **MIDI**.
+When you press a piano key, a little hammer hits a metal string. The string wiggles back and forth super fast. It pushes the air next to it, squish, then lets it go, stretch. Squish, stretch, squish, stretch. Those squishes travel through the air, like ripples in a pond, until they reach your ear. Your eardrum wiggles the same way, and your brain says: "That's a note!"
 
-**MIDI** is like sheet music for computers. It doesn't store the *sound*. It stores the *instructions*: "play middle C, now, for half a second, this loud". Then you can play those notes on any instrument in a music app. Hum a tune, and turn it into a trumpet!
+If you draw those wiggles on paper, you get a wavy line. That's a **sound wave**.
 
-### First: what is sound?
+`[ON SCREEN: A slider. Slide it left, the wave stretches out and the note gets lower. Slide it right, the wave squeezes up and the note gets higher.]`
 
-`[ON SCREEN: A guitar string twanging in slow motion. The air in front of it squishing and stretching. A wavy line drawn underneath.]`
+How fast the air wiggles is called the **frequency**. We measure it in **hertz**, written **Hz**, which just means **wiggles per second**. The name comes from a scientist called **Heinrich Hertz**, who, in the 1880s, was the first person to make and detect invisible radio waves.
+- **Slow wiggles make low notes.** The lowest key on a piano wiggles about **27** times a second.
+- **Fast wiggles make high notes.** The highest key wiggles over **4,000** times a second.
+- **Middle C**, right in the middle of the piano, wiggles about **261.6** times every second.
+- The note **A** that orchestras tune to wiggles exactly **440** times a second.
+- Go **up one octave**, from one C to the next C, and the wiggles **double**. Middle C is about 262. The C above it is about 523.
 
-**NARRATOR:**
-When a guitar string twangs, it wiggles back and forth super fast. It pushes the air, squish, stretch, squish, stretch, and those wiggles travel to your ear. That's a **sound wave**.
+How **big** the wiggles are is how **loud** the sound is. Big wiggles are loud. Tiny wiggles are quiet.
 
-How fast it wiggles is called its **frequency**, measured in **hertz (Hz)**, which means "wiggles per second".
-- **Slow wiggles = low notes.** A big bass guitar string wiggles about 41 times a second: 41 Hz.
-- **Fast wiggles = high notes.** The A note that orchestras tune to wiggles **440** times a second: 440 Hz.
-- Go **up one octave** (from one C to the next C), and the wiggles **double**. 440 becomes 880.
+### A note is really a stack of wiggles
 
-### Notes have hidden helper notes
-
-`[ON SCREEN: One string vibrating as a whole, then in halves, thirds and quarters, all at once.]`
-
-**NARRATOR:**
-Here's a secret. When you play one note, you don't hear just one frequency. A string wiggles as a whole **and** in halves, thirds and quarters at the same time. So a 100 Hz note also has quieter wiggles at 200, 300 and 400 Hz. These are called **harmonics**. They're why a piano and a guitar sound different even when they play the same note.
-
-That makes computer listening hard: is that 200 Hz a *new* note, or just a harmonic of the 100 Hz note?
-
-### How Basic Pitch listens
-
-`[ON SCREEN: A spectrogram glowing. Then several copies of it, slid up and stacked like pancakes, with the glowing lines lining up.]`
+`[ON SCREEN: A string vibrating as a whole, then in halves, thirds and quarters, all at the same time, like a rainbow of wiggles.]`
 
 **NARRATOR:**
-1. **Make a picture of the sound.** Basic Pitch draws a **spectrogram**: time goes across, frequency goes up, and loudness glows. It uses a special version called a **CQT** (constant-Q transform) that's spaced like **piano keys**. Each step up is a musical step, not just "plus 10 hertz". So musical notes line up neatly.
-2. **Stack the harmonics.** It makes copies of the picture, shifted up by 2 times, 3 times and so on, and **stacks them like pancakes**. Now a note and all its harmonics line up in one spot. That makes real notes easy to spot.
-3. **A small neural network looks at the stack.** It's a **convolutional neural network**, a model that slides little "magnifying glasses" across a picture looking for patterns. It's the same kind of model that finds cats in photos. It makes three guesses, for every moment:
-   - **Onset:** "Is a note *starting* right now?"
-   - **Note:** "Is a note *playing* right now, and which one?"
-   - **Pitch:** "Exactly how high, including bends?" Like a singer sliding up, or a guitarist bending a string.
-4. **Turn guesses into notes.** A little bit of normal code joins the guesses into notes with a start and an end, and saves a **MIDI file**.
+Here's a secret. A piano note isn't one clean wiggle. The string wiggles as a whole, which gives the main note we hear. That's called the **fundamental**. But it also wiggles in halves, thirds and quarters at the same time, which makes quieter, higher wiggles at **2 times, 3 times and 4 times** the main frequency. These are called **overtones**, or **harmonics**.
+
+So when you play middle C at 262 Hz, there are also quiet wiggles at about 523, 785 and 1,047 Hz, all mixed in.
+
+The mix of overtones is a big part of why a piano and a guitar sound different, even when they play exactly the same note.
+
+### A chord is one tangled wave
+
+**NARRATOR:**
+Now press **three** keys at once, a chord. You don't get three separate waves flying through the air. You get **one** single, tangled-up wave, with all three notes **and** all their overtones mixed together.
+
+So here's the puzzle a computer has to solve: given one tangled wave, **which notes are hiding inside it?** Is that wiggle at 523 a new note, or just an overtone of middle C? It's like hearing a whole choir singing and trying to write down every singer's note. That's really hard, and it's exactly what **Basic Pitch** does.
+
+### Meet Basic Pitch, by Spotify
+
+`[ON SCREEN: Someone humming into a phone. Coloured blocks appear on a piano roll, one block per note.]`
+
+**NARRATOR:**
+**Basic Pitch** is an open model made by **Spotify**, the music app. You give it a recording, like you singing, a guitar or a piano, and it writes down **every note**: which note, when it started, how long it lasted and how loud it was.
+
+It saves the answer as **MIDI**. MIDI is like sheet music for computers. It doesn't store the *sound*. It stores *instructions*, like "play middle C now, for half a second, medium loud". You can play those instructions back on any instrument. Hum a tune, and turn it into a trumpet!
+
+### How Basic Pitch listens, step by step
+
+`[ON SCREEN: A glowing spectrogram. Then copies of it slide up and stack like pancakes, and the bright lines line up.]`
+
+**NARRATOR:**
+1. **Make a picture of the sound.** Basic Pitch turns the wave into a **spectrogram**: time goes across, low and high notes go up and down, and loud parts glow brighter. It uses a special kind called a **CQT** (constant-Q transform), where the rows are spaced like **piano keys**. Every step up the picture is a musical step. Basic Pitch uses **three rows for every piano key**, so it can see notes that are a tiny bit sharp or flat, or bending.
+2. **Stack the harmonics like pancakes.** It makes copies of the picture, shifted up by the overtone amounts (2×, 3×, 4× and so on), and **stacks them**. Now a real note and all its overtones **line up in the same spot**, like pancakes in a neat pile. Real notes glow extra bright. That makes them easy to tell apart from overtones.
+3. **A small brain looks at the stack.** It's a **convolutional neural network**, a model that slides little "magnifying glasses" across a picture looking for patterns. It's the same kind of model that spots cats in photos. For every tiny moment, about 86 times a second, it makes **three guesses**:
+   - **Onset:** "Is a note **starting** right now?" Like spotting the moment a key gets pressed.
+   - **Note:** "Which notes are **sounding** right now?"
+   - **Pitch:** "Exactly **how high** is it?" This catches singers sliding between notes and guitar strings being bent.
+4. **Turn guesses into notes.** Some normal, non-AI code joins those guesses into a list of notes, each with a start, an end and a loudness, and saves it as MIDI.
 
 ### How did Spotify build it?
 
+`[ON SCREEN: A self-playing piano pressing its own keys, while a notebook writes down every key press.]`
+
 **NARRATOR:**
-The same **guess, check, nudge** loop as Chatterbox! They collected music where they **already knew the right notes**: piano recordings where a special piano wrote down every key press, guitar recordings with the notes marked, and singing with the notes written out. The model guessed the notes, checked against the real ones, and nudged its numbers. Millions of times.
+With the same **guess, check, nudge** loop as Chatterbox! The trick is finding music where you **already know every right note**. Spotify trained Basic Pitch on lots of different collections:
+- recordings from **self-playing pianos**, which write down every key press,
+- **guitar** recordings where every note was marked,
+- **singing** where the notes were written out,
+- and music made by computers from MIDI, so the notes are known exactly.
 
-The surprising part: Basic Pitch is **tiny**. Chatterbox has about 500 million numbers. Basic Pitch has fewer than **20,000**. That's why it runs fast on any laptop, even inside a web browser, and **doesn't need a GPU**. Spotify shared it with the **Apache 2.0** licence, on GitHub at **github.com/spotify/basic-pitch**.
+The model guessed the notes, checked them against the real ones, and nudged its numbers. Millions of times. Because it learned from many instruments, it works on almost **any** instrument. Grown-ups call that **instrument-agnostic**.
 
-### Ask Claude to try it
+The amazing part: Basic Pitch is **tiny**. Chatterbox has about 500 million numbers. Basic Pitch has fewer than **20,000**. That's 25,000 times smaller! So it runs fast on any laptop or phone, even inside a web browser, and **doesn't need a GPU at all**.
 
-> **Type this to Claude:**
-> Install Spotify's open-source Basic Pitch in a new folder. Here's a recording of me humming: humming.wav. Turn it into a MIDI file, then play the notes back on a piano sound so I can hear it. Explain what the onset, note and pitch outputs mean, like I'm 8.
+Spotify shared it with the **Apache 2.0** licence, on GitHub at **github.com/spotify/basic-pitch**. Anyone can use it, even in an app.
 
-> **Type this to Claude:**
-> Make a little web page where I can record myself singing, and it shows the notes on a piano roll.
+So who used it? In the next chapter, we'll meet a real app that did.
 
 ---
 
-## Chapter 13 — More Open-Source Magic: Demucs by Meta
+## Chapter 13 — Hayden Keys: A Piano App That Hears Your Music
+*(about 7 minutes)*
+
+`[ON SCREEN: The Hayden Keys app on a phone. A friendly panda. Falling coloured blocks land on piano keys. The website haydenkeys.com.]`
+
+**NARRATOR:**
+Meet **Hayden Keys**. It's a free piano-learning app, a bit like a game, with lessons, a panda buddy, streaks and over 240 songs. It's on the web at **haydenkeys.com**, and it was built the same way as Lucy Labs: by talking to **Claude**, in plain English.
+
+Hayden Keys teaches piano the easy way: **numbers and shapes first**, letter names later, and **real songs early**. Coloured blocks fall down the screen, and when one lands on a key, you play that key.
+
+But its coolest trick is this: **you can upload any recording**, and the app works out the notes so you can learn to play it. To do that, it uses **Spotify's Basic Pitch**.
+
+### Step 1: Get the sound ready
+
+`[ON SCREEN: An mp3 file dropping into the phone. A funnel squeezes the sound into one stream, labelled "mono, 22,050 wiggle-measurements per second".]`
+
+**NARRATOR:**
+A recording on your phone is stored as **samples**: the computer measures the sound wave's height tens of thousands of times every second and writes each measurement down as a number. Music is usually measured **44,100 or 48,000 times a second**, in **stereo**, which means two channels, left and right.
+
+But Basic Pitch was trained to listen at **22,050 measurements a second**, in **mono**, which means one channel. So Hayden Keys first squeezes the recording into that exact shape.
+
+Here's a true story: when this step was wrong, the app got confused and found **6,233 notes** in one song! Getting the input exactly right matters.
+
+### Step 2: Basic Pitch listens, right on your phone
+
+**NARRATOR:**
+Then Basic Pitch does its pancake-stacking, onset-note-pitch magic from the last chapter. And here's the cool part: it runs **on your phone**, inside the app, using a free toolbox called **TensorFlow.js**. The song is **never sent to anyone's computer**. No server, no GPU and no cost per song. That's how Hayden Keys can be free.
+
+### Step 3: Clean up the mistakes
+
+`[ON SCREEN: A list of notes. Faint "ghost" notes floating above the real ones get crossed out.]`
+
+**NARRATOR:**
+Remember overtones? Sometimes Basic Pitch hears a loud overtone and thinks it's a real note. So the Hayden Keys team, with Claude, wrote some **clean-up rules**:
+- If a quiet note starts at **exactly the same time** as a louder note, and sits exactly where an overtone would be (12, 19, 24 or 28 piano keys higher), it's probably a **ghost**. Throw it away.
+- Tiny, quiet blips that are too short to be real notes get thrown away too.
+- They also turned down how "jumpy" the model was. They had set its sensitivity much higher than Spotify's normal settings, and that's what made thousands of fake notes. Going back to Spotify's own settings fixed it.
+
+After the clean-up, on a test melody, the app found **100% of the notes with zero fake ones**.
+
+### Step 4: A second, piano-expert model
+
+`[ON SCREEN: Two detectives. One wears a badge saying "Basic Pitch: any instrument". The other says "Onsets and Frames: piano expert".]`
+
+**NARRATOR:**
+Basic Pitch knows **every** instrument a little bit. But for piano, there's an even better open model: **Onsets and Frames**, made by Google's **Magenta** team, also with the Apache 2.0 licence.
+
+Onsets and Frames was trained on hundreds of hours of **piano competition** performances, recorded on special pianos that wrote down **every key press and exactly how hard it was pressed**. It has two parts working together:
+- an **onset** detector, which listens for the moment a hammer hits a string,
+- and a **frame** detector, which listens for which notes are still ringing, moment by moment.
+
+It only reports a note when the onset detector says it **started**, which stops a lot of mistakes. It also uses **LSTMs**, a kind of model with a little **memory**, so it remembers what it just heard a moment ago.
+
+The original model file was **62.5 megabytes**. Hayden Keys squished it to **15.7 megabytes** by storing each number with fewer digits, and it still found exactly the same notes in their tests.
+
+So Hayden Keys uses **both detectives**. On **Auto**, it plays the first 20 seconds of your song to both models. If they **agree**, the song is probably piano, so it uses the piano expert. If they **disagree**, it's probably a band, so it uses Basic Pitch.
+
+On their test recordings, the piano expert scored about **91 to 99 out of 100** for finding the right notes, and it was about **three times faster**: a 3-minute song took about 14 seconds.
+
+### Step 5: Bars, beats and hands
+
+**NARRATOR:**
+A list of notes isn't a lesson yet. So the app also:
+- **finds the beat** by looking for a pattern that repeats in time (a maths trick called **autocorrelation**),
+- draws **bar lines**, so you know where you are,
+- splits notes into **left hand and right hand**,
+- and shades soft notes lighter and strong notes darker.
+
+### Bonus: the app listens while you play
+
+`[ON SCREEN: A kid playing a real piano. The phone's microphone icon glows. The falling blocks wait until the right key is played. "Nice!"]`
+
+**NARRATOR:**
+There's a mode called **Wait for me**. The app listens through the microphone and waits until you play the right note. How does it know?
+
+It uses that same autocorrelation trick. It takes the wave from the microphone, slides a copy of it along itself, and finds how far it has to slide before the copy **lines up again**. That distance tells it how often the wave repeats, which is its **frequency**, which tells it the **note**! Play G, and it hears about 392 wiggles a second. "In tune. Nice!"
+
+For chords, it sorts all the sound it hears into the **12 note families** (C, C sharp, D and so on, up to B) and checks that the right ones are glowing.
+
+### How the builder asked Claude
+
+**NARRATOR:**
+The builder didn't write maths by hand. They talked to Claude, like a friend. Here's the kind of prompt that builds a feature like this:
+
+> **Type this to Claude:**
+> I want people to upload a song and see the notes as falling blocks on a piano. Use Spotify's free, open-source Basic Pitch, running on the phone, so no song is sent to a server. Tell me which format the audio needs to be in. Test it on a recording where we already know the notes, and tell me how many it got right and how many were fake.
+
+And when it found 6,233 notes:
+
+> **Type this to Claude:**
+> It found 6,233 notes in one song. That's way too many. Find out why, fix it, and show me the before and after.
+
+### Try it yourself
+
+> **Type this to Claude:**
+> Install Spotify's open-source Basic Pitch in a new folder. Here's a recording of me humming: humming.wav. Turn it into a MIDI file, then play the notes back on a piano sound so I can hear it. Explain the onset, note and pitch outputs like I'm 8.
+
+> **Type this to Claude:**
+> Make a little web page that listens to my microphone and shows which piano note I'm singing, with a needle that says if I'm sharp or flat.
+
+One kindness rule, from Hayden Keys itself: **only upload music you're allowed to use.** Hayden Keys never pulls songs from YouTube or streaming apps, because that breaks their rules and isn't fair to the artists.
+
+---
+
+## Chapter 14 — More Open-Source Magic: Demucs by Meta
 *(about 6 minutes)*
 
 `[ON SCREEN: A fruit smoothie in a blender. A machine runs it backwards. Out pop a banana, a strawberry, a blueberry and a mango.]`
@@ -1006,7 +1144,7 @@ How do you teach a model to un-blend? You **make the smoothies yourself**, so yo
 
 Repeat millions of times, with lots of tricks: swapping drums from one song into another, changing speeds and pitches, so the model sees endless new smoothies.
 
-Same loop as Chatterbox. Same loop as Basic Pitch. **Guess, check, nudge.** Almost every model you'll ever meet learns this way.
+Same loop as Chatterbox. Same loop as Basic Pitch and Onsets and Frames. **Guess, check, nudge.** Almost every model you'll ever meet learns this way.
 
 ### Does it need a GPU?
 
@@ -1025,13 +1163,13 @@ Only use songs **you made**, or songs you're allowed to use, if you're going to 
 
 ---
 
-## Chapter 14 — The Treasure Map: More Open-Source Projects, and Your Next Adventure
+## Chapter 15 — The Treasure Map: More Open-Source Projects, and Your Next Adventure
 *(about 7 minutes)*
 
 `[ON SCREEN: A treasure map. Islands labelled "Talking", "Music", "Videos", "Chat", "Money", "Pictures".]`
 
 **NARRATOR:**
-You've met three open models: **Chatterbox** for voices, **Basic Pitch** for notes, and **Demucs** for un-mixing. There are thousands more. Here are some famous islands on the treasure map.
+You've met four open models: **Chatterbox** for voices, **Basic Pitch** and **Onsets and Frames** for notes, and **Demucs** for un-mixing. There are thousands more. Here are some famous islands on the treasure map.
 
 ### 🤖 Island of Chat: open language models
 
@@ -1108,7 +1246,7 @@ So go on. Open the Claude app. Click **Code**. Pick a folder. Tell Claude your d
 
 ## Producer notes (not read aloud)
 
-- **The Hayden Keys line (Chapter 12)** came from the brief. Hayden's actual project is not in the Lucy Labs notes, so fill in one true sentence before recording.
+- **Hayden Keys facts (Chapters 12–13)** come from the Astryks/haydenkeys repo (`README.md`, `STATUS.md`, `THIRD_PARTY_NOTICES.md`): Basic Pitch 1.0.1 vendored on device with TensorFlow.js; audio resampled to mono 22,050 Hz; the 6,233-note bug from over-sensitive thresholds (0.25/0.25 vs the defaults 0.5/0.3); overtone clean-up (+12/19/24/28 semitones); Onsets and Frames (Magenta, Apache-2.0) cut from 62.5 MB to 15.7 MB at 8-bit; Auto picks a model by agreement on 20 s; F1 0.91–0.99 and 13.8 s vs 41 s on a 3-minute song; autocorrelation pitch and 12-pitch-class chroma for Wait for me; 240+ songs; no YouTube import.
 - **Plans and ages:** Claude's consumer plans require users to be 18+, so the course frames a grown-up as the account holder throughout. Check current plan names, prices and which plans include Claude Code before filming.
 - **Prices:** GPU, domain, Stripe and Vercel prices are from the Lucy Labs build (Sept–Oct 2026) or are rough ranges. Re-check them before publishing.
 - **Real Lucy Labs facts used:**
