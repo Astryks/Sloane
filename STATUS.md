@@ -135,6 +135,22 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-10-27 (night) - Kids course "Build Anything with Open-Source AI": 15 animated chapters (free credit only)
+
+- **Script:** `docs/kids-course-open-source-ai.md`, generated from the beat files. It replaces the earlier "talking computer" draft.
+  - Lucy Labs is never named.
+  - Chapter 1 leads with "recreate any voice from a 15-second clip" and Sid's caveat: misuse, entertainment only, approval needed.
+- **Build:** `deliverables/kids-course/` (git-ignored). Remotion 4.0.290, plain React, no AI video.
+  - `beats/chNN.json`: what's said, plus the visual and its cue words.
+  - `src/course/*`: the pastel world, Pip the mascot (mouth follows the voice), layouts and about 45 custom scenes.
+  - Render: `tools/finish.sh N`, which writes `renders/chNN.mp4` and `.srt` at -16 LUFS.
+- **Voice:** Gemini 2.5 Pro TTS **Sulafat** in en-AU, called through Vertex `generateContent` with a seed and temperature 0.7, all on the free-trial project lucy-labs-508023.
+  - One fixed voice prompt for every passage.
+  - Whole passages of up to 55 words per take.
+  - QA on every take (`tools/narrate2.py`): word for word with faster-whisper medium.en float32; mid-sentence pauses up to 0.7s and between-sentence pauses up to 1.1s; and a voice match against Sid's chosen Sulafat clip (pitch within 7%, spectrum distance up to 0.34).
+  - Pitch spread in Chapter 1 went from 190–324 Hz (one call per line, per-line moods) to 221–250 Hz.
+- **Spend:** a few dollars of trial credit (TTS plus 4 Lyria beds). Rendering is local and free.
+
 ## Latest update, 2026-10-27 (later) - ORCA ad: couple diving off a sailboat on the Amalfi Coast (free credit only)
 
 - **Output:** `deliverables/ORCA_amalfi.mp4`, 32s, 9:16.
