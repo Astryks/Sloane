@@ -135,14 +135,14 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
-## Latest update, 2026-10-28 - Kids course "Build Anything with Open-Source AI": 16 animated chapters (free credit only)
+## Latest update, 2026-10-28 - Kids course "Build Anything with Open-Source AI": 17 animated chapters (free credit only)
 
 - **Script:** `docs/kids-course-open-source-ai.md`, generated from the beat files. It replaces the earlier "talking computer" draft.
   - Lucy Labs is never named.
   - Chapter 1 leads with "recreate any voice from a 15-second clip" and Sid's caveat: misuse, entertainment only, approval needed.
 - **Build:** `deliverables/kids-course/` (git-ignored). Remotion 4.0.290, plain React, no AI video.
   - `beats/chNN.json`: what's said, plus the visual and its cue words.
-  - `src/course/*`: the pastel world, Pip the mascot (mouth follows the voice), layouts and about 45 custom scenes.
+  - `src/course/*`: the pastel world, layouts and about 50 custom scenes. Pip the mascot was removed from every chapter at Sid's request (2026-10-28) and all chapters re-rendered.
   - Render: `tools/finish.sh N`, which writes `renders/chNN.mp4` and `.srt` at -16 LUFS.
 - **Voice:** Gemini 2.5 Pro TTS **Sulafat** in en-AU, called through Vertex `generateContent` with a seed and temperature 0.7, all on the free-trial project lucy-labs-508023.
   - One fixed voice prompt for every passage.
@@ -155,7 +155,15 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
   - Where training videos come from, and how they're cleaned and captioned.
   - A founder's day, with the simplified training loop shown as code.
   - Human feedback and release.
+  - Now ends on a cliffhanger into Chapter 17; Sid's closing message moved to the end of Chapter 17.
+- **Chapter 17, "The Giant Machine Behind AI" (8:08):**
+  - Why no human corrects millions of times: the answer key (we added the static), the loss, backpropagation nudging billions of numbers, about a second per round. People give thousands of choices, and a judge model scales them to millions of scores.
+  - The code people write (data, model, loop, teamwork across GPUs, testing); PyTorch does the backwards maths.
+  - Where videos live: storage buckets (S3, GCS), petabytes, hard drives shipped by truck, shards.
+  - What a model needs beyond GPUs; zooming into a data centre (building, racks, servers, 8 GPUs); cooling; energy (one GPU is about a microwave, a cluster is about a small city); where data centres are built.
+  - The ecosystem chain from sand to you (chip designers, TSMC, ASML, memory, builders, power, clouds, open-source volunteers, data teams, researchers, GitHub and Hugging Face).
   - Sid's closing message.
+  - One passage is 8% lower in pitch than the reference (the "more than just GPUs" list), accepted after two rounds.
 - **Copies:** all chapters are in `~/Desktop/Open Source AI Course/`.
 - **Spend:** a few dollars of trial credit (TTS plus 4 Lyria beds). Rendering is local and free.
 
