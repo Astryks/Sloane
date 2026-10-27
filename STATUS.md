@@ -135,6 +135,23 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-10-27 - Polar-bear shorts UGC ad: hand-directed vs Directed by Lucy (free credit only)
+
+- **Same brief, two versions:** Veo 3.1 Fast at 1080p 9:16 on Sid's free-trial project `lucy-labs-508023`. Outputs are in `deliverables/`.
+  - **A, hand-directed** (`A_hand_directed.mp4`, 35s): character sheet, then 5 frames drawn from the product photos, then 5 shots (porch hook, drawstring/print close-up tilting to the real view, back of the shorts, dock sprint and cannonball, wet selfie).
+    - Veo blocked 2 shots: a possible minor / celebrity likeness, codes 17301594 / 15236754. Blocked shots aren't charged. Fixed by making Cal an obviously adult 31-year-old with a beard.
+    - 2 shots were refilmed: a different face on the tilt-up, and the sweater going back on.
+  - **B, Directed by Lucy** (`B_directed_by_lucy.mp4`, 23s): Lucy's real planner, create-route processing, compiler, Veo formatter, negative prompt and seeds, run locally (`scratchpad/shorts/lucy_run.mts`). Plan: "Cabin Shorts Cold Plunge", 5 shots, UGC, so chain=on.
+    - Face consistent, lines delivered.
+    - **But it never leaves the room:** no dock run or plunge, and he's dry in the "after the plunge" shot. The print is blurrier.
+- **Spend:** about A$28 of trial credit (roughly 106s of Veo plus about 20 images). The trial expires 6 Nov 2026.
+- **Bug fixed (`lib/vertexVeo.ts`):** Veo 3.x accepts `enhancePrompt=false` at submit, then fails the finished job ("prompt enhancement cannot be disabled"). The submit-time retry never caught it. The director sets that flag on every Vertex shot, so live director Veo shots could fail. Now it's never sent to `veo-3*`, and the refusal is remembered if it shows up in a finished job.
+- **Lucy fixes this test points to (not done yet):**
+  1. UGC defaults to `chain=true` (every shot starts from the last frame), which traps the whole ad in shot 1's room. Break the chain when the shot's setting or location changes.
+  2. Chained shots lose the product reference, so the print drifts. Re-attach the product photo, or redraw a frame when the product is the subject.
+  3. A selfie shot's frame was drawn as a wide shot.
+  4. Pre-flight: describe people as clearly adult to avoid Veo's minor filter.
+
 ## Latest update, 2026-10-16 (night) - Jess "MEFE method" explainer, made on free Google Cloud credit only
 
 - **Output:** `deliverables/jess_mefe.mp4` (master, 147 MB) and `jess_mefe_share.mp4` (53 MB). 2:54, 9:16, full colour, bold 1-3 word captions in the style of the Short Sid sent. The script is delivered word for word; the final transcript matches it 98.9%. `deliverables/` is git-ignored.

@@ -270,7 +270,9 @@ const ENHANCE_PROMPT_REJECTED = new Set<string>();
 
 export async function submitVertexVeoJob(model: string, body: Record<string, unknown>): Promise<string> {
   let params = { ...((body.parameters as Record<string, unknown> | undefined) ?? {}) };
-  if ("enhancePrompt" in params && ENHANCE_PROMPT_REJECTED.has(model)) delete params.enhancePrompt;
+  // 2026-10-27: Veo 3.x accepts enhancePrompt=false at submit and then FAILS the finished job
+  // ("Veo 3 prompt enhancement cannot be disabled"), so the retry below never sees it - never send it to 3.x.
+  if ("enhancePrompt" in params && (ENHANCE_PROMPT_REJECTED.has(model) || /^veo-3/.test(model))) delete params.enhancePrompt;
   const post = (p: Record<string, unknown>) => vertexPost(modelUrl(model, "predictLongRunning"), { ...body, parameters: p });
   const withAdultFallback = async (p: Record<string, unknown>, err: unknown) => {
     if (p.personGeneration !== "allow_all") throw err;
@@ -315,6 +317,7 @@ export async function getVertexVeoStatus(model: string, operationName: string): 
   const op = await fetchOperation(model, operationName);
   if (!op.done) return "IN_PROGRESS";
   if (op.error) {
+    if (/prompt enhancement cannot be disabled/i.test(String((op.error as { message?: unknown }).message ?? ""))) ENHANCE_PROMPT_REJECTED.add(model);
     console.error("[vertexVeo] operation error", JSON.stringify(op.error).slice(0, 800));
     return "FAILED";
   }
