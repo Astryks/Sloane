@@ -267,22 +267,22 @@ Renaissance has a fund called Medallion, and it's a legend. The share market usu
 
 So how did they do it? Imagine looking at millions of prices, and spotting tiny patterns no human could ever see. That's what their maths and computers did. But the exact recipe? Still a secret, locked away in a vault.
 
-So Jack asks Claude: are there any open source models that could give me a starting point? And Claude says yes! Tools like Microsoft's Qlib let you test your own ideas on old prices. Like a time machine for the share market!
+So Jack asks Claude: are there any open source models that could give me a starting point? And Claude says yes! There's one called Kronos. It studied over twelve billion price snapshots, from forty-five stock exchanges around the world, to learn the language of the market!
 
-Jack won't beat Medallion tomorrow. But he can learn how the pros think. Only ever with pretend money, and always with a grown-up.
+Jack won't beat Medallion tomorrow. But he can test his ideas on old prices, like a time machine, and learn how the pros think. Only ever with pretend money, and always with a grown-up.
 
 And Zara loves games. There are open models that make 3D objects, music, and character voices. And free game engines, like Godot, to put it all together.
 
 Find anything that interests you. Ask Claude what exists, ask it to build something, and experiment. Break things. Fix them. Try again.
 
-But wait. Why would companies give these away for free? Imagine two lemonade stands. One sells lemonade for five dollars. The other gives it away for free. Which one gets all the customers?
+But wait. Why would companies give these away for free? Imagine two lemonade stands. One sells lemonade for five dollars. The other gives it away for free. Which one gets all the customers? The free one! And it can still make money, by selling other things, like cookies and cupcakes.
 
-Sometimes, companies give their models away, so lots of people use theirs, instead of the big closed ones. And sometimes, it's just because people love building things, and want to share them. That's how a lot of science works.
+Companies are the same. Sometimes, they give their models away for free, so lots of people use theirs, instead of the big closed ones, and they make money from their other products. And sometimes, it's just because people love building things, and want to share them. That's how a lot of science works.
 
 So take these models, and make them your own. Play around, wander around, and let your mind explore!
 
 It may sound complicated. And that's because it is! But a lot of amazing researchers have worked really hard on it, and now it's there for you to use. Ask Claude to explain everything, and have fun with it.
 
-And maybe someday, just like Mia, you'll help create an amazing open source model, and share it with the world.
+And maybe someday, just like the researchers who made Demucs and Basic Pitch, you'll create an amazing open source model, and share it with the world.
 
 So, what will you build first? Open Claude, tell it your idea, like you're talking to a friend, and let's get started!

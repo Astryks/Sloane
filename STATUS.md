@@ -144,6 +144,19 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-10-29 - Kids course: pronunciation, cut-off lines, Kronos, lemonade line
+
+- **Pronunciation:** Demucs is now "DEE-mucks" everywhere (the old note in `tools/narrate.py` said "deh-MUX"). Renaissance is now "ruh-NAY-sunce", and Kronos is "KROH-noss". Every line containing these was re-voiced.
+- **Cut-off lines:** Gemini sometimes stops mid-word. `narrate4.py` now flags a take that ends while the voice is still loud (`cut_off()`) and retakes it. It also fades the end of chapter titles.
+  - Re-voiced about 20 lines that were cut off, including chapter 6's "Let's find out!" and chapter 7's "put it all together".
+- **Chapter 1:** in the "other AI helpers like Codex" scene, Mia walks over and points at the Claude sign.
+- **Chapter 7:**
+  - Kronos replaces Qlib as Jack's open-source starting point: an MIT-licensed foundation model trained on 12 billion+ price records from 45 exchanges (arXiv 2508.02739). Claude's message also says nobody knows Medallion's secret.
+  - The "time machine" idea moved to the next line: test ideas on old prices.
+  - The lemonade stand now makes money from cookies and cupcakes, and "companies are the same… they make money from their other products".
+  - The ending now says "just like the researchers who made Demucs and Basic Pitch" (Mia didn't build a model).
+- **Minor voice flags left:** a few lines are 8-12% low in pitch (ch3 p9/p11/p17, ch4 p1, ch5 p1), and two lines run at about 161 wpm (ch1 p2, ch3 p15).
+
 ## Latest update, 2026-10-28 (late night) - Kids course: real Hayden Keys recording, terminal + Xcode, Medallion story, Astryks end card
 
 - **Chapter 3:**
