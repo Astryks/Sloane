@@ -2,6 +2,13 @@
 
 Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open issues in `docs/realism-status.md`.
 
+## 2026-10-28: Stripe webhook fixed (live)
+
+- **Problem:** from 22 Oct the Stripe webhook pointed at `https://lucylabs.app/api/billing/webhook`, which now 308-redirects to `www.lucylabs.app`. Stripe does not follow redirects, so every `checkout.session.completed` failed. Customers were charged normally, but their credits were not added.
+- **Fix:** endpoint `we_1UDC8nItjmPeTn3QfNBDnuwC` changed in the Stripe dashboard to `https://www.lucylabs.app/api/billing/webhook` (same signing secret, no code change).
+- **Missed purchases replayed 28 Oct:** 4 events, all now 200 (credits granted once, via the processed_stripe_events and grant-key guards): evt_1UTIM9… and evt_1UTIPH… (22 Oct), evt_1UTrh7… and evt_1UTriq… (24 Oct).
+- **Keep in mind:** if the primary domain ever changes in Vercel again, update the Stripe endpoint too. The first replay timed out on a cold start but completed; Stripe's retry then returned duplicate/200.
+
 ## ▶ Owner to do after the 2026-10-19 merge of PRs #45 and #46
 
 Sid approved merging both PRs on 2026-10-19 (prompt enhancer #45, then the audit/security fixes #46). Owner settings still needed:
