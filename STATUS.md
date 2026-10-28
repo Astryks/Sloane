@@ -135,6 +135,29 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-10-28 (later) - Kids course remade: 7 chapters, stick figures, build-first flow (free credit only)
+
+- **Why:** Sid found the 17-chapter version badly structured, with bobbing animation and a flat voice. It is now a simple build-first story.
+- **Flow (7 chapters, about 17 minutes):**
+  1. Hello, Builder! (2.1 min).
+  2. Learn Any Song (1.7): the Hayden Keys feature idea; Step 1, ask Claude, which finds Demucs and Basic Pitch.
+  3. Let's Build It! (3.0): Step 2, GitHub ("Google Drive for code") and the Terminal; Step 3, a domain; Claude guides Vercel and optional Stripe; the build demo; "learn from the best".
+  4. How Does It Really Work? (3.5): how Demucs was built (Meta AI Paris, MUSDB18 plus about 800 songs, the data loader, PyTorch, the model code, guess/check/nudge, GPUs).
+  5. Inside Basic Pitch (2.5): Spotify's lab, TensorFlow, under 20,000 numbers, harmonic stacking, the rabbit hole with Claude.
+  6. Recreate Any Voice (2.4): Steps 1–5, Chatterbox, 15 seconds, the permission caveat, LoRA, "you're training your own model".
+  7. Find Any Model (2.1): video (Wan), agents (Llama/Qwen), trading with pretend money (Qlib), games, music; ask, build, experiment.
+- **Visuals:** new `src/story/` engine:
+  - Posed stick figures that walk, type, point, jump and talk, with speech bubbles.
+  - Claude as an orange buddy.
+  - Animated mock app screens (Claude chat, Terminal, GitHub, domain search, deploy, falling-notes piano, upload/split, voice studio).
+  - Camera moves, five scene transitions and a step badge.
+  - Build screens are mocks made in code; Sid offered real screen recordings if wanted.
+- **Voice:** `tools/narrate3.py`, Sulafat en-AU with a "real, unscripted talking" prompt (about 148 wpm, wider pitch movement), passages of up to 95 words, same voice-match QA.
+  - Accepted flags: the ASR mishears "Demucs" and "Défossez" (pronunciation is fine), ch05 p5 is 13% lower in pitch, and the ch02 p0 voice colour is 0.354.
+- **Build:** script in `tools/beats3_src.py`, which generates `beats3/`. Render with `tools/finish3.sh N`, which writes `renders3/chNN.mp4` and `.srt`. Contact sheet with `tools/sheet3.sh`.
+- **Copies:** `~/Desktop/Open Source AI Course/` now holds the 7 new chapters. The 17-chapter version was moved (not deleted) to `~/Desktop/Open Source AI Course (old version)/`.
+- **Script:** `docs/kids-course-open-source-ai.md` is now the v3 narration.
+
 ## Latest update, 2026-10-28 - Kids course "Build Anything with Open-Source AI": 17 animated chapters (free credit only)
 
 - **Script:** `docs/kids-course-open-source-ai.md`, generated from the beat files. It replaces the earlier "talking computer" draft.
