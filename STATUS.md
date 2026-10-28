@@ -142,6 +142,28 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-10-28 (night) - Kids course: story version, Aoede voice, realistic Claude screens (free credit only)
+
+- **Story:** every chapter now follows one story so young kids get the full context, with Sid's own Chapter 1 opener.
+  - Mia (10) learns Grandma's favourite song for her birthday (Demucs and Basic Pitch).
+  - With her friend Leo's permission, she clones his voice so he can read bedtime stories to her little brother Sam (Chatterbox and a LoRA).
+  - School friends each find a model: Wan, Llama/Qwen, Qlib with pretend money, Godot.
+  - Each chapter has its own high-energy ending that teases the next chapter.
+  - Story text: `tools/story_src.py`, spliced in by `tools/beats3_src.py`.
+- **Chapter 1 opener examples:** Meta Animated Drawings, Demucs guitar stem, Microsoft TRELLIS photo-to-3D, and Alibaba Wan. "Chatterbox… licensed under MIT" (it is MIT-licensed by Resemble AI, not made by the university).
+- **Voice:** Sid picked **Aoede (en-AU)** from six samples (`voice_options/`).
+  - `tools/narrate4.py` follows VOICE-GUIDE.md: base line, a written mood per passage, pace notes quoting the passage's own words, at most 60 words per passage, the guide's gaps, and a slower young-kids direction.
+  - QA: word-for-word, voice match to `ref_aoede.wav`, and a pace check (re-roll above 150 wpm). Average is about 137 wpm.
+  - Audio is in `audio/v5`.
+- **Claude screens:** redesigned to look like the real app.
+  - Paper colours, spark logo, sidebar with recents, folder chip and model picker.
+  - The prompt types into the input box, the send button squishes, Claude shows "Thinking…" then streams serif text.
+  - Claude Code tool rows (Bash/Write/Edit with ✓ and ⎿ results).
+  - Many more Claude moments: the plan, the bug fix, asking before renting a GPU, the Vercel sign-up, the rabbit hole, voice build, LoRA, friends' questions.
+- **Cue fix:** the transcript split "ChatGPT", so its label showed at the start of the scene. `timeline3.py` now maps the script's spelling onto the transcript timings, which also fixes subtitle spelling and dropped first words. `tools/cuecheck.py` audits every cue.
+- **Lengths:** 4.8 / 2.5 / 4.2 / 4.2 / 3.3 / 3.8 / 2.9 min (about 26 min).
+- **Copies:** `~/Desktop/Open Source AI Course/` holds this version. Earlier versions are kept, not deleted.
+
 ## Latest update, 2026-10-28 (later) - Kids course remade: 7 chapters, stick figures, build-first flow (free credit only)
 
 - **Why:** Sid found the 17-chapter version badly structured, with bobbing animation and a flat voice. It is now a simple build-first story.
