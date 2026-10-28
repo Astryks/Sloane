@@ -144,6 +144,25 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-10-28 (late night) - Kids course: real Hayden Keys recording, terminal + Xcode, Medallion story, Astryks end card
+
+- **Chapter 3:**
+  - The domain step now matches the screen: "Hayden Keys lives at Hayden Keys dot com. Mia picks her own: my piano songs dot com".
+  - New terminal section: find it with Command + Space or use VS Code. Claude Code has its own terminal and runs most commands itself. It asks you to run a command when you need to log in or type a password (e.g. `gh auth login`), with a grown-up's help.
+  - New Xcode/App Store line: "Claude will guide you, one step at a time".
+  - A "Hayden Keys built their free site with Claude too" beat.
+- **Real recording:** Sid's haydenkeys.com recording (Grandma.mp3 upload, finding notes, playing) plays in the "moment of truth" and Hayden Keys scenes.
+  - It is cropped to the page. The file-picker seconds (they list his Downloads) are cut, and there is no menu bar, dock or tabs.
+  - `public/hk_upload.mp4`, shown by the `clip` screen kind in `Screens.tsx`.
+- **Chapter 6:** says "LoRA… stands for Low-Rank Adaptation".
+- **Chapter 7:**
+  - Priya is now Alice.
+  - Jack's six-scene story: share-market "weather", Renaissance and Jim Simons (maths professor, code breaker), Medallion (about 66% a year before fees, 30%+ after fees for 30+ years, against about 10% for the market), the secret recipe "in a vault", then Qlib as an open-source starting point ("a time machine for the share market"), with pretend money and a grown-up.
+  - Medallion is described as secret, not open source.
+- **End card:** every chapter fades to black, then plays the Astryks logo (`brand/astryks_end.mp4`), added in `tools/finish3.sh`.
+- **Fix:** falling piano notes ran out about 30 s into a video; they now loop.
+- **Lengths:** 4.8 / 2.5 / 5.4 / 4.2 / 3.3 / 4.0 / 4.3 min, plus 3.4 s of logo each (about 29 min).
+
 ## Latest update, 2026-10-28 (night) - Kids course: story version, Aoede voice, realistic Claude screens (free credit only)
 
 - **Story:** every chapter now follows one story so young kids get the full context, with Sid's own Chapter 1 opener.

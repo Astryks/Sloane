@@ -1,7 +1,7 @@
 # Build Anything with Open-Source AI
 ### A story course for young builders: Mia builds real apps with Claude and free open-source models
 
-This is the final narration, word for word, as voiced in the videos (7 chapters, story version). The narrator is Gemini TTS **Aoede** (Australian English), directed per the voice guide for young kids. Each chapter has a video and a subtitle file in `deliverables/kids-course/renders3/`.
+This is the final narration, word for word, as voiced in the videos (7 chapters, story version). The narrator is Gemini TTS **Aoede** (Australian English), directed per the voice guide for young kids. Each chapter has a video and a subtitle file in `deliverables/kids-course/renders3/`, and ends on the Astryks logo.
 
 > **Voice cloning note (Chapter 6):** voice cloning has been misused to trick and fool people. It's for entertainment and learning only. Only use someone's voice if they've said yes.
 
@@ -93,9 +93,15 @@ Step two. Ask Claude to build it. But first, Mia needs two things.
 
 Thing number one is GitHub. GitHub is like Google Drive, but for code. It keeps all your project's files safe online, with save points, just like in a video game. So if something breaks, you can always go back.
 
-Thing number two is a terminal. It's a window where you, or Claude, can type instructions to the computer. Every Mac already has one, called Terminal. Or you can use a free app called VS Code.
+Thing number two is a terminal. That's a window where you type instructions to the computer. To find it on a Mac, press Command and Space, and type Terminal. Or you can download a free app called VS Code.
 
-Step three. Every website needs an address, like haydenkeys dot com. That's called a domain. Mia's mum helps her buy one, from a website like GoDaddy. It costs about fifteen to thirty dollars a year.
+Here's the cool part. Claude Code has its own terminal built in! So most of the time, Claude types and runs all the commands for you.
+
+But sometimes, Claude asks you to run a command yourself. Like when you need to log in to an account, or type a password. Claude never sees your passwords, so that part is always your job.
+
+So Mia copies the command, pastes it into Terminal, and presses enter. Her mum helps with the password. Then she tells Claude: done! And Claude carries on.
+
+Step three. Every website needs an address, called a domain. Hayden Keys lives at Hayden Keys dot com. Mia picks her own: my piano songs dot com! Her mum helps her buy it, from a website like GoDaddy. It costs about fifteen to thirty dollars a year.
 
 And that's really it! Claude will guide Mia through everything else. She just follows along.
 
@@ -115,7 +121,7 @@ It also suggests renting a GPU. That's a super fast computer chip, perfect for s
 
 When it's ready, Claude puts the website online, and connects Mia's domain.
 
-And now, the moment of truth. Mia uploads Grandma's favourite song.
+And now, the moment of truth. Here's the real thing, on Hayden Keys! Mia uploads Grandma's favourite song.
 
 Demucs splits it into layers. The singing, the drums, the bass, and the piano. Then Basic Pitch writes down every piano note. And there it is! Grandma's song, as falling blocks, ready to play.
 
@@ -126,6 +132,12 @@ Then, on Grandma's birthday, Mia sits down at the piano, and plays her favourite
 How cool is this? You can upload any song, and it pulls out the piano notes for you. You can learn your favourite songs, from the artists you love. Learn from the best!
 
 And then, try making your own music too! Just remember to only upload songs you're allowed to use. Other people's music belongs to them.
+
+By the way, our friends at Hayden Keys built a free website, where anyone can learn to play the piano. And they used Claude to build it too!
+
+You can build anything you want, and upload it to the App Store, or Google's Play Store. For the App Store, you may need a free app from Apple called Xcode. Don't worry, Claude will guide you through everything. Just take it one step at a time.
+
+Share it with your friends. Let yourself wander around, and explore!
 
 Mia did it! And guess what? So can you. But how does Demucs actually know where the drums are? Grab your detective hat, because next, we're going behind the scenes!
 
@@ -225,7 +237,7 @@ Hmm. It sounds a bit like Leo. But it's flat, like a robot reading. Where are al
 
 Step five. Mia asks Claude how to make it sound more like Leo. And Claude says: when the copy sounds a bit flat, you can add something called a LoRA.
 
-Remember Grandma's recipe book? Imagine Chatterbox is a giant book about how people talk, with hundreds of millions of numbers. Instead of rewriting the whole book, you add a few tiny sticky notes. That's a LoRA!
+Remember Grandma's recipe book? Imagine Chatterbox is a giant book about how people talk, with hundreds of millions of numbers. Instead of rewriting the whole book, you add a few tiny sticky notes. That's a LoRA! It stands for Low-Rank Adaptation. A big, fancy name, for tiny sticky notes!
 
 The big book stays frozen. You only train the sticky notes. So Leo records a bit more, maybe half an hour. And Mia trains the sticky notes on a rented GPU, for a few minutes.
 
@@ -243,11 +255,21 @@ The next day at school, Mia shows her friends what she built. And now, they all 
 
 Here's the biggest secret of this whole course. Whatever you're into, there's probably an open source model for it. Just ask Claude. And they're free to play with.
 
-Priya loves making films. She asks Claude, and finds open models that turn words into videos, like Wan, from Alibaba.
+Alice loves making films. She asks Claude, and finds open models that turn words into videos, like Wan, from Alibaba.
 
 Leo wants his own AI helper. Open chat models, like Llama and Qwen, can run on your own computer. And you can build your own agent, that does jobs for you.
 
-Jack is into money and markets. There are open source tools, like Microsoft's Qlib, that help you test trading ideas the way hedge funds do, on old prices. But only ever with pretend money, and always with a grown-up.
+Jack loves the share market. Every morning, he checks how his favourite companies are doing, the way other kids check the weather. Sunny? Rainy? Up? Down?
+
+And there's one mystery Jack just can't stop thinking about. A company called Renaissance, started by a maths genius named Jim Simons. Before that, Jim was a maths professor, and even a secret code breaker!
+
+Renaissance has a fund called Medallion, and it's a legend. The share market usually grows about ten percent a year. But Medallion grew about sixty-six percent a year, before fees! And even after fees, over thirty percent a year, for more than thirty years!
+
+So how did they do it? Imagine looking at millions of prices, and spotting tiny patterns no human could ever see. That's what their maths and computers did. But the exact recipe? Still a secret, locked away in a vault.
+
+So Jack asks Claude: are there any open source models that could give me a starting point? And Claude says yes! Tools like Microsoft's Qlib let you test your own ideas on old prices. Like a time machine for the share market!
+
+Jack won't beat Medallion tomorrow. But he can learn how the pros think. Only ever with pretend money, and always with a grown-up.
 
 And Zara loves games. There are open models that make 3D objects, music, and character voices. And free game engines, like Godot, to put it all together.
 
