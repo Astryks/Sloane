@@ -7,6 +7,8 @@ Directed by Lucy realism work (PRs #40-#43): one-page summary, flags and open is
 - **Problem:** from 22 Oct the Stripe webhook pointed at `https://lucylabs.app/api/billing/webhook`, which now 308-redirects to `www.lucylabs.app`. Stripe does not follow redirects, so every `checkout.session.completed` failed. Customers were charged normally, but their credits were not added.
 - **Fix:** endpoint `we_1UDC8nItjmPeTn3QfNBDnuwC` changed in the Stripe dashboard to `https://www.lucylabs.app/api/billing/webhook` (same signing secret, no code change).
 - **Missed purchases replayed 28 Oct:** 4 events, all now 200 (credits granted once, via the processed_stripe_events and grant-key guards): evt_1UTIM9… and evt_1UTIPH… (22 Oct), evt_1UTrh7… and evt_1UTriq… (24 Oct).
+- **Customers emailed 28 Oct** from support@astryks.com (Mimoza Bllaca, both addresses; Jovica Agusevic), offering a refund of the second purchase if unintended.
+- **fal balance (28 Oct):** was $2.95 (Lucy blocks generation under $2.50); Sid added $10, now $12.95 (~3 Seedance videos). No card on file, auto top-up OFF, fal low-balance email OFF. **To do (Sid):** add a card, turn on auto top-up, top up more. Lucy's own daily low-balance email did not reach Sid, so check `FAL_ADMIN_KEY` is set in Vercel.
 - **Keep in mind:** if the primary domain ever changes in Vercel again, update the Stripe endpoint too. The first replay timed out on a cold start but completed; Stripe's retry then returned duplicate/200.
 
 ## ▶ Owner to do after the 2026-10-19 merge of PRs #45 and #46
