@@ -155,6 +155,11 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
   - The "time machine" idea moved to the next line: test ideas on old prices.
   - The lemonade stand now makes money from cookies and cupcakes, and "companies are the same… they make money from their other products".
   - The ending now says "just like the researchers who made Demucs and Basic Pitch" (Mia didn't build a model).
+- **Chapter 7, later on 2026-10-29:**
+  - The share market line now says "over twenty years or longer… historically about ten to eleven percent a year".
+  - Jack no longer uses pretend money. He uses "a small amount of money, that his mum has agreed to, for research, and that they're both prepared to lose".
+  - New line: Jack can use Kronos to get started, then combine it with FinRL and Microsoft's Qlib, brainstorming with Claude.
+  - New looks so the friends don't look like Mia or Leo: Jack (spiky navy hair), Alice (golden hair, pink bow), Zara (two buns, headband), added in `Stick.tsx`.
 - **Minor voice flags left:** a few lines are 8-12% low in pitch (ch3 p9/p11/p17, ch4 p1, ch5 p1), and two lines run at about 161 wpm (ch1 p2, ch3 p15).
 
 ## Latest update, 2026-10-28 (late night) - Kids course: real Hayden Keys recording, terminal + Xcode, Medallion story, Astryks end card

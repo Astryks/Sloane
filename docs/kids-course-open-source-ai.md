@@ -269,7 +269,9 @@ So how did they do it? Imagine looking at millions of prices, and spotting tiny 
 
 So Jack asks Claude: are there any open source models that could give me a starting point? And Claude says yes! There's one called Kronos. It studied over twelve billion price snapshots, from forty-five stock exchanges around the world, to learn the language of the market!
 
-Jack won't beat Medallion tomorrow. But he can test his ideas on old prices, like a time machine, and learn how the pros think. Only ever with pretend money, and always with a grown-up.
+Jack can use Kronos to get started. Then he can try combining it with other open source tools, like FinRL, and Microsoft's Qlib. He brainstorms with Claude, and plays around with them!
+
+Jack won't beat Medallion tomorrow. But he can test his ideas on old prices, like a time machine, and learn how the pros think. And only ever with a small amount of money, that his mum has agreed to, for research, and that they're both prepared to lose.
 
 And Zara loves games. There are open models that make 3D objects, music, and character voices. And free game engines, like Godot, to put it all together.
 
