@@ -263,7 +263,7 @@ Jack loves the share market. Every morning, he checks how his favourite companie
 
 And there's one mystery Jack just can't stop thinking about. A company called Renaissance, started by a maths genius named Jim Simons. Before that, Jim was a maths professor, and even a secret code breaker!
 
-Renaissance has a fund called Medallion, and it's a legend. The share market usually grows about ten percent a year. But Medallion grew about sixty-six percent a year, before fees! And even after fees, over thirty percent a year, for more than thirty years!
+Renaissance has a fund called Medallion, and it's a legend. Over twenty years or longer, the share market has historically grown about ten to eleven percent a year. But Medallion grew about sixty-six percent a year, before fees! And even after fees, over thirty percent a year, for more than thirty years!
 
 So how did they do it? Imagine looking at millions of prices, and spotting tiny patterns no human could ever see. That's what their maths and computers did. But the exact recipe? Still a secret, locked away in a vault.
 
