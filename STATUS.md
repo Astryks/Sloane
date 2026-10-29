@@ -146,7 +146,7 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 ## Latest update, 2026-10-29 - Kids course: pronunciation, cut-off lines, Kronos, lemonade line
 
-- **Pronunciation:** Demucs is now "DEE-mucks" everywhere (the old note in `tools/narrate.py` said "deh-MUX"). Renaissance is now "ruh-NAY-sunce", and Kronos is "KROH-noss". Every line containing these was re-voiced.
+- **Pronunciation:** Demucs is now "DEE-mucks" everywhere (the old note in `tools/narrate.py` said "deh-MUX"). Renaissance is now "REN-uh-sahns" (the American way, per Sid), and Kronos is "KROH-noss". Every line containing these was re-voiced.
 - **Cut-off lines:** Gemini sometimes stops mid-word. `narrate4.py` now flags a take that ends while the voice is still loud (`cut_off()`) and retakes it. It also fades the end of chapter titles.
   - Re-voiced about 20 lines that were cut off, including chapter 6's "Let's find out!" and chapter 7's "put it all together".
 - **Chapter 1:** in the "other AI helpers like Codex" scene, Mia walks over and points at the Claude sign.
