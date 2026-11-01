@@ -144,6 +144,33 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-11-02 - Share Market 101: animated course in production (free credit only)
+
+- **Source:** Sid's 81-page "Share Market 101 v21" script, fact-checked as at Oct 2026 (`docs/share-market-101/script.md`, plus per-page fact-checks), then turned into stick-figure stories.
+- **Cast:**
+  - Alice (11), Mum, Dad, Grandpa, Max, Jack and Zara, in new looks with clothes (not the open-source course's characters).
+  - Garry the polar bear explains hard concepts and wears a different winter outfit each time; he also appears in silent cameos (kayak, fishing, sliding and so on).
+- **Voices:** narrator Algieba (en-AU, soothing); Alice's questions to Claude voiced by Zephyr (en-GB).
+- **Format:** about 85 videos of 5–12 minutes each (long chapters split into parts automatically, by `split_parts` in `tools/sm_src.py`).
+  - Each video opens with "In this video…" (`tools/sm_intros.py`) and ends on a cliffhanger, then the Astryks end card.
+- **Content added at Sid's request:**
+  - First-principles "so what?" reasoning on every number.
+  - Legendary quotes.
+  - Who owns the market.
+  - The rise of China, with charts.
+  - Tech waves with archive photos (Ford, Watt, Benz).
+  - The top-10 companies race from 1980 to 2026.
+  - Four real stock notes, credited "written by our friend, an analyst at a fund".
+  - Sources of truth: SEC filings, earnings calls, expert networks, broker research, AI, YouTube, scuttlebutt.
+  - Clips: Tepper on QE (2010), Rubenstein × Powell, Bezos (1999 fixed-cost, 2005 WD-40 and toilet paper), Laffont (Coatue), Lynch, Dalio and others. All are credited, and their rights need clearing before publishing.
+- **Fact-check:** four independent checkers verified every number against filings, the Fed/RBA/IMF and the ATO, and made about 150 fixes.
+  - Reports: `docs/share-market-101/verify_*.md`.
+  - Notable: Apple is #1 at end of October (not Nvidia); Alphabet is $279.84 after its 29 October drop; the new CGT law replaces the 50% discount with indexation from 1 July 2027.
+- **Pipeline:** `COURSE=sm`.
+  - `tools/sm_pipeline.sh narrate|render <chapters>` runs one voice stream and one render stream side by side.
+  - Unchanged videos are skipped (hash check); voice takes are reused by matching text.
+  - Output: `~/Desktop/Share Market/NN.P - Title (Part P).mp4`.
+
 ## Latest update, 2026-10-29 - Kids course: pronunciation, cut-off lines, Kronos, lemonade line
 
 - **Pronunciation:** Demucs is now "DEE-mucks" everywhere (the old note in `tools/narrate.py` said "deh-MUX"). Renaissance is now "REN-uh-sahns" (the American way, per Sid), and Kronos is "KROH-noss". Every line containing these was re-voiced.
