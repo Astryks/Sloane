@@ -144,6 +144,22 @@ Builds on PR #45 (`feat/prompt-enhancer`): merge #45 first, or merge this PR, wh
 
 **Audit list from the 16 Oct review:** all fixed on `fix/audit-security` (built on this branch), except one P2 item that needs Sid. See the 2026-10-17 section above.
 
+## Latest update, 2026-11-02 (night) - Share Market 101: handoff doc, final audit and de-duplication pass
+
+- **Handoff doc:** `docs/share-market-101/HANDOFF.md`, also on the Desktop under Share Market. It's everything another agent needs:
+  - where the code lives (git-ignored under `deliverables/kids-course`)
+  - Google Cloud free credits (project `lucy-labs-508023`, gcloud; never paid)
+  - exact voice prompts, settings and QA, including Sid's VOICE-GUIDE.md and the full pronunciation table
+  - music prompts, how to run the pipeline, rules and open items
+- **Content added today:**
+  - Ch13: Kodak, BlackBerry and Blockbuster; the market looks forward; value traps.
+  - Ch20: Lehman, CDOs, buying the dip; SVB and the history of bank runs; Bretton Woods and money printing; gold; the dollar; currencies; crypto and card fees.
+  - Ch21: photos for innovations; pharma (patent cliff, GLP-1 race); the Covid boom and bust; the AI stack; railroad, fibre and AI buildouts.
+  - Ch22: what Tepper, Soros and Ackman saw and did.
+  - The whole course rewritten in simple language, with more Garry.
+- **Not yet fully audited:** the content added after the first fact-check pass. A second audit of every number and all on-screen text (splits, currency conversions, audited financials, anecdotes) is running, followed by a pass to remove repetition across chapters.
+- **Pipeline:** paused until those passes finish. It will then re-record only the lines that changed.
+
 ## Latest update, 2026-11-02 - Share Market 101: animated course in production (free credit only)
 
 - **Source:** Sid's 81-page "Share Market 101 v21" script, fact-checked as at Oct 2026 (`docs/share-market-101/script.md`, plus per-page fact-checks), then turned into stick-figure stories.
